@@ -126,12 +126,12 @@ fi
 step "Atualizando o banco de dados"
 if [ -f supabase/baseline.sql ]; then
   # Extensões que o schema exige (idempotente; iguais ao install.sh).
-  docker run --rm postgres:17-alpine psql "$SUPABASE_DB_URL" -c \
+  docker run --rm postgres:17-alpine psql "$(db_admin_url)" -c \
     "create extension if not exists vector with schema public; create extension if not exists citext with schema public; create extension if not exists pg_trgm with schema public;" \
     >/dev/null 2>&1 || true
 
   raw="$(docker run --rm -i -v "$PROJECT_DIR/supabase/baseline.sql:/b.sql:ro" \
-        postgres:17-alpine psql "$SUPABASE_DB_URL" -f /b.sql 2>&1 || true)"
+        postgres:17-alpine psql "$(db_admin_url)" -f /b.sql 2>&1 || true)"
 
   # Erros benignos ao re-aplicar sobre uma base existente:
   benign='already exists|multiple primary keys|multiple default values|is already a member|already a partition'
