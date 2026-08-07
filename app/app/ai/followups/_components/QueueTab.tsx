@@ -35,6 +35,7 @@ import { Clock, MagnifyingGlass, Trash } from "@/lib/ui/icons";
 import { useFollowupFlows } from "@/hooks/followup/useFollowupFlows";
 import {
   useCancelFollowupEnrollment,
+  useCancelFollowupPromise,
   useFollowupQueue,
   type FollowupEnrollmentStatus,
   type FollowupQueueRow,
@@ -62,6 +63,7 @@ const STATUS_LABEL: Record<string, string> = {
   dead: "Morto",
   agendada: "Agendada",
   "concluída": "Concluída",
+  cancelada: "Cancelada",
 };
 
 const STATUS_VARIANT: Record<string, "neutral" | "success" | "warning" | "error" | "info"> = {
@@ -73,9 +75,25 @@ const STATUS_VARIANT: Record<string, "neutral" | "success" | "warning" | "error"
   dead: "error",
   agendada: "info",
   "concluída": "neutral",
+  cancelada: "neutral",
 };
 
 const LIVE_ENROLLMENT_STATUSES = new Set(["active", "waiting_reply", "paused_handoff"]);
+
+/**
+ * O que ainda dá para desmarcar.
+ *
+ * A fila mostrava promessa e enrollment lado a lado e só oferecia o botão para o
+ * segundo: o agente prometia voltar, a pessoa via na tela e não tinha o que
+ * fazer. As duas famílias são canceláveis agora, por rotas diferentes — o
+ * significado do cancelamento não é o mesmo, e um comando único atingiria a
+ * linha errada em silêncio.
+ */
+function podeCancelar(row: FollowupQueueRow): boolean {
+  return row.source === "enrollment"
+    ? LIVE_ENROLLMENT_STATUSES.has(row.status)
+    : row.status === "agendada";
+}
 
 function QueueStatusBadge({ status }: { status: string }) {
   return (
@@ -103,7 +121,7 @@ export function QueueTab({ canWrite }: Props) {
   const [pointerId, setPointerId] = useState<string>("all");
   const [searchInput, setSearchInput] = useState("");
   const [q, setQ] = useState("");
-  const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
+  const [pendingCancel, setPendingCancel] = useState<FollowupQueueRow | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setQ(searchInput.trim()), 250);
@@ -120,7 +138,8 @@ export function QueueTab({ canWrite }: Props) {
     [status, pointerId, q],
   );
   const { data, isLoading, hasNextPage, isFetchingNextPage, fetchNextPage } = useFollowupQueue(filters);
-  const cancelMutation = useCancelFollowupEnrollment();
+  const cancelEnrollment = useCancelFollowupEnrollment();
+  const cancelPromise = useCancelFollowupPromise();
 
   const rows: FollowupQueueRow[] = data?.pages.flatMap((p) => p.data) ?? [];
 
@@ -194,7 +213,7 @@ export function QueueTab({ canWrite }: Props) {
             </TableHeader>
             <TableBody>
               {rows.map((row) => {
-                const canCancel = canWrite && row.source === "enrollment" && LIVE_ENROLLMENT_STATUSES.has(row.status);
+                const canCancel = canWrite && podeCancelar(row);
                 return (
                   <TableRow key={`${row.source}:${row.id}`} data-testid="queue-row">
                     <TableCell className="font-medium">{row.contact.name}</TableCell>
@@ -221,8 +240,11 @@ export function QueueTab({ canWrite }: Props) {
                           <Button
                             variant="ghost"
                             size="sm"
-                            aria-label="Cancelar follow-up"
-                            onClick={() => setPendingCancelId(row.id)}
+                            data-testid="cancelar-item-da-fila"
+                            aria-label={
+                              row.source === "promise" ? "Cancelar retorno" : "Cancelar follow-up"
+                            }
+                            onClick={() => setPendingCancel(row)}
                           >
                             <Trash size={14} aria-hidden className="mr-1 text-error" /> Cancelar
                           </Button>
@@ -245,12 +267,18 @@ export function QueueTab({ canWrite }: Props) {
         </div>
       )}
 
-      <AlertDialog open={pendingCancelId !== null} onOpenChange={(open) => !open && setPendingCancelId(null)}>
+      <AlertDialog open={pendingCancel !== null} onOpenChange={(open) => !open && setPendingCancel(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar este follow-up?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {pendingCancel?.source === "promise"
+                ? "Cancelar este retorno?"
+                : "Cancelar este follow-up?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              O lead não receberá mais mensagens deste fluxo. Essa ação não pode ser desfeita.
+              {pendingCancel?.source === "promise"
+                ? "O agente não voltará a falar com esta pessoa no horário combinado, e vai saber que você desmarcou."
+                : "O lead não receberá mais mensagens deste fluxo. Essa ação não pode ser desfeita."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -258,11 +286,12 @@ export function QueueTab({ canWrite }: Props) {
             <AlertDialogAction
               className={buttonVariants({ variant: "destructive" })}
               onClick={() => {
-                if (pendingCancelId) cancelMutation.mutate(pendingCancelId);
-                setPendingCancelId(null);
+                if (pendingCancel?.source === "promise") cancelPromise.mutate(pendingCancel.id);
+                else if (pendingCancel) cancelEnrollment.mutate(pendingCancel.id);
+                setPendingCancel(null);
               }}
             >
-              Cancelar follow-up
+              {pendingCancel?.source === "promise" ? "Cancelar retorno" : "Cancelar follow-up"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -42,7 +42,16 @@ export type SkipReason =
   | "handoff_recent"
   | "conversation_not_found"
   | "empty_inbound_body"
-  | "duplicate_outbound";
+  | "duplicate_outbound"
+  /**
+   * A organização tem agente PUBLICADO, e quem responde publicado é o
+   * agent-engine (issue #129). Este worker é o caminho pré-engine: ele não
+   * chega a enviar nada — insere a outbound como `sending` e emite
+   * `message.send_requested`, que NUNCA teve consumidor. Sem esta trava os dois
+   * rodam na mesma mensagem: o engine responde de verdade e este aqui gasta
+   * token à toa e deixa uma linha presa para sempre no inbox de quem instalou.
+   */
+  | "engine_owns_reply";
 
 export interface BotContext {
   organization_id: string;

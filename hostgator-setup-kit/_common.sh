@@ -34,11 +34,176 @@ dc_files() {
   fi
 }
 
-c_red() { printf '\033[31m%s\033[0m\n' "$*"; }
-c_grn() { printf '\033[32m%s\033[0m\n' "$*"; }
-c_ylw() { printf '\033[33m%s\033[0m\n' "$*"; }
+# ── A rede externa por onde o proxy de fora alcança o app ────────────────────
+# O nome que o docker compose dá ao projeto quando ninguém passa -p: basename do
+# diretório, minúsculo, só [a-z0-9_-] — E com os `_`/`-` do INÍCIO aparados
+# (NormalizeProjectName faz TrimLeft). Sem essa aparada, uma pasta como
+# `/root/_deskcomm` faz o kit calcular `_deskcomm` enquanto os contêineres
+# carregam `deskcomm`: a instalação deixa de se reconhecer e passa a se tratar
+# como intrusa. Medido contra o docker compose v2.38.2 em `_deskcomm`,
+# `-deskcomm`, `_-_crm` e `_123` — todos divergiam.
+nome_do_projeto_compose() {  # nome_do_projeto_compose <diretório>
+  local n
+  n="$(basename "$1" | tr '[:upper:]' '[:lower:]' | tr -cd 'a-z0-9_-')"
+  printf '%s' "${n#"${n%%[!_-]*}"}"
+}
+
+nome_do_projeto_atual() {
+  printf '%s' "${COMPOSE_PROJECT_NAME:-$(nome_do_projeto_compose "${PROJECT_DIR:-$PWD}")}"
+}
+
+# A bridge que ESTE projeto reserva para o proxy externo. Um `basename` cru
+# diverge numa pasta com maiúscula, ponto ou underscore inicial — e aí o kit
+# cria uma rede e o compose procura outra.
+rede_reservada_do_proxy() { printf '%s_proxy' "$(nome_do_projeto_atual)"; }
+
+# O compose declara TRAEFIK_NETWORK como rede EXTERNA, e rede externa que não
+# existe é recusada ANTES de o compose criar qualquer coisa — medido com o
+# compose v2.38.2: `up -d` morre em "network X declared as external, but could
+# not be found", sem dizer de onde saiu o nome. Descobrir isso aqui, com o nome na
+# mão, é dezenas de minutos de diferença para quem está instalando. Valor escrito
+# à mão no .env passa pelo mesmo crivo: erra tão fácil quanto a detecção.
+#
+# A rede que o instalador reserva para si é o caso em que não existir é NORMAL —
+# instalação nova, ou alguém que rodou `docker network prune`. Aí a resposta é
+# criar, não morrer: o nome é nosso e sabemos a forma dele.
+# Ecoa: ok | criar | inexistente | driver_errado
+veredito_rede_do_proxy() {  # veredito_rede_do_proxy <driver encontrado> <rede> <bridge do projeto>
+  local drv="${1:-}" rede="${2:-}" nossa="${3:-}"
+  if [ -z "$drv" ]; then
+    [ -n "$nossa" ] && [ "$rede" = "$nossa" ] && { printf 'criar'; return 0; }
+    printf 'inexistente'; return 0
+  fi
+  [ "$drv" = bridge ] && { printf 'ok'; return 0; }
+  # $4 = "true" quando a rede é uma overlay attachable (Swarm). Contêiner de
+  # compose comum entra numa dessas, então ela serve tão bem quanto uma bridge.
+  # Sem o attachable a recusa continua: ali o `up` morreria em
+  # "could not attach to network".
+  [ "$drv" = overlay ] && [ "${4:-}" = true ] && { printf 'ok'; return 0; }
+  printf 'driver_errado'
+}
+
+# Aplica o veredito acima: confere no Docker, cria a nossa quando falta, morre
+# explicando quando é de outro. Mora aqui — e não no install.sh — porque o
+# `dc up -d` do update.sh corre exatamente o mesmo risco: a bridge é um artefato
+# como qualquer outro e some num `docker network prune`, ou no `down -v` que o
+# próprio kit ensina como caminho de recomeço. Sem esta checagem a atualização
+# morre com a mesma mensagem opaca do compose, e pior: o agent.sh roda o
+# update.sh sozinho a cada 5 minutos, então ninguém está olhando a tela.
+# Define TRAEFIK_NETWORK quando ela vem vazia — de propósito, é o mesmo default
+# que o instalador grava no .env.
+garantir_rede_do_proxy() {
+  [ "${REVERSE_PROXY:-caddy}" = "traefik" ] || return 0
+  local nossa drv erro
+  nossa="$(rede_reservada_do_proxy)"
+  TRAEFIK_NETWORK="${TRAEFIK_NETWORK:-traefik}"
+  drv="$(docker network inspect -f '{{.Driver}}' "$TRAEFIK_NETWORK" 2>/dev/null || true)"
+  local att
+  att="$(docker network inspect -f '{{.Attachable}}' "$TRAEFIK_NETWORK" 2>/dev/null || true)"
+  case "$(veredito_rede_do_proxy "$drv" "$TRAEFIK_NETWORK" "$nossa" "$att")" in
+  ok) : ;;
+  criar)
+    # O motivo vai junto porque aqui NÃO se sabe qual é: o comando está certo, e
+    # quem recusou foi o Docker (falta de faixa de IP livre numa VPS com muitas
+    # stacks é um caso conhecido). Sem repassar a resposta dele, a mensagem
+    # mandaria repetir à mão o comando que acabou de falhar.
+    if ! erro="$(docker network create "$TRAEFIK_NETWORK" 2>&1 >/dev/null)"; then
+      die "Não consegui criar a rede Docker '$TRAEFIK_NETWORK'. O Docker respondeu:
+  ${erro}"
+    fi
+    c_dim "  (rede '$TRAEFIK_NETWORK' criada — é por ela que o Traefik alcança o CRM)"
+    ;;
+  inexistente)
+    die "A rede Docker '$TRAEFIK_NETWORK' não existe.
+Rode 'docker network ls', identifique a rede do seu Traefik e ponha
+TRAEFIK_NETWORK=<nome> no .env antes de tentar de novo."
+    ;;
+  driver_errado)
+    # Mandar quem está em modo host "procurar a rede do seu Traefik" é mandar
+    # procurar o que não existe: em modo host ele não está em rede nenhuma do
+    # Docker. Para esse caso a saída é apagar a linha e deixar o kit decidir —
+    # ele cria a bridge do projeto sozinho.
+    die "A rede '$TRAEFIK_NETWORK' tem driver '$drv', e o app precisa
+de uma bridge para o Traefik alcançar o contêiner. Se o seu Traefik roda em modo
+host (é o caso quando 'docker ps' não mostra porta publicada nele), APAGUE a linha
+TRAEFIK_NETWORK do .env: o kit cria e usa a rede '$nossa'.
+Senão, rode 'docker network ls' e ponha a bridge certa em TRAEFIK_NETWORK no .env.
+Se for uma overlay do Swarm, ela precisa ter sido criada com --attachable —
+sem isso um contêiner de compose comum não consegue entrar nela."
+    ;;
+  esac
+}
+
+# Cor só quando há terminal de verdade — mesma regra do install.sh (se mexer
+# numa, mexa na outra). Aqui isso vale dobrado: o update.sh, que herda estas
+# funções, é rodado pelo agent.sh com a saída redirecionada para arquivo
+# (`> "$LOG"`) a cada 5 minutos, para sempre, em toda instalação. Era daí que
+# vinha o escape ANSI que o esc() do agent.sh precisa varrer byte a byte antes
+# de mandar o log no heartbeat; não emitir na origem é a correção de causa.
+if   [ -n "${NO_COLOR:-}" ];    then COLOR=0
+elif [ -n "${FORCE_COLOR:-}" ]; then COLOR=1
+elif [ -t 1 ];                  then COLOR=1
+else                                 COLOR=0
+fi
+paint() { local code="$1"; shift; if [ "$COLOR" = 1 ]; then printf '\033[%sm%s\033[0m\n' "$code" "$*"; else printf '%s\n' "$*"; fi; }
+c_red() { paint 31 "$*"; }
+c_grn() { paint 32 "$*"; }
+c_ylw() { paint 33 "$*"; }
+c_dim() { paint 2  "$*"; }
 die()   { c_red "✖ $*"; exit 1; }
-step()  { printf '\n\033[1m▶ %s\033[0m\n' "$*"; }
+step()  { printf '\n'; paint 1 "▶ $*"; }
+
+# Gêmea da de install.sh (se mexer numa, mexa na outra) — ver o comentário lá
+# para o defeito que ela fecha. Coberta por test-validators.sh.
+resposta_sim() {
+  local r
+  r="$(printf '%s' "${1:-}" | tr -d '[:space:]' | tr '[:upper:]' '[:lower:]')"
+  case "$r" in s|sim|y|yes) return 0;; *) return 1;; esac
+}
+
+# Saúde do app pela rota que ele responde de verdade, não pela porta. A porta
+# 3000 aceita conexão assim que o Node sobe — ANTES de o app saber se alcança
+# banco, Redis e WhatsApp. Era exatamente a diferença entre o install.sh, que
+# testava a porta e imprimia "Instalação concluída!" mesmo sem resposta, e o
+# update.sh, que só declara sucesso com "status":"ok". Um critério, um lugar.
+# Devolve DUAS linhas: o status GERAL na primeira, o corpo inteiro na segunda.
+#
+# A separação existe porque procurar '"status":"ok"' no JSON cru é errado, e
+# erra em silêncio: `ok` é o vocabulário dos CHECKS individuais
+# (ok|degraded|down), enquanto o status geral usa outro (healthy|degraded|
+# unhealthy). Medido contra o app real: um `grep '"status":"ok"'` casa com o
+# `checks.redis`, então um app com o BANCO FORA — status geral "unhealthy" —
+# passava como saudável, desde que qualquer outro check estivesse de pé. Quem
+# decide é o app, no Node que já está sendo invocado; o shell não repete a
+# regra dele.
+app_health_probe() {
+  dc exec -T app node -e \
+    "fetch('http://127.0.0.1:3000/api/v1/health').then(r=>r.json()).then(j=>{console.log((j&&j.data&&j.data.status)||'sem_status');console.log(JSON.stringify(j))}).catch(()=>process.exit(1))" \
+    2>/dev/null || echo ''
+}
+
+# wait_app_healthy [tentativas] [intervalo_s] — 0 quando o app se declara
+# `healthy` ou `degraded`, 1 caso contrário. `degraded` entra de propósito:
+# significa que algum serviço OPCIONAL ainda não foi configurado (o check
+# devolve degraded/not_configured), e recusar a instalação por isso reprovaria
+# um CRM que está de pé e atendendo. `unhealthy` é outra história — quer dizer
+# check DOWN, e aí o app não serve. Ecoa o corpo lido, para quem chama poder
+# mostrar o motivo em vez de só dizer que não deu.
+wait_app_healthy() {
+  local tentativas="${1:-20}" intervalo="${2:-3}" saida='' status='' corpo='' i=0
+  while [ "$i" -lt "$tentativas" ]; do
+    saida="$(app_health_probe)"
+    status="$(printf '%s\n' "$saida" | head -1 | tr -d '\r')"
+    corpo="$(printf '%s\n' "$saida" | tail -n +2)"
+    case "$status" in
+      healthy|degraded) printf '%s' "$corpo"; return 0;;
+    esac
+    i=$((i+1))
+    [ "$i" -lt "$tentativas" ] && sleep "$intervalo"
+  done
+  printf '%s' "$corpo"
+  return 1
+}
 
 # Código de saída de quem RECUSOU antes de tocar em qualquer coisa — distinto
 # de "falhei no meio" (1). O agent.sh usa isso para não desfazer uma
@@ -59,6 +224,29 @@ refuse() { c_red "✖ $*"; exit "$REFUSED_RC"; }
 # história ANTES de perguntar, e, se não der, devolvemos 2 — o chamador
 # recusa. Falhar fechado é o certo num script que roda como root na máquina de
 # quem não sabe consertar.
+# Repositório da imagem do app, derivado do `origin` DESTE clone.
+#
+# O publish-image.yml publica em `ghcr.io/${{ github.repository }}` — ou seja, um
+# fork publica sozinho no lugar dele. Fixar o nome do upstream no update.sh faz o
+# clone de um fork puxar a imagem de OUTRO projeto: no melhor caso a versão nem
+# existe lá e o pull falha; no pior, existe uma tag de mesmo nome e o servidor
+# roda código que não é o que está no disco.
+#
+# Cai no padrão histórico quando o origin não é do GitHub, não é legível, ou nem
+# é um repositório git — que é o caso do install.sh rodando de um tarball.
+imagem_do_projeto() {
+  local slug
+  slug="$(git remote get-url origin 2>/dev/null \
+          | sed -E 's#/$##; s#\.git$##' \
+          | sed -nE 's#^(https?://|git@)github\.com[:/]+([^/]+/[^/]+)$#\2#p' \
+          | tr 'A-Z' 'a-z')"
+  if [ -n "$slug" ]; then
+    printf 'ghcr.io/%s' "$slug"
+  else
+    printf 'ghcr.io/melgarafael/deskcommcrm'
+  fi
+}
+
 is_already_in_head() {
   local ref="$1"
   if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" = "true" ]; then
@@ -94,7 +282,16 @@ load_env() {
     case "$key" in ''|*[!A-Za-z0-9_]*) continue;; esac
     case "$val" in
       \"*\") val="${val:1:${#val}-2}";;
-      \'*\') val="${val:1:${#val}-2}";;
+      \'*\')
+        val="${val:1:${#val}-2}"
+        # envq escreve a aspa simples do CONTEÚDO como '\'' (fecha o literal,
+        # escapa a aspa, reabre) — é o que faz a linha ser shell válido. Só que
+        # tirar as aspas de fora não desfaz isso: sem esta troca, uma senha com
+        # aspa volta da releitura com quatro caracteres a mais, e o erro só
+        # aparece longe daqui (o psql recusa a conexão, o login não bate) sem
+        # nada apontando para o .env. Achado pelo teste de round-trip.
+        val="${val//"'\\''"/"'"}"
+        ;;
     esac
     printf -v "$key" '%s' "$val"
     export "${key?}"
@@ -149,6 +346,33 @@ owner_id_by_email() {
 # lidos por cron, não por trigger→HTTP nem fila gerenciada (doutrina do
 # projeto: trigger Postgres nunca faz HTTP). Chamada por install.sh e
 # update.sh — re-rodar não duplica a linha do crontab.
+# ── Cron: uma instalação nunca mexe na linha de outra ────────────────────────
+# O filtro era `crontab -l | grep -v 'event-log-drain' | crontab -`: casava com
+# a linha de QUALQUER instalação do host. Instalar uma segunda instância na
+# mesma VPS apagava as duas linhas da primeira — o drain de eventos e o agente
+# de atualização — em silêncio, e o dono só descobriria pelo que parou de
+# acontecer. Confirmado numa VPS com produção rodando: as linhas dela seriam
+# levadas por uma instalação nova em outra pasta.
+#
+# Agora cada linha carrega um marcador com o diretório da instalação, e o
+# filtro remove só as que são dela.
+# O marcador identifica a instalação E O PAPEL da linha. O papel não é enfeite:
+# com um marcador só por instalação, a segunda função a rodar apagava a linha da
+# primeira (o filtro remove tudo que casa com o marcador, e as duas linhas
+# casavam). Medido na VPS: depois de instalar, sobrava só o agente e o CRM ficava
+# SEM o drain de eventos — a automação inteira parada, em silêncio.
+cron_tag() { printf '# deskcomm:%s:%s' "${PROJECT_DIR:-$PWD}" "${1:?papel da linha (drain|agent)}"; }
+
+# Puro (testável sem tocar no crontab real): lê o crontab atual em stdin e
+# imprime o novo. Tira as linhas DESTA instalação — pelo marcador, e também
+# pela `assinatura` para as linhas legadas, escritas antes de o marcador
+# existir, que sem isso ficariam duplicadas a cada re-execução.
+cron_merge() {  # cron_merge <marcador> <assinatura_legada> <linha_nova>
+  local marcador="$1" legado="$2" nova="$3"
+  { grep -vF -e "$marcador" | grep -vF -e "$legado"; } || true
+  printf '%s\n' "$nova"
+}
+
 setup_event_log_drain_cron() {
   command -v crontab >/dev/null 2>&1 || { c_ylw "⚠ 'crontab' não encontrado — instale o pacote 'cron' e rode de novo pra ativar as automações."; return 0; }
 
@@ -157,14 +381,17 @@ setup_event_log_drain_cron() {
   [ -n "$secret" ] || { c_ylw "⚠ falta INTERNAL_SECRET/INTERNAL_CRON_SECRET — não ativei o cron das automações."; return 0; }
   [ -n "${NEXT_PUBLIC_APP_URL:-}" ] || { c_ylw "⚠ falta NEXT_PUBLIC_APP_URL — não ativei o cron das automações."; return 0; }
 
-  local first_time=1
-  if crontab -l 2>/dev/null | grep -q 'event-log-drain'; then first_time=0; fi
+  local url_drain="${NEXT_PUBLIC_APP_URL}/api/v1/cron/event-log-drain"
+  local marcador; marcador="$(cron_tag drain)"
 
-  local cron_line="* * * * * curl -fsS -H \"Authorization: Bearer ${secret}\" \"${NEXT_PUBLIC_APP_URL}/api/v1/cron/event-log-drain\" >/dev/null 2>&1"
-  # "|| true": com pipefail ativo, grep -v sem match nenhum (crontab vazio ou
-  # sem a linha ainda) sai com status 1 e derrubaria o subshell por set -e
-  # ANTES do echo do novo cron_line — neutralizamos aqui, de propósito.
-  ( crontab -l 2>/dev/null | grep -v 'event-log-drain' || true; echo "$cron_line" ) | crontab -
+  # "primeira vez" é sobre ESTA instalação, não sobre o host: com o teste antigo
+  # ('existe alguma linha de event-log-drain?'), uma instalação nova numa VPS
+  # que já roda outra se achava veterana e pulava a higienização de eventos.
+  local first_time=1
+  if crontab -l 2>/dev/null | grep -qF -e "$url_drain"; then first_time=0; fi
+
+  local cron_line="* * * * * curl -fsS -H \"Authorization: Bearer ${secret}\" \"${url_drain}\" >/dev/null 2>&1 ${marcador}"
+  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$url_drain" "$cron_line" ) | crontab -
   c_grn "✓ automações ativas (cron do event-log-drain, a cada minuto)"
 
   if [ "$first_time" = 1 ]; then
@@ -198,9 +425,12 @@ setup_update_agent_cron() {
   # DIRETÓRIO CORRENTE. No cron o CWD é o home do dono do crontab — sem o cd,
   # a linha só funciona por acidente (instalação padrão em /root/deskcommcrm) e
   # morre calada a cada 5 minutos em qualquer REPO_DIR customizado ou /opt.
-  local cron_line="*/5 * * * * cd ${PROJECT_DIR} && bash hostgator-setup-kit/agent.sh >/dev/null 2>&1"
-  # "|| true": com pipefail, grep -v sem match sai 1 e derrubaria o subshell.
-  ( crontab -l 2>/dev/null | grep -v 'hostgator-setup-kit/agent.sh' || true; echo "$cron_line" ) | crontab -
+  # A assinatura legada inclui o PROJECT_DIR: é o que distingue a linha desta
+  # instalação da linha de uma vizinha, que roda o mesmo agent.sh em outra pasta.
+  local legado="cd ${PROJECT_DIR} && bash hostgator-setup-kit/agent.sh"
+  local marcador; marcador="$(cron_tag agent)"
+  local cron_line="*/5 * * * * ${legado} >/dev/null 2>&1 ${marcador}"
+  ( crontab -l 2>/dev/null | cron_merge "$marcador" "$legado" "$cron_line" ) | crontab -
   c_grn "✓ atualização pela tela ativa (agente a cada 5 minutos)"
 }
 

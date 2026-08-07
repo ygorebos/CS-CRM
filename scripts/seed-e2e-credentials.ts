@@ -14,20 +14,21 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 import { generateTotp } from "../tests/e2e/utils/totp";
+import { anunciarDestino, credenciaisSupabaseDeTeste } from "./lib/env-de-teste";
 
-// Carrega .env.local manualmente (sem next/env aqui).
-const envFile = fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
-const env: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
-
-const SUPABASE_URL = env.NEXT_PUBLIC_SUPABASE_URL!;
-const SERVICE_ROLE = env.SUPABASE_SERVICE_ROLE_KEY!;
-if (!SUPABASE_URL || !SERVICE_ROLE) {
-  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY in .env.local");
-}
+// `process.env` VENCE o `.env.local` (ver scripts/lib/env-de-teste.ts).
+//
+// A versão anterior lia `.env.local` DIRETO do disco, e por isso a suíte E2E
+// semeava org, usuários e agentes no banco de PRODUÇÃO: o `.env.e2e` injetado no
+// webServer do Playwright nunca alcançava este script, porque ele não olhava
+// para o ambiente. Medido em 2026-08-06 — o factor TOTP em `.e2e-creds.json` não
+// existia no banco local porque tinha sido criado na nuvem.
+const credenciais = credenciaisSupabaseDeTeste();
+anunciarDestino("seed-e2e-credentials", credenciais);
+const SUPABASE_URL = credenciais.url;
+const SERVICE_ROLE = credenciais.serviceRole;
+const ANON_KEY = credenciais.anonKey;
+const APP_URL = credenciais.appUrl;
 
 const admin = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { autoRefreshToken: false, persistSession: false },
@@ -204,7 +205,7 @@ async function ensureAdminTotp(adminUserId: string, adminEmail: string): Promise
     console.log(`[seed] admin TOTP factor removed (rotating): ${f.id}`);
   }
 
-  const anon = createClient(SUPABASE_URL, env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, {
+  const anon = createClient(SUPABASE_URL, ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
   const { error: signInErr } = await anon.auth.signInWithPassword({
@@ -258,9 +259,9 @@ async function main(): Promise<void> {
     users,
     admin_totp: adminTotp,
     default_agent_id: agentId,
-    app_url: env.NEXT_PUBLIC_APP_URL || "http://localhost:3000",
+    app_url: APP_URL,
     supabase_url: SUPABASE_URL,
-    supabase_anon_key: env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "",
+    supabase_anon_key: ANON_KEY,
   };
 
   fs.writeFileSync(".e2e-creds.json", JSON.stringify(creds, null, 2));

@@ -5,11 +5,13 @@
  * como erro instrutivo (o modelo a vê no turno seguinte); só se TODOS passarem a
  * mensagem alcança o `ChannelAdapter` (e, por baixo, o sink idempotente F2-06).
  *
- * Ordem FINAL v5 (DECLARATIVA + VERSIONADA — `BEFORE_SEND_GATES`/`BEFORE_SEND_CHAIN_VERSION`,
+ * Ordem FINAL v6 (DECLARATIVA + VERSIONADA — `BEFORE_SEND_GATES`/`BEFORE_SEND_CHAIN_VERSION`,
  * F4-08/F4-09): (1) stop/opt-out — irrevogável; (2) lgpd — anonimização/base legal de
- * prospecção (F4-09); (3) anti-ban (janela/throttle/warm-up/caps — F2-11); (4) spinning
- * (F2-12); (5) promise determinística (F4-01); (6) promise semântica (F4-02); (6.5) case
- * promise — anti-alucinação de casos humanos (spec 15 §10.2, Wave 4); (7) disclosure
+ * prospecção (F4-09); (3) anti-ban (janela/throttle/warm-up/caps — F2-11); (3.5) janela de
+ * atendimento; (4) spinning (F2-12); (5) promise determinística (F4-01); (6) promise
+ * semântica (F4-02); (6.5) case promise — anti-alucinação de casos humanos (spec 15 §10.2,
+ * Wave 4); (6.7) internal_vocabulary — vazamento de vocabulário interno ao cliente
+ * (`docs/doctrine/separacao-fala-e-operacao.md`); (7) disclosure
  * (F4-05). A ordem é código-constante DE PROPÓSITO, não config de
  * runtime: "stop primeiro" é invariante de segurança (regra dura nº 2) e mudar a ordem sem
  * bumpar a versão quebra o CI — deixá-la mutável em disco seria um footgun.
@@ -63,6 +65,7 @@ import type { DisclosureMode } from './disclosure/template';
 import { escalateLgpdVeto, isLegalBasisValid } from './lgpd/legal-basis';
 import type { LgpdInput } from './lgpd/legal-basis';
 import { detectHumanPromise } from './human-promise';
+import { detectarVazamentoInterno, renderVetoDeVazamento } from './vazamento-interno';
 // Módulo PURO de propósito (`capabilities`, não `index`): o seam não arrasta o
 // adapter — e com ele o cliente HTTP do canal — para dentro do worker.
 import { capabilitiesOf, DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
@@ -170,6 +173,29 @@ export interface GateContext {
   casesEnabled: boolean;
   hasOpenCase: boolean;
   openedCaseThisTurn: boolean;
+  /**
+   * Arma o `internalVocabularyGate` (vazamento de vocabulário interno ao cliente).
+   *
+   * **OPCIONAL, e ausente = DESARMADO — a direção segura AQUI é o oposto da do
+   * `messagingWindow`, e a diferença é o que acontece com o veto em cada caminho.**
+   *
+   * No caminho do AGENTE (`send_message` do inbound-turn) existe um modelo no laço: o
+   * veto volta a ele como erro instrutivo, ele reescreve, e o fail-safe libera se
+   * insistir. Lá o gate arma.
+   *
+   * No caminho DETERMINÍSTICO (`followup-turn.ts`, re-entrada por template versionado)
+   * não há ninguém para ensinar: veto ali é DROP SILENCIOSO — o follow-up morre sem
+   * sintoma, desligando por dentro o invariante 4 de `docs/doctrine/sistema-vivo.md`
+   * ("nada morre sem próximo passo"). Um default ARMADO faria exatamente isso em todo
+   * chamador que não conhece este campo. Por isso ausente = no-op: na pior hipótese o
+   * vazamento continua (o defeito que já existe e que este gate veio MEDIR), nunca o
+   * cliente mudo.
+   *
+   * O contra-risco — um caller do agente esquecer o campo e desarmar o guarda em
+   * silêncio — é coberto por `tests/unit/gate-vazamento-interno.test.ts`, que cobra a
+   * fiação nos dois sentidos: presente no `send_message`, ausente no follow-up.
+   */
+  internalVocabularyEnforced?: boolean;
 }
 
 /**
@@ -319,6 +345,41 @@ export const casePromiseGate: Gate = {
 };
 
 /**
+ * Gate de VAZAMENTO DE VOCABULÁRIO INTERNO (`docs/doctrine/separacao-fala-e-operacao.md`)
+ * — barra a mensagem ao cliente final que carrega nome de ferramenta, tabela/coluna,
+ * papel de acesso, termo de arquitetura ou erro cru. Desarmado (campo ausente) = no-op;
+ * a razão do default e a assimetria entre os caminhos estão em `GateContext`.
+ *
+ * ⚠️ É REDE, NÃO CURA. A cura é o Conversador nunca ter visto esse vocabulário (a
+ * separação falar/operar da doutrina). O valor imediato e independente deste gate é
+ * transformar "acho que vaza" em NÚMERO: cada veto vira linha em `before_send_traces`
+ * com a categoria do vazamento, antes de qualquer refatoração.
+ *
+ * Posição 6.7 de `BEFORE_SEND_GATES`: DEPOIS do `casePromiseGate` e ANTES do
+ * `disclosureGate`. Antes do disclosure de propósito — o disclosure pode EMENDAR o corpo
+ * (`amendBody`), e o que se quer inspecionar é o texto que o MODELO escreveu, não um
+ * texto já costurado pelo runtime (o disclosure é template do tenant; vetá-lo devolveria
+ * ao modelo a culpa por uma frase que não é dele).
+ */
+export const internalVocabularyGate: Gate = {
+  name: 'internal_vocabulary',
+  evaluate: (ctx) => {
+    if (ctx.internalVocabularyEnforced !== true) return { pass: true };
+    const achado = detectarVazamentoInterno(ctx.body);
+    if (!achado.achou) return { pass: true };
+    return {
+      pass: false,
+      code: 'internal_vocabulary_leak',
+      reason: renderVetoDeVazamento(achado.termos),
+      // detail é LOGADO e persistido: contagem + CATEGORIAS (rótulos nossos, fechados),
+      // nunca os termos — termo casado é trecho da candidata, e um snake_case pode ter
+      // vindo de um dado do lead. A medição que a doutrina pede cabe nestes dois campos.
+      detail: { leaked_count: achado.termos.length, leaked_kinds: achado.categorias.join(',') },
+    };
+  },
+};
+
+/**
  * Gate de disclosure (F4-05; blueprint 5.7) — garante que a PRIMEIRA mensagem outbound a um
  * lead novo se apresenta como assistente virtual (template versionado por org). Decisão de
  * produto que blinda hoje (CDC) e amanhã (PL 2338), não exigência da Meta. Sem template
@@ -447,9 +508,14 @@ const spinningGate: Gate = {
  * do guardrail anti-alucinação de casos humanos; v5 = insere `messagingWindowGate`
  * logo após `pacing` — o irmão de hetero-restrição do anti-ban (Fase 4 do seam de
  * canais). Em canal sem janela ele registra `skipped`, então nenhum envio muda de
- * destino: a v5 muda o TRACE, não o comportamento.
+ * destino: a v5 muda o TRACE, não o comportamento. v6 = insere
+ * `internalVocabularyGate` entre `case_promise` e `disclosure` — a rede contra vazamento
+ * de vocabulário interno ao cliente (`docs/doctrine/separacao-fala-e-operacao.md`). Ele
+ * nasce DESARMADO por default (ver `GateContext.internalVocabularyEnforced`): só o
+ * caminho do agente o arma, então, como a v5, a v6 não muda o destino de nenhum envio
+ * que já existia — muda o TRACE, e passa a medir o vazamento onde há modelo para ensinar.
  */
-export const BEFORE_SEND_CHAIN_VERSION = 5;
+export const BEFORE_SEND_CHAIN_VERSION = 6;
 
 /**
  * Ordem FINAL da cadeia (F4-08/F4-09; edge-contract §before_send / blueprint órgão 5) — DADO
@@ -462,6 +528,8 @@ export const BEFORE_SEND_CHAIN_VERSION = 5;
  *   (5) promise — validação determinística de preço/desconto/parcelamento (F4-01);
  *   (6) semantic_promise — promessa em texto livre que a regex não pega (F4-02);
  *   (6.5) case_promise — anti-alucinação de casos humanos (spec 15 §10.2, Wave 4);
+ *   (6.7) internal_vocabulary — vazamento de vocabulário interno ao cliente (doutrina
+ *         `separacao-fala-e-operacao.md`); antes do disclosure porque ele pode emendar o corpo;
  *   (7) disclosure — 1ª mensagem se apresenta como assistente virtual (F4-05).
  * (O anti-jailbreak F4-04 é INBOUND advisório, não gate de before_send — não entra aqui.)
  */
@@ -474,6 +542,7 @@ export const BEFORE_SEND_GATES: readonly Gate[] = [
   promiseGate,
   semanticPromiseGate,
   casePromiseGate,
+  internalVocabularyGate,
   disclosureGate,
 ];
 
@@ -566,6 +635,15 @@ export interface RunBeforeSendArgs {
   hasOpenCase?: boolean;
   openedCaseThisTurn?: boolean;
   /**
+   * Arma o `internalVocabularyGate`. Ausente (default) = gate no-op — ver a justificativa
+   * do default em `GateContext.internalVocabularyEnforced`: um veto no caminho
+   * determinístico seria drop silencioso, e cliente mudo não pode ser desfecho.
+   *
+   * O caminho do agente também o passa `false` de propósito no re-run do fail-safe:
+   * depois de N vetos no mesmo turno o envio sai, com registro.
+   */
+  enforceInternalVocabulary?: boolean;
+  /**
    * Enviado SÓ se TODOS os gates passarem — ChannelAdapter (própria tx/idempotência). Recebe o
    * corpo FINAL (o disclosureGate F4-05 pode emendá-lo via `amendBody`): quem monta o send DEVE
    * enviar este `body`, não o corpo original capturado antes da cadeia.
@@ -642,6 +720,7 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
       casesEnabled: args.casesEnabled ?? false,
       hasOpenCase: args.hasOpenCase ?? false,
       openedCaseThisTurn: args.openedCaseThisTurn ?? false,
+      internalVocabularyEnforced: args.enforceInternalVocabulary ?? false,
     };
 
     const trace: GateTraceEntry[] = [];

@@ -46,6 +46,9 @@ const AGENT: PublishedAgentConfig = {
   ragTopK: 5,
   ragSimilarityThreshold: 0.72,
   versionCreatedBy: null,
+  operatorEnabled: false,
+  operatorModel: null,
+  operatorToolIds: [],
   agentCreatedBy: null,
 };
 

@@ -31,6 +31,7 @@ const TEMPLATES: { id: PromptTemplate; title: string; desc: string }[] = [
 export function SetupAiForm() {
   const [name, setName] = useState("Atendente IA");
   const [template, setTemplate] = useState<PromptTemplate>("ecommerce_friendly");
+  const [naoPublicado, setNaoPublicado] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
   return (
@@ -38,9 +39,18 @@ export function SetupAiForm() {
       className="space-y-5 rounded-lg border bg-background p-6"
       action={(formData) => {
         startTransition(async () => {
+          setNaoPublicado(null);
           const res = await createDefaultAgent(formData);
           if (res && !res.ok) {
             toast.error(`Falha ao criar agente: ${res.error}`);
+            return;
+          }
+          // Agente criado, publicação não. O caminho completo redireciona no
+          // servidor, então chegar aqui com `publish_error` é a única forma de a
+          // pessoa saber que o atendente ainda não responde — nunca esconder.
+          if (res?.publish_error) {
+            setNaoPublicado(res.publish_error);
+            toast.warning("Agente criado, mas ainda não publicado.");
           }
         });
       }}
@@ -85,6 +95,37 @@ export function SetupAiForm() {
           ))}
         </div>
       </fieldset>
+
+      {naoPublicado && (
+        <div
+          role="alert"
+          className="space-y-3 rounded-md border border-amber-300/60 bg-amber-50 p-4 dark:border-amber-500/30 dark:bg-amber-950/20"
+        >
+          <p className="text-sm font-medium">
+            Seu agente foi criado, mas ficou como <strong>rascunho</strong>: não consegui ler os
+            números de WhatsApp desta instalação, então não dá pra dizer em qual número ele
+            atenderia — e rascunho não responde mensagem.
+          </p>
+          <p className="text-xs text-muted-foreground">
+            Erro do banco de dados: <code className="break-all">{naoPublicado}</code>
+          </p>
+          <p className="text-sm">
+            Tente de novo no botão abaixo (clicar de novo não cria um segundo agente) ou siga
+            agora e publique depois em <strong>IA › Agentes</strong>.
+          </p>
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                window.location.href = "/onboarding/invite-team";
+              }}
+            >
+              Continuar sem publicar
+            </Button>
+          </div>
+        </div>
+      )}
 
       <div className="flex justify-between gap-2">
         <Button

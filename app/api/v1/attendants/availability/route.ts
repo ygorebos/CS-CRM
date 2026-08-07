@@ -19,8 +19,7 @@ import type { NextRequest } from "next/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { isServiceRoleConfigured } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
-import { ROLE_RANK, type Role } from "@/lib/auth/types";
-import { OPEN_LOAD_STATUSES } from "@/lib/routing/eligibility";
+import { carregarRosterDeAtendimento } from "@/lib/escalacao/atendentes";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 
@@ -63,74 +62,46 @@ export async function GET(_req: NextRequest): Promise<Response> {
 
   const admin = createAdminClient();
 
-  const { data: members, error: mErr } = await admin
-    .from("user_organizations")
-    .select("user_id, role")
-    .eq("organization_id", activeOrg.orgId)
-    .is("revoked_at", null);
-  if (mErr) return fail("internal_error", mErr.message, 500, { requestId });
-
-  // Atendentes = agent+ (viewer não é insumo de roteamento).
-  const attendants = (members ?? []).filter(
-    (m) => ROLE_RANK[m.role as Role] >= ROLE_RANK.agent,
-  ) as Array<{ user_id: string; role: Role }>;
-  const userIds = attendants.map((m) => m.user_id);
-  if (userIds.length === 0) return ok([], { requestId });
-
-  const { data: availData, error: aErr } = await admin
-    .from("attendant_availability")
-    .select(SELECT_COLS)
-    .eq("organization_id", activeOrg.orgId)
-    .in("user_id", userIds);
-  if (aErr) return fail("internal_error", aErr.message, 500, { requestId });
-  const availByUser = new Map(
-    ((availData ?? []) as AvailabilityRow[]).map((a) => [a.user_id, a] as const),
-  );
-
-  // Carga atual = conversas abertas atribuídas, contadas org-wide (mesma
-  // definição do worker de roteamento).
-  const { data: openConvs, error: loadErr } = await admin
-    .from("conversations")
-    .select("assigned_to_user_id")
-    .eq("organization_id", activeOrg.orgId)
-    .in("assigned_to_user_id", userIds)
-    .in("status", OPEN_LOAD_STATUSES as unknown as string[]);
-  if (loadErr) return fail("internal_error", loadErr.message, 500, { requestId });
-  const loadByUser = new Map<string, number>();
-  for (const c of (openConvs ?? []) as Array<{ assigned_to_user_id: string | null }>) {
-    if (c.assigned_to_user_id) {
-      loadByUser.set(c.assigned_to_user_id, (loadByUser.get(c.assigned_to_user_id) ?? 0) + 1);
-    }
+  // O roster + a carga vivem em lib/escalacao/atendentes.ts porque a capacidade
+  // do agente ("quem pode assumir agora?") lê exatamente a mesma coisa. Enquanto
+  // a regra morou aqui dentro, o agente escalava para uma fila cega.
+  let roster;
+  try {
+    roster = await carregarRosterDeAtendimento(admin, activeOrg.orgId);
+  } catch (err) {
+    return fail("internal_error", err instanceof Error ? err.message : "roster", 500, {
+      requestId,
+    });
   }
+  if (roster.length === 0) return ok([], { requestId });
 
-  // Nome/email por atendente (mesmo padrão de /api/v1/metrics/attendants).
+  // Nome/email por atendente (mesmo padrão de /api/v1/metrics/attendants). Fica
+  // NA ROTA, não na função compartilhada: e-mail é PII e a superfície do agente
+  // não recebe e-mail nem telefone de atendente.
   const names = new Map<string, { name: string | null; email: string | null }>();
   await Promise.all(
-    userIds.map(async (id) => {
-      const { data: userRes } = await admin.auth.admin.getUserById(id);
+    roster.map(async ({ userId }) => {
+      const { data: userRes } = await admin.auth.admin.getUserById(userId);
       const u = userRes?.user;
-      names.set(id, {
+      names.set(userId, {
         name: (u?.user_metadata?.full_name as string | undefined) ?? null,
         email: u?.email ?? null,
       });
     }),
   );
 
-  const rows = attendants.map((m) => {
-    const a = availByUser.get(m.user_id);
-    return {
-      user_id: m.user_id,
-      role: m.role,
-      name: names.get(m.user_id)?.name ?? null,
-      email: names.get(m.user_id)?.email ?? null,
-      is_available: a?.is_available ?? false,
-      capacity: a?.capacity ?? null,
-      schedule: a?.schedule ?? { timezone: "America/Sao_Paulo", windows: [] },
-      last_heartbeat_at: a?.last_heartbeat_at ?? null,
-      updated_at: a?.updated_at ?? null,
-      current_load: loadByUser.get(m.user_id) ?? 0,
-    };
-  });
+  const rows = roster.map((m) => ({
+    user_id: m.userId,
+    role: m.papel,
+    name: names.get(m.userId)?.name ?? null,
+    email: names.get(m.userId)?.email ?? null,
+    is_available: m.disponivel,
+    capacity: m.capacidade,
+    schedule: m.agenda,
+    last_heartbeat_at: m.ultimoSinalDeVida,
+    updated_at: m.atualizadoEm,
+    current_load: m.cargaAtual,
+  }));
 
   return ok(rows, { requestId });
 }

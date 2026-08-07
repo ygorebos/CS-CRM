@@ -11,6 +11,8 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { logger } from "@/lib/logger";
+
 import { flowGraphSchema, type FlowGraph, type FlowNode } from "./graph-schema";
 import {
   ACTION_RECHECK_MS,
@@ -88,6 +90,11 @@ export interface TickDeps {
 }
 
 export interface TickSummary {
+  /**
+   * Distingue "o claim falhou" de "nada vencido" — os dois produzem
+   * `claimed: 0`, e sem esta marca o segundo esconde o primeiro para sempre.
+   */
+  claim_falhou?: boolean;
   claimed: number;
   advanced: number;
   scheduled: number;
@@ -406,8 +413,19 @@ export async function runFollowupTick(deps: TickDeps, opts?: { limit?: number })
   let claimed: EnrollmentRow[];
   try {
     claimed = await deps.db.claimDueEnrollments(opts?.limit ?? DEFAULT_CLAIM_LIMIT, CLAIM_LEASE_SECONDS);
-  } catch {
-    // claim falhando é infra (DB fora do ar) — o tick seguinte tenta de novo; nunca lança.
+  } catch (err) {
+    // Claim falhando é infra (DB fora do ar) — o tick seguinte tenta de novo, e
+    // NUNCA lança: derrubar o worker por isso pararia todos os follow-ups.
+    //
+    // Mas silenciar é o defeito: `claimed: 0` aqui é indistinguível de "nada
+    // vencido", que é o estado normal. Se o claim falhar SEMPRE, o follow-up
+    // morre inteiro e o sintoma é a ausência de sintoma — ninguém descobre.
+    // A doutrina já tem a regra escrita para o audit (`CLAUDE.md`: falha de
+    // write gera alerta, não bloqueia); aqui ela vale igual.
+    logger.error("followup: claim falhou — tick sem enrollments, NAO e 'nada vencido'", {
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    summary.claim_falhou = true;
     return summary;
   }
   summary.claimed = claimed.length;

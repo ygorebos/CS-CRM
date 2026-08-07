@@ -33,6 +33,37 @@ export interface EphemeralToken {
   expiresAt: string;
 }
 
+/**
+ * O prefixo do token efêmero — exportado porque a regra tem UM dono.
+ *
+ * ## O defeito que a entropia conserta
+ *
+ * Era `dsk_run_${runId.slice(0, 8)}`, derivado SÓ do run. `api_tokens` tem
+ * `unique (organization_id, prefix)`, então o mesmo job retentado mintava com o
+ * mesmo prefixo: a colisão não era rara, era **garantida em toda retentativa**.
+ * Medido num turno real — o mint estourava, `buildMcpTurnTools` falhava, e o
+ * turno seguia SEM capacidade nenhuma, deixando só um log de worker. Um blip de
+ * rede degradava o agente para sem-mãos.
+ *
+ * Os 4 bytes aleatórios também matam o irmão silencioso: dois jobs distintos
+ * cujos uuid coincidem nos 8 primeiros caracteres.
+ *
+ * ## Por que é seguro mexer no prefixo
+ *
+ * A autenticação bate `token_hash` (`lib/mcp/auth.ts`), nunca o prefixo — ele é
+ * identificação para humano ler no audit, não chave de busca.
+ *
+ * ## Por que é exportado
+ *
+ * `tests/invariants/capacidades-ausentes.test.ts` exercita esta função contra a
+ * constraint REAL do banco. Se o teste tivesse a própria cópia da regra, ele
+ * continuaria verde depois de alguém reverter o conserto aqui — seria a segunda
+ * lista, que é o defeito que ele existe para pegar.
+ */
+export function buildEphemeralPrefix(runId: string): string {
+  return `dsk_run_${runId.slice(0, 8)}_${randomBytes(4).toString("hex")}`;
+}
+
 async function resolveCreatedBy(
   organizationId: string,
   ...candidates: Array<string | null | undefined>
@@ -64,7 +95,7 @@ export async function mintEphemeralToken(
     throw new Error("no_actor_user_for_ephemeral_token");
   }
 
-  const prefix = `dsk_run_${input.runId.slice(0, 8)}`;
+  const prefix = buildEphemeralPrefix(input.runId);
   const secret = randomBytes(32).toString("base64url");
   const plaintext = `${prefix}_${secret}`;
   const tokenHash = createHash("sha256").update(plaintext).digest();
@@ -84,7 +115,7 @@ export async function mintEphemeralToken(
         "mcp:write",
         "actor:ai_agent",
         `agent_run:${input.runId}`,
-        "role:agent",
+        "role:ai_operator",
       ],
       expires_at: expiresAt,
     })

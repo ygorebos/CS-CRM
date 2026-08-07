@@ -16,6 +16,8 @@ import { audit } from "@/lib/audit";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Role } from "@/lib/auth/types";
+import { duplicateAgentWithVersion } from "@/lib/ai/agents/duplicate";
 
 const UUID_RX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -24,7 +26,7 @@ type ActionResult<T = void> =
   | { ok: false; error: string; message?: string };
 
 type AdminGuard =
-  | { kind: "ok"; authUser: { id: string }; activeOrg: { orgId: string; role: "viewer" | "agent" | "manager" | "admin" } }
+  | { kind: "ok"; authUser: { id: string }; activeOrg: { orgId: string; role: Role } }
   | { kind: "fail"; result: { ok: false; error: string } };
 
 async function ensureAdmin(): Promise<AdminGuard> {
@@ -220,43 +222,25 @@ export async function duplicateAgentAction(id: string): Promise<ActionResult<{ n
 
   const admin = createAdminClient();
 
-  const { data: source } = await admin
-    .from("ai_agents")
-    .select(
-      "id, name, description, model, system_prompt, kind, priority, config, guardrails, active_kb_version_id",
-    )
-    .eq("id", id)
-    .eq("organization_id", activeOrg.orgId)
-    .maybeSingle();
-  if (!source) return { ok: false, error: "not_found" };
+  // Mesma implementação da rota /api/v1/ai/agents/:id/duplicate. Antes daqui a
+  // action fazia cópia rasa (só a linha de ai_agents), e para mcp_agent isso
+  // devolvia um agente em branco: prompt, ferramentas, credencial, canal,
+  // palavras de handoff, budgets e follow-up vivem em ai_agent_versions.
+  // `requireVersion: false` porque o botão da lista também duplica rag_bot
+  // legado, que não tem versão nenhuma.
+  const result = await duplicateAgentWithVersion(admin, {
+    orgId: activeOrg.orgId,
+    agentId: id,
+    actorUserId: authUser.id,
+    requireVersion: false,
+  });
 
-  // Para mcp_agent, idealmente clona uma versão draft/published. Por simplicidade
-  // de UX, fazemos cópia "shallow" — agent + duplicate row; a versão fica ausente
-  // e o usuário re-publica. Conservador para a wave 10. (Spec 10 §4.3 detalha
-  // clonagem completa via /api/v1/ai/agents/:id/duplicate, que continua disponível.)
-  const { data: cloned, error } = await admin
-    .from("ai_agents")
-    .insert({
-      organization_id: activeOrg.orgId,
-      name: `${source.name} (cópia)`,
-      description: source.description,
-      model: source.model,
-      system_prompt: source.system_prompt,
-      kind: source.kind ?? "rag_bot",
-      priority: source.priority ?? 100,
-      is_active: false,
-      is_default: false,
-      config: source.config ?? {},
-      guardrails: source.guardrails ?? null,
-      active_kb_version_id: source.active_kb_version_id,
-      created_by: authUser.id,
-    })
-    .select("id")
-    .single();
-
-  if (error || !cloned) {
-    return { ok: false, error: "internal_error", message: error?.message };
+  if (!result.ok) {
+    if (result.error === "not_found") return { ok: false, error: "not_found" };
+    return { ok: false, error: "internal_error", message: result.message };
   }
+
+  const cloned = result.agent as { id: string };
 
   void audit({
     action: "ai_agent.duplicated",
@@ -264,7 +248,14 @@ export async function duplicateAgentAction(id: string): Promise<ActionResult<{ n
     organizationId: activeOrg.orgId,
     resourceType: "ai_agent",
     resourceId: cloned.id,
-    metadata: { source_agent_id: source.id },
+    metadata: {
+      source_agent_id: id,
+      // Mesma ação (`ai_agent.duplicated`) emitida de dois lugares: os dois metadata
+      // têm de ter a MESMA forma, senão quem lê o audit não sabe se o campo faltou
+      // porque não houve versão ou porque veio pelo outro caminho.
+      source_version_id: result.sourceVersionId,
+      source_version_copied: result.version !== null,
+    },
   });
 
   revalidatePath("/app/ai/agents");

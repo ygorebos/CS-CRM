@@ -8,7 +8,22 @@
 
 export type Actor =
   | { type: "user"; id: string; role?: string }
-  | { type: "ai_agent"; id: string; role: string; api_token_id?: string }
+  /**
+   * ⚠️ `id` E `agent_id` NÃO SÃO A MESMA COISA, e confundi-los custa a atividade.
+   *
+   * `id` é QUEM AGIU para efeito de correlação no audit — e cada runtime põe ali
+   * o que tem à mão: o runtime nativo põe o id do RUN (`ai_agent_runs`), o token
+   * MCP externo põe o id do run vindo do escopo `agent_run:` (ou o do próprio
+   * token), e o envio do motor chega a pôr a string literal `agent-engine`.
+   *
+   * `agent_id` é a linha em `ai_agents` — a ÚNICA coisa que pode ir para uma
+   * coluna com FK, como `crm_lead_activities.actor_agent_id`. Sem esta separação,
+   * um id de run viajava para lá e o INSERT morria na FK: a mutação acontecia, a
+   * timeline não registrava, e a perda só aparecia em `event_log`. Opcional
+   * porque nem todo caminho conhece o agente (token externo, por exemplo) — e
+   * "não sei qual agente" tem de virar atividade de sistema, nunca linha perdida.
+   */
+  | { type: "ai_agent"; id: string; role: string; api_token_id?: string; agent_id?: string }
   | { type: "webhook_source"; id: string };
 
 export interface HandlerCtx {

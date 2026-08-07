@@ -8,6 +8,8 @@
  * stored in container env). Plaintext-then-hash is NOT used in this version.
  * So WAHA_API_KEY in .env.local IS the hex hash.
  */
+import { classificarFalhaDeAlcance, explicarFalhaDeAlcance } from "@/lib/net/alcance";
+
 export class WahaClient {
   constructor(
     private readonly baseUrl: string,
@@ -68,6 +70,52 @@ export class WahaClient {
     if (!res.ok && ![404, 422, 409].includes(res.status)) {
       const body = await res.text().catch(() => "");
       throw new Error(`waha_stop_${res.status}: ${body.slice(0, 200)}`);
+    }
+  }
+
+  /**
+   * Logout: descarta as CREDENCIAIS pareadas da sessão (o conteúdo de
+   * `/app/.sessions`), mantendo a sessão registrada no WAHA.
+   *
+   * É o passo que falta para reconectar um número desvinculado pelo celular:
+   * `stop + start` sozinho reaproveita as credenciais em disco; se o WhatsApp já
+   * as revogou, o engine tenta reconectar com credencial morta e cai direto em
+   * FAILED — sem NUNCA passar por SCAN_QR_CODE, então a UI fica esperando um QR
+   * que nunca vem. Com logout antes do start, o pareamento recomeça do zero.
+   *
+   * Idempotente: 404 (sessão desconhecida) / 422 / 409 (já deslogada) contam
+   * como sucesso — quem chama quer o efeito, não a transição.
+   */
+  async logoutSession(name: string): Promise<void> {
+    const res = await fetch(
+      `${this.baseUrl}/api/sessions/${encodeURIComponent(name)}/logout`,
+      {
+        method: "POST",
+        headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      },
+    );
+    if (!res.ok && ![404, 422, 409].includes(res.status)) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`waha_logout_${res.status}: ${body.slice(0, 200)}`);
+    }
+  }
+
+  /**
+   * Remove a sessão do WAHA por completo (registro + credenciais em disco).
+   * Idempotente pelo mesmo motivo do logout: 404 = já não existe = sucesso.
+   */
+  async deleteSession(name: string): Promise<void> {
+    const res = await fetch(
+      `${this.baseUrl}/api/sessions/${encodeURIComponent(name)}`,
+      {
+        method: "DELETE",
+        headers: { "X-Api-Key": this.apiKey, "Content-Type": "application/json" },
+      },
+    );
+    if (!res.ok && ![404, 422, 409].includes(res.status)) {
+      const body = await res.text().catch(() => "");
+      throw new Error(`waha_delete_${res.status}: ${body.slice(0, 200)}`);
     }
   }
 
@@ -138,13 +186,27 @@ export class WahaClient {
 }
 
 /**
- * Traduz erros crus do WAHA (fetch failed, ECONNREFUSED, timeout) numa
- * mensagem clara para o usuário. Usado quando o container não está no ar.
+ * Traduz erros crus do WAHA numa mensagem que aponta ONDE mexer.
+ *
+ * A versão anterior mandava TODA falha de rede para a mesma frase — "confirme
+ * que o container está no ar" —, inclusive `ENOTFOUND`, que significa o oposto:
+ * o endereço configurado não existe, então não há container nenhum a conferir.
+ * Em produção isso mandou o dono reiniciar durante semanas um container que
+ * nunca havia caído. Reiniciar o que está de pé não conserta um endereço errado,
+ * e a frase errada é pior que nenhuma: ela encerra a investigação.
+ *
+ * Aceita o erro CRU, e não só a mensagem, porque o código real (`ENOTFOUND`,
+ * `ECONNREFUSED`) vive na cadeia de `cause` — `err.message` sozinho é sempre
+ * "fetch failed". Continua aceitando string para os pontos que já achataram o
+ * erro; lá a classificação cai no texto e degrada para "indeterminada", que é a
+ * verdade disponível.
  */
-export function wahaFriendlyError(msg: string): string {
-  if (/fetch failed|ECONNREFUSED|ENOTFOUND|und_err|network|timeout|socket|EAI_AGAIN/i.test(msg)) {
-    return "O serviço do WhatsApp (WAHA) não está respondendo. Confirme que o container está no ar e tente de novo.";
+export function wahaFriendlyError(erro: unknown): string {
+  const falha = classificarFalhaDeAlcance(erro);
+  if (falha !== "indeterminada") {
+    return explicarFalhaDeAlcance(falha, "o WhatsApp (WAHA)");
   }
+  const msg = erro instanceof Error ? erro.message : String(erro ?? "unknown");
   return `Falha na comunicação com o WhatsApp (WAHA): ${msg}`;
 }
 

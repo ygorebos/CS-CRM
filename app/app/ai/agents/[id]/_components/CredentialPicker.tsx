@@ -36,10 +36,10 @@ export function CredentialPicker({ provider, credentials, value, onChange, disab
 
   return (
     <div className="space-y-1">
-      <Label htmlFor={id}>Credencial</Label>
+      <Label htmlFor={id}>Chave de acesso</Label>
       <Select value={value || undefined} onValueChange={onChange} disabled={disabled}>
         <SelectTrigger id={id}>
-          <SelectValue placeholder="Selecione uma credencial" />
+          <SelectValue placeholder="Escolha uma chave" />
         </SelectTrigger>
         <SelectContent>
           {filtered.map((c) => {

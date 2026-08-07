@@ -24,6 +24,14 @@ export interface Conversation {
   tags: string[];
   metadata: Record<string, unknown>;
   snooze_until: string | null;
+  /**
+   * Até quando o atendimento automático está desligado nesta conversa
+   * (`'infinity'` depois de passar para uma pessoa). A tela precisa disto para
+   * saber SE existe algo a devolver — sem o campo, o botão de retomar não teria
+   * como aparecer só quando faz sentido, e a rota ficaria sem porta.
+   */
+  bot_silenced_until: string | null;
+  last_handoff_at: string | null;
   created_at: string;
   updated_at: string;
 }

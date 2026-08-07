@@ -2,10 +2,11 @@ import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { listSelectableChannels } from "@/lib/channels/selectable";
 import { createClient } from "@/lib/supabase/server";
 import type { CredentialRow } from "@/hooks/ai/useCredentials";
 
-import { AgentForm, type ChannelSessionLite } from "../[id]/_components/AgentForm";
+import { AgentForm } from "../[id]/_components/AgentForm";
 
 export const dynamic = "force-dynamic";
 
@@ -21,24 +22,15 @@ export default async function NewAgentPage() {
   }
 
   const supabase = await createClient();
-  const [credentialsRes, channelRes] = await Promise.all([
+  const [credentialsRes, channelSessions] = await Promise.all([
     supabase
       .from("ai_provider_credentials_safe")
       .select(CREDENTIAL_COLUMNS)
       .eq("organization_id", activeOrg.orgId),
-    supabase
-      .from("channel_sessions")
-      .select("id, display_name, status, phone_number, waha_session_name")
-      .eq("organization_id", activeOrg.orgId),
+    listSelectableChannels(supabase, activeOrg.orgId),
   ]);
 
   const credentials = (credentialsRes.data ?? []) as unknown as CredentialRow[];
-  const channelSessions: ChannelSessionLite[] = (channelRes.data ?? []).map((c) => ({
-    id: c.id as string,
-    display_name: (c.display_name as string | null) ?? (c.waha_session_name as string),
-    status: c.status as string,
-    phone_number: (c.phone_number as string | null) ?? null,
-  }));
 
   return (
     <div className="flex h-full flex-col gap-6 p-6">

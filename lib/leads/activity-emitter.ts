@@ -129,7 +129,13 @@ export function actorParaAtividade(actor: Actor): {
     return { kind: "user", userId: actor.id, agentId: null };
   }
   if (actor.type === "ai_agent") {
-    return { kind: "ai", userId: null, agentId: actor.id };
+    // ⚠️ `agent_id`, NUNCA `id`. `id` carrega o run (ou o token, ou a string
+    // 'agent-engine') dependendo de quem chamou, e `actor_agent_id` tem FK para
+    // `ai_agents`: mandar `id` para lá derrubava o INSERT e a atividade sumia em
+    // silêncio. Sem `agent_id` a linha entra como sistema — perde-se a AUTORIA,
+    // que é ruim, em vez da LINHA INTEIRA, que é pior. Ver `Actor` em
+    // lib/api/handlers/types.ts.
+    return { kind: "ai", userId: null, agentId: actor.agent_id ?? null };
   }
   // webhook_source e afins: o produto agiu, não uma pessoa nem um agente.
   return { kind: "system", userId: null, agentId: null };

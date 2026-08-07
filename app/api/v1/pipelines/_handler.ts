@@ -36,11 +36,24 @@ export async function listPipelinesHandler(
   ctx: HandlerCtx,
   q: ListPipelinesQuery = {},
 ): Promise<{ pipelines: PipelineRow[] }> {
+  // ⚠️ O FILTRO DE ORGANIZAÇÃO É O QUE SEPARA OS TENANTS AQUI, e ele faltava.
+  // O `ctx.organization_id` chegava e não era usado: quem tem UMA organização não
+  // notava (a RLS já limitava), mas o produto é multi-tenant e um usuário pode ser
+  // membro de várias — aí a policy autoriza TODAS e a lista vinha misturada, sem
+  // dizer de quem era cada funil. Medido em QA: o manager da `e2e-test-org`, com
+  // ela ativa, recebeu como primeiro item um funil da `e2e-segunda-org`; a tela de
+  // entradas automáticas oferece essa lista para escolher o destino dos contatos.
+  //
+  // A tool MCP já se defendia filtrando o RESULTADO em JS (`lib/mcp/tools/pipelines.ts`)
+  // — o remendo estava no chamador, e o outro chamador não o tinha. Filtrar aqui
+  // é a correção na origem; a defesa em profundidade da tool fica redundante e
+  // inofensiva, que é como defesa em profundidade deve ficar.
   let query = supabase
     .from("crm_pipelines")
     .select(
       "id, organization_id, name, slug, description, is_default, is_archived, position, vocabulary, settings, created_at, updated_at",
     )
+    .eq("organization_id", ctx.organization_id)
     .order("position", { ascending: true });
 
   if (!q.include_archived) {

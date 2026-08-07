@@ -19,6 +19,8 @@ import { sendEmail } from "@/lib/email/resend";
 import { inviteOnboardingSchema } from "@/lib/schemas/onboarding";
 import { requireOnboardingCtx, patchOnboardingState, OnboardingError } from "./_shared";
 
+type PapelHumano = "viewer" | "agent" | "manager" | "admin";
+
 export type SendInvitesResult =
   | {
       ok: true;
@@ -31,7 +33,9 @@ export type SendInvitesResult =
   | { ok: false; error: "auth_required" | "no_active_org" | "invalid_input"; details?: unknown };
 
 interface InvitePayload {
-  invitations: { email: string; role: "viewer" | "agent" | "manager" | "admin" }[];
+  // Convite é para PESSOA: só papel humano. `ai_operator` não entra aqui de
+  // propósito — é papel de token de agente, ninguém o recebe por e-mail.
+  invitations: { email: string; role: PapelHumano }[];
   skip?: boolean;
 }
 

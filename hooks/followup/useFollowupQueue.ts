@@ -83,3 +83,33 @@ export function useCancelFollowupEnrollment() {
     },
   });
 }
+
+/**
+ * Desmarcar a PROMESSA — o retorno avulso que o agente combinou.
+ *
+ * Mutação separada da de enrollment porque são duas coisas diferentes no banco
+ * e no significado: uma encerra a caminhada num fluxo publicado, a outra desfaz
+ * uma promessa que o agente fez numa conversa. A fila mostra as duas juntas
+ * (é o que o operador quer ver), mas unificar o comando faria um cancelamento
+ * atingir a linha errada em silêncio.
+ */
+export function useCancelFollowupPromise() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationKey: ["followup", "promises", "cancel"],
+    mutationFn: async (promiseId: string) => {
+      const res = await apiClient.post<{ data: { id: string; status: string } }>(
+        `/api/v1/ai/followups/promises/${promiseId}/cancel`,
+        {},
+      );
+      return res.data;
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["followup", "queue"] });
+      toast.success("Retorno cancelado.");
+    },
+    onError: (err) => {
+      showApiError(err);
+    },
+  });
+}

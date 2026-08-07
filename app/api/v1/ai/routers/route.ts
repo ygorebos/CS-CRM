@@ -14,6 +14,7 @@ import { z } from "zod";
 import { ok, fail } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 export const dynamic = "force-dynamic";
@@ -94,12 +95,28 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const admin = createAdminClient();
 
-  const { data: session } = await admin
-    .from("channel_sessions")
-    .select("id")
-    .eq("id", input.channel_session_id)
-    .eq("organization_id", org.orgId)
-    .maybeSingle();
+  // Arquivado não é destino válido — a linha só sobrevive por causa das FKs.
+  //
+  // Tolerante à coluna ausente, e o erro NÃO vira 404. Esta consulta produziu o
+  // 404 mais enganoso do produto: num banco sem a migration 0106 o PostgREST
+  // devolve 42703, `data` vem null, e descartar o `error` transformava "a
+  // consulta falhou" em "esse número não é seu" — sobre um número WORKING que a
+  // tela ao lado listava. O usuário só podia concluir que o CRM tinha perdido o
+  // canal dele. Falhar aberto na informação: se não deu para verificar, dizemos
+  // que não deu, em vez de afirmar a ausência (ver lib/channels/archived).
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select("id")
+      .eq("id", input.channel_session_id)
+      .eq("organization_id", org.orgId);
+  const { data: session, error: sessionErr } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null).maybeSingle(),
+    () => base().maybeSingle(),
+  );
+  if (sessionErr) {
+    return fail("internal_error", "Erro ao verificar o número de WhatsApp.", 500, { requestId });
+  }
   if (!session) {
     return fail("channel_session_not_found", "Número de WhatsApp não encontrado nesta organização.", 404, {
       requestId,

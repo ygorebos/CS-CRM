@@ -40,6 +40,7 @@ import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 
 import { RISK_COLD_HOURS } from "@/lib/leads/risk-radar";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 import {
   CREDS,
   EVIDENCE,
@@ -52,12 +53,7 @@ import {
   shotPage,
 } from "./qa-helpers";
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const envVars: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) envVars[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const envVars = carregarEnvLocal();
 const admin = createClient(envVars.NEXT_PUBLIC_SUPABASE_URL!, envVars.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
 });

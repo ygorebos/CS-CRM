@@ -23,6 +23,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "../archived";
 import { phoneLookupVariants } from "../phone-variants";
 import type { InboundMessageEvent } from "./webhook";
 
@@ -37,13 +38,21 @@ export type IngestOutcome =
 /**
  * Sessão dona do número que RECEBEU. Amarra a mensagem ao tenant certo — nunca
  * confiamos no corpo para escolher organização (regra dura de tenancy).
+ *
+ * Sessão ARQUIVADA não é dona de nada: o usuário excluiu o canal. Sem este
+ * filtro, o desfecho `no_session` (que o chamador loga e devolve no corpo) vira
+ * uma mensagem gravada num canal que já não existe para o operador.
  */
 async function sessionByPhoneNumberId(admin: Admin, phoneNumberId: string) {
-  const { data } = await admin
-    .from("channel_sessions")
-    .select("id, organization_id")
-    .eq("meta_phone_number_id", phoneNumberId)
-    .maybeSingle();
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select("id, organization_id")
+      .eq("meta_phone_number_id", phoneNumberId);
+  const { data } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null).maybeSingle(),
+    () => base().maybeSingle(),
+  );
   return data;
 }
 

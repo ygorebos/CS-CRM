@@ -41,6 +41,7 @@ import {
   type RouterDetailState,
   type RouterMemberInput,
 } from "@/hooks/ai/useRouters";
+import type { ClassifierModelOption } from "@/lib/ai/classifier-models";
 import type { ChannelSessionLite } from "../../agents/[id]/_components/AgentForm";
 
 interface AgentLite {
@@ -53,6 +54,8 @@ interface Props {
   initialState: RouterDetailState;
   agents: AgentLite[];
   channelSessions: ChannelSessionLite[];
+  /** Só os modelos que esta organização consegue usar — ver lib/ai/classifier-models. */
+  classifierModels: ClassifierModelOption[];
 }
 
 interface DraftMember extends RouterMemberInput {
@@ -60,12 +63,30 @@ interface DraftMember extends RouterMemberInput {
 }
 
 const NONE = "__none__";
+/** "deixa o sistema escolher" — grava null nos dois campos e volta ao padrão. */
+const AUTO = "__auto__";
+
+/**
+ * A chave do seletor carrega provedor E modelo (`provider::model_id`) porque os
+ * dois precisam ser gravados juntos: `resolveOrgLlmConfig` decide o provedor pela
+ * config da ORGANIZAÇÃO, então um id de modelo salvo sozinho viaja para o
+ * provedor errado e a classificação falha em toda mensagem.
+ */
+function classifierKeyFrom(config: Record<string, unknown> | null | undefined): string {
+  const cfg = config ?? {};
+  const model = cfg["classifier_model"];
+  const provider = cfg["classifier_provider"];
+  if (typeof model !== "string" || model.trim() === "") return AUTO;
+  if (typeof provider !== "string" || provider.trim() === "") return AUTO;
+  return `${provider}::${model}`;
+}
 
 export function RouterEditorClient({
   routerId,
   initialState,
   agents,
   channelSessions,
+  classifierModels,
 }: Props) {
   const nextRouter = useNextRouter();
   const canManage = usePermission("ai.routers.manage");
@@ -79,6 +100,9 @@ export function RouterEditorClient({
   const [name, setName] = React.useState(router.name);
   const [isActive, setIsActive] = React.useState(router.is_active);
   const [fallbackAgentId, setFallbackAgentId] = React.useState(router.fallback_agent_id ?? "");
+  // Uma chave só para os dois campos: escolher modelo sem levar o provedor junto
+  // manda o id para o provedor da ORG, e a classificação falha sempre.
+  const [classifier, setClassifier] = React.useState(() => classifierKeyFrom(router.config));
   const [draftMembers, setDraftMembers] = React.useState<DraftMember[]>(() =>
     members.map((m) => ({ ...m, key: m.id })),
   );
@@ -95,6 +119,7 @@ export function RouterEditorClient({
       name: router.name,
       isActive: router.is_active,
       fallbackAgentId: router.fallback_agent_id ?? "",
+      classifier: classifierKeyFrom(router.config),
       members: members.map(({ agent_id, intent_name, intent_description, examples }) => ({
         agent_id,
         intent_name,
@@ -116,6 +141,7 @@ export function RouterEditorClient({
     name !== baseline.name ||
     isActive !== baseline.isActive ||
     fallbackAgentId !== baseline.fallbackAgentId ||
+    classifier !== baseline.classifier ||
     JSON.stringify(currentMembers) !== JSON.stringify(baseline.members);
 
   const memberErrors = draftMembers.map((m) => {
@@ -164,11 +190,23 @@ export function RouterEditorClient({
       return;
     }
     try {
-      if (name !== baseline.name || isActive !== baseline.isActive || fallbackAgentId !== baseline.fallbackAgentId) {
+      if (
+        name !== baseline.name ||
+        isActive !== baseline.isActive ||
+        fallbackAgentId !== baseline.fallbackAgentId ||
+        classifier !== baseline.classifier
+      ) {
+        const [provider, modelId] = classifier.split("::");
         await updateRouter.mutateAsync({
           name,
           is_active: isActive,
           fallback_agent_id: fallbackAgentId || null,
+          // O PATCH mescla `config` com a existente, então mandar só estes dois
+          // campos preserva sticky/min_confidence.
+          config:
+            classifier === AUTO
+              ? { classifier_model: null, classifier_provider: null }
+              : { classifier_model: modelId, classifier_provider: provider },
         });
       }
       if (JSON.stringify(currentMembers) !== JSON.stringify(baseline.members)) {
@@ -252,6 +290,36 @@ export function RouterEditorClient({
               <Label htmlFor="router-active">
                 {isActive ? "Ativo — está roteando as conversas deste número" : "Inativo — não roteia nada"}
               </Label>
+            </div>
+          </Card>
+
+          <Card className="space-y-3 p-4">
+            <h3 className="text-sm font-medium">Modelo que identifica a intenção</h3>
+            <div className="space-y-1">
+              <Label htmlFor="router-classifier">Modelo do classificador</Label>
+              <Select
+                value={classifier}
+                onValueChange={setClassifier}
+                disabled={!canManage || classifierModels.length === 0}
+              >
+                <SelectTrigger id="router-classifier">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={AUTO}>Automático — usa o provedor da organização</SelectItem>
+                  {classifierModels.map((m) => (
+                    <SelectItem key={`${m.provider}::${m.model_id}`} value={`${m.provider}::${m.model_id}`}>
+                      {m.display_name} · {m.provider}
+                      {m.origem === "plataforma" ? " (chave desta instalação)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                {classifierModels.length === 0
+                  ? "Nenhuma chave de IA utilizável nesta organização — cadastre uma em Agentes IA › Credenciais para poder escolher o modelo."
+                  : "Só aparecem modelos de provedores com chave cadastrada aqui. Se a conta do provedor estiver sem crédito, a identificação falha e tudo cai no fallback."}
+              </p>
             </div>
           </Card>
 

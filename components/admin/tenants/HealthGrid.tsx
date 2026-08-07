@@ -54,9 +54,9 @@ export function HealthGrid({ health }: HealthGridProps) {
   const { waha, nuvemshop, ai, audit } = health;
 
   // WAHA card
-  const wahaConnected = waha.sessions.filter(
-    (s) => s.status === "WORKING" || s.status === "CONNECTED",
-  ).length;
+  // Vocabulário real de channel_sessions.status: STARTING/SCAN_QR_CODE/WORKING/
+  // STOPPED/FAILED. "CONNECTED" nunca chegava aqui — o CHECK do schema o proíbe.
+  const wahaConnected = waha.sessions.filter((s) => s.status === "WORKING").length;
   const wahaPrimary =
     waha.sessions.length === 0
       ? "Sem sessões"

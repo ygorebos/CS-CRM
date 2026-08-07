@@ -19,6 +19,7 @@ import {
   knobsView,
   effectiveKnobs,
   windowIsValid,
+  WARMUP_PULADO,
   type ChannelKnobsRow,
 } from "@/lib/ai/pacing-knobs";
 
@@ -39,6 +40,8 @@ export async function GET(): Promise<Response> {
       .from("channel_sessions")
       .select("id, waha_session_name, display_name, phone_number, status, daily_message_limit")
       .eq("organization_id", org.orgId)
+      // Canal arquivado foi excluído pelo usuário: não volta como opção aqui.
+      .is("archived_at", null)
       .order("created_at", { ascending: true }),
     admin
       .from("channel_knobs")
@@ -78,7 +81,16 @@ export async function PUT(req: NextRequest): Promise<Response> {
       details: parsed.error.flatten(),
     });
   }
-  const { channel_session_id, daily_message_limit, ...knobFields } = parsed.data;
+  const { channel_session_id, daily_message_limit, skip_warmup, ...camposDiretos } = parsed.data;
+  // `skip_warmup` é pergunta da TELA; a coluna guarda a forma que o motor lê.
+  // A tradução mora aqui, num lugar só: a tela não deveria precisar conhecer o
+  // formato dos degraus para dizer "este número já está aquecido".
+  const knobFields = {
+    ...camposDiretos,
+    ...(skip_warmup !== undefined
+      ? { warmup_daily_caps: skip_warmup ? [...WARMUP_PULADO] : null }
+      : {}),
+  };
 
   const admin = createAdminClient();
   const { data: session } = await admin
@@ -86,6 +98,11 @@ export async function PUT(req: NextRequest): Promise<Response> {
     .select("id")
     .eq("id", channel_session_id)
     .eq("organization_id", org.orgId)
+    // O MESMO filtro do GET, e não por simetria: sem ele a tela sumia com a
+    // conexão excluída e a rota continuava aceitando gravar knobs e teto diário
+    // nela — configuração viva pendurada num canal que não envia mais, à espera
+    // de confundir quem investigar o próximo envio que não saiu.
+    .is("archived_at", null)
     .maybeSingle();
   if (!session) {
     return fail("session_not_found", "Conexão não encontrada nesta organização.", 404, {

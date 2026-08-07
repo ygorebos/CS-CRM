@@ -28,13 +28,19 @@ interface Props {
   onChange: (modelId: string, ctx?: { contextWindow: number | null }) => void;
   disabled?: boolean;
   id?: string;
+  /**
+   * Texto do estado "nada escolhido". Existe porque nem todo uso deste seletor
+   * trata vazio como erro: no papel Operador, vazio SIGNIFICA "usa o mesmo
+   * modelo que conversa", e chamar isso de "Selecione um modelo" mentiria.
+   */
+  placeholder?: string;
 }
 
 interface ApiResponse {
   data: { models: ModelOption[] };
 }
 
-export function ModelPicker({ provider, value, onChange, disabled, id }: Props) {
+export function ModelPicker({ provider, value, onChange, disabled, id, placeholder }: Props) {
   const query = useQuery({
     queryKey: ["ai", "providers", provider, "models"],
     queryFn: async () => {
@@ -58,7 +64,7 @@ export function ModelPicker({ provider, value, onChange, disabled, id }: Props) 
         disabled={disabled || query.isLoading}
       >
         <SelectTrigger id={id}>
-          <SelectValue placeholder={query.isLoading ? "Carregando…" : "Selecione um modelo"} />
+          <SelectValue placeholder={query.isLoading ? "Carregando…" : (placeholder ?? "Selecione um modelo")} />
         </SelectTrigger>
         <SelectContent>
           {models.map((m) => (

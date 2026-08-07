@@ -105,6 +105,15 @@ Se mesmo assim aparecerem, aqui está o diagnóstico pronto:
    para "liberar" as portas: isso quebra as automações do painel dela. Se precisar rodar
    compose na mão nessa instalação, inclua sempre os dois arquivos:
    `docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml ...`
+   A detecção é automática quando o Traefik PUBLICA as portas (a coluna `Ports` do
+   `docker ps` é a prova). Quando ele roda em `--network host` (Hostinger), essa coluna sai
+   vazia para todo mundo e a eleição vira suspeita, não prova — aí o instalador confirma
+   com quem está na frente do terminal e, em `--yes`, para pedindo `REVERSE_PROXY=traefik`
+   no `.env`. Publicar o CRM atrás do proxy errado instala "com sucesso" um site mudo.
+   Nesse cenário a rede a apontar não é a do proxy (ele não está em rede nenhuma do
+   Docker): o kit cria e usa a bridge `<nome do projeto no compose>_proxy`, e tanto o
+   `install.sh` quanto o `update.sh` a recriam se ela sumir (`garantir_rede_do_proxy`, em
+   `_common.sh`).
 1. **Firewall te tranca fora do VPS** — o `ufw` padrão libera a porta **22**, mas alguns
    VPS da HostGator usam SSH em porta **custom** (ex.: `22022`). SEMPRE confira a porta do
    SSH atual (`ss -tlnp | grep sshd` ou o número que você usou pra conectar) e libere ELA

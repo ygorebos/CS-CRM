@@ -37,6 +37,7 @@ import * as path from "node:path";
 
 import { test, expect } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
+import { carregarEnvLocal } from "../../scripts/lib/env-de-teste";
 
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
 
@@ -54,12 +55,9 @@ function loadCreds(): Creds {
 }
 
 function envLocal(): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const line of fs.readFileSync(".env.local", "utf8").split("\n")) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m) out[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-  }
-  return out;
+  // `process.env` vence o `.env.local`, e a ausência do arquivo não é erro —
+  // ver scripts/lib/env-de-teste.ts.
+  return carregarEnvLocal();
 }
 
 /**

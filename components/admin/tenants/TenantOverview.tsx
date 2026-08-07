@@ -22,6 +22,35 @@ function formatDate(iso: string | null): string {
   }).format(new Date(iso));
 }
 
+// Vocabulário real de `tenant_integrations.status` (CHECK no schema). A tela
+// comparava com "active", que não existe nele: a integração saudável escrita
+// pelo callback do OAuth ('healthy') caía no ramo final e a tela imprimia a
+// string crua do banco.
+//
+// Exportados para o teste conferir a COBERTURA contra o CHECK do
+// `supabase/baseline.sql` (TenantOverview.test.tsx): status novo que uma
+// migration acrescente ao banco sem entrar nestes mapas volta a vazar cru para
+// a tela, e é isso que o teste reprova.
+export const NUVEMSHOP_LABEL: Record<string, string> = {
+  connecting: "Conectando",
+  healthy: "Conectado",
+  token_expired: "Token expirado",
+  scope_missing: "Permissão faltando",
+  disconnected: "Desconectado",
+  rate_limited: "Limitado (rate limit)",
+  error: "Com erro",
+};
+
+export const NUVEMSHOP_VARIANT: Record<string, "success" | "warning" | "error" | "neutral"> = {
+  connecting: "neutral",
+  healthy: "success",
+  token_expired: "error",
+  scope_missing: "error",
+  disconnected: "warning",
+  rate_limited: "warning",
+  error: "error",
+};
+
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-start justify-between gap-4 py-2 border-b last:border-0">
@@ -64,14 +93,14 @@ export function TenantOverview({ organization, counts, integrations }: TenantOve
   const plan = (organization.settings as { plan?: string } | null)?.plan ?? "—";
 
   const nuvemshopStatus = integrations.nuvemshop_status;
-  const nuvemshopLabel =
-    nuvemshopStatus === "active"
-      ? "Conectado"
-      : nuvemshopStatus === "disconnected"
-        ? "Desconectado"
-        : nuvemshopStatus
-          ? nuvemshopStatus
-          : "Não integrado";
+  // Valor fora do vocabulário conhecido continua aparecendo cru de propósito:
+  // esconder um estado que a tela não sabe nomear é pior que mostrá-lo.
+  const nuvemshopLabel = nuvemshopStatus
+    ? (NUVEMSHOP_LABEL[nuvemshopStatus] ?? nuvemshopStatus)
+    : "Não integrado";
+  const nuvemshopVariant = nuvemshopStatus
+    ? (NUVEMSHOP_VARIANT[nuvemshopStatus] ?? "warning")
+    : "neutral";
 
   return (
     <div className="space-y-6">
@@ -116,17 +145,7 @@ export function TenantOverview({ organization, counts, integrations }: TenantOve
             <InfoRow
               label="Nuvemshop"
               value={
-                <Badge
-                  variant={
-                    nuvemshopStatus === "active"
-                      ? "success"
-                      : nuvemshopStatus
-                        ? "warning"
-                        : "neutral"
-                  }
-                >
-                  {nuvemshopLabel}
-                </Badge>
+                <Badge variant={nuvemshopVariant}>{nuvemshopLabel}</Badge>
               }
             />
             {integrations.nuvemshop_connected_at && (

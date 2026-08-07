@@ -90,7 +90,7 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - Mídia: subir pro Supabase Storage primeiro, passar URL ao WAHA (não inline base64)
 - Multi-device: assinar `message.any` (não só `message`); tratar `fromMe=true` sem duplicar
 - Grupos: SKIP CRM binding se `chatId.endsWith('@g.us')`. Sender é `p.author`, não `p.from`
-- Cron `recover-stuck-messages`: marca `status='sending'` há >5min como `failed`
+- Cron `recover-stuck-messages` (`app/api/v1/cron/recover-stuck-messages/route.ts`, agendado no `scheduler` do `docker-compose.prod.yml`): marca `status='sending'` há >5min como `failed` **e abre aviso na Central** (`agent_inbox_items` kind `message_send_stuck`). Não toca em `queued`: esse estado tem dono (o agent-engine reagenda por `SEND_QUEUED_RETRY_MS`), e falhá-lo perderia mensagem que ia sair. Não reenvia — envio em dobro é pior que não-envio
 
 ### Doutrina DIRC (antes de adicionar campo)
 - **D**uplicar — vive aqui mesmo?
@@ -151,6 +151,32 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 | `lib/supabase/{browser,server,admin}.ts` | Clients canônicos |
 | `app/api/v1/health/route.ts` | Health check (Supabase + Redis + WAHA) |
 | `supabase/migrations/` | Schema versionado |
+| `docs/runbooks/deploy.md` | **Deploy em produção — leia ANTES de mexer na VPS** |
+
+---
+
+## Deploy em produção (NÃO NEGOCIÁVEL)
+
+**Numa VPS que já tem proxy reverso próprio (Hostinger, Coolify, Dokploy…), todo
+`up -d` leva os DOIS arquivos de compose:**
+
+```bash
+docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml --env-file .env up -d app
+```
+
+Omitir `-f docker-compose.traefik.yml` recria o contêiner sem as labels de
+roteamento; o Traefik da hospedagem deixa de enxergá-lo e **o domínio inteiro
+responde `404 page not found`** — com o contêiner `healthy`, porque o
+healthcheck é um probe TCP interno e não sabe nada de roteamento.
+
+Depois de qualquer deploy, confirme que o domínio responde **307** (redireciona
+pro login) e não 404. Verificações e o caso de build local em
+`docs/runbooks/deploy.md`.
+
+O caminho normal **não constrói nada na VPS**: commit → push → PR → merge na
+`main` → o CI publica no GHCR → a VPS puxa. Imagem construída na VPS é exceção
+de emergência e é dívida: existe só naquele disco e qualquer `up -d` sem
+`APP_PULL_POLICY=never` a substitui em silêncio.
 
 ---
 
@@ -188,7 +214,7 @@ Checks **obrigatórios** na branch protection da `main` (verificado na configura
 
 Check **não-obrigatório** (roda, mas não segura merge):
 
-- **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **10 das 20 specs** Playwright (`smoke`, `auth`, `error-pages`, `password-recovery`, `signup-journey`, `rbac-roles`, `inbox-scope`, `reset-password-mfa`, `degradacao-silenciosa`, `vps-webhook-outbound-ssrf`). As outras 10 dependem de serviço externo (WAHA, Redis, Resend, Nuvemshop) e seguem sem gate (issue #63) — inclusive a `vps-fresh-onboarding`, que é P0.
+- **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **28 das 32 specs** Playwright. As 4 de fora: `followup-journey` e `webhooks` (precisam de WAHA), `vps-fresh-onboarding` (WAHA + Redis + Resend + Nuvemshop — é a P0 da doutrina de QA Visual) e `capacidades-do-agente`, que está fora porque **reprova de verdade**: ligar o pacote "Atender" enche o teto de 20 capacidades e a UI desabilita o checkbox da capacidade crítica que o próprio desenho manda marcar à mão. O `e2e` **ainda não é obrigatório** — o conjunto de specs mudou em 2026-08-05, então as execuções verdes anteriores eram de outro conjunto e não servem de prova de estabilidade deste (issue #63).
 
 Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webhooks ou automações: rode `pnpm test:db` **localmente** antes de abrir PR. É o único caminho que exercita o `baseline.sql` que o self-hoster realmente aplica.
 
@@ -243,6 +269,14 @@ Processo padrão (siga sempre):
 6. **Reflita no `supabase/baseline.sql` (OBRIGATÓRIO — é o que o kit self-host aplica).** O baseline é um dump `--schema-only` + um **apêndice idempotente** no fim do arquivo (blocos rotulados `-- ---- <coisa> (migration NNNN) ----`). O kit HostGator aplica **só o baseline.sql**, tanto no `install.sh` (banco novo, `ON_ERROR_STOP=1`) quanto no `update.sh` (re-aplica em banco existente, **sem** `ON_ERROR_STOP`). Então toda mudança de schema pós-snapshot DEVE ser acrescentada ao apêndice, **idempotente e auto-curativa**: `add column if not exists`, `create ... if not exists`, `create or replace function`, e — se a mudança adiciona constraint — **deduplicar/corrigir os dados ANTES** de criar a constraint (senão o `update.sh` de um clone bugado quebra). Sem isto, clones não recebem a mudança (ou quebram ao atualizar). Migração adicionada só em `migrations/` mas não no baseline **não chega aos self-hosters**.
 7. **Aplique e prove**: aplique via `mcp__plugin_supabase_supabase__apply_migration` (ou `supabase db push`), capture o estado ANTES/DEPOIS e prove invariantes (ex.: contagem de linhas que não pode mudar). Se mexeu em contrato, regenere `lib/database.types.ts`. Para mudanças de schema no kit, valide o baseline num Postgres descartável (`pgvector/pgvector:pg17` + extensões) aplicando `install` (fresh, `ON_ERROR_STOP=1`) e `update` (re-aplicar, sem a flag) — ambos têm que passar.
 8. **Backfill de dados quebrados existentes**: constraint nova falha se os dados atuais a violam — a migration (e o apêndice do baseline) deve deduplicar/corrigir ANTES de criar a constraint.
+9. **Função nova em `public` nasce EXPOSTA — revogue as DUAS origens.** Toda `create function` no schema `public` termina com:
+
+   ```sql
+   revoke execute on function public.fn_x(...) from public, anon;
+   grant  execute on function public.fn_x(...) to <só quem precisa>;
+   ```
+
+   São duas origens distintas de `EXECUTE`, e tratar só uma deixa a função exposta com o gate verde: **(A)** o grant direto a `anon` do `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon` do baseline, que vale para toda função criada depois dele — isto é, para todo apêndice novo — e que `revoke from public` **não** remove; **(B)** o grant a `PUBLIC` que o Postgres dá a qualquer função ao criá-la, que `revoke from anon` **não** remove. Sem os dois, o PostgREST expõe a função como RPC alcançável pela anon key, que vai para o browser. Vigiado por `tests/invariants/hardening-definer-varredura.test.ts`, que varre todas as `security definer` de `public` (issue #128 — a versão anterior checava uma lista fixa de 6, e 8 de 25 estavam expostas).
 
 **Resumo do fluxo de uma mudança de schema:** arquivo em `migrations/` (fonte da verdade p/ Supabase CLI) **+** apêndice idempotente no `baseline.sql` (p/ o kit self-host) **+** linha no MANIFEST. Os dois artefatos de schema andam juntos. Nunca edite migrations já aplicadas — corrija com uma "forward-fix" nova (e mais um apêndice no baseline).
 

@@ -66,11 +66,13 @@ mudança toca schema, RLS ou UI, `gov:verify` verde **não** é prova — rode `
 efêmero pg17). `.github/workflows/perf.yml`: `build-and-size` = `pnpm build`.
 **Os três são checks obrigatórios** na branch protection da `main`.
 
-`.github/workflows/e2e.yml` roda **10 das 20 specs** Playwright (`smoke`, `auth`,
-`error-pages`) contra um Supabase local de verdade com o `baseline.sql` aplicado — o mesmo
-banco que o self-hoster tem. **Não é obrigatório ainda** (falta dado de estabilidade) e as
-outras 16 continuam sem gate: se você mexeu em UI ou fluxo de usuário fora desse
-subconjunto, a prova é sua.
+`.github/workflows/e2e.yml` roda **28 das 32 specs** Playwright contra um Supabase local de
+verdade com o `baseline.sql` aplicado — o mesmo banco que o self-hoster tem. **Não é
+obrigatório ainda** (o conjunto de specs acabou de mudar, então execuções verdes anteriores
+eram de outro conjunto e não provam a estabilidade deste). As 4 de fora: `followup-journey` e
+`webhooks` (precisam de WAHA), `vps-fresh-onboarding` (WAHA + Redis + Resend + Nuvemshop; é a
+P0 da doutrina de QA) e `capacidades-do-agente`, que está fora porque REPROVA de verdade — ver
+o summary do job. Se você mexeu em UI fora desse subconjunto, a prova é sua.
 
 ## Padrões de código (observados no repo, não inventados)
 
@@ -94,6 +96,13 @@ subconjunto, a prova é sua.
 - **`lib/auth/public-paths.ts`** — adicionar path aqui remove a checagem de auth de borda.
   Só com guard próprio dentro da rota.
 - **`.env*`** — não abra, não copie valor, não logue. Só `.env.example` é template.
+- **`docker-compose.traefik.yml`** — numa VPS que já tem proxy reverso próprio
+  (Hostinger, Coolify, Dokploy…), é o único lugar que dá ao contêiner `app` as labels
+  de roteamento. Todo `up -d` leva os **dois** arquivos de compose:
+  `docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml --env-file .env up -d app`.
+  Esquecer o segundo `-f` recria o contêiner sem labels: o proxy deixa de enxergá-lo e o
+  domínio inteiro responde `404`, com o contêiner `healthy` — o healthcheck é um probe TCP
+  interno e não sabe nada de roteamento. Runbook: `docs/runbooks/deploy.md`.
 
 ## Arquivos GERADOS — não editar à mão
 
@@ -111,22 +120,27 @@ subconjunto, a prova é sua.
    como prova de UX (doutrina de QA Visual em `CLAUDE.md`).
 5. Mudou schema → migration versionada em `supabase/migrations/` **+** apêndice idempotente
    em `supabase/baseline.sql` **+** linha em `supabase/migrations/MANIFEST.md`. Os três juntos.
+6. Criou função em `public` → `revoke execute on function ... from public, anon;` e depois
+   `grant` só a quem precisa. São **duas** origens de `EXECUTE` e revogar uma só deixa a
+   função exposta como RPC alcançável pela anon key. Detalhe em `CLAUDE.md`, item 9 da
+   doutrina de Migrations.
 
 ## Testes existentes (CONFIRMADO)
 
 - **221** arquivos `*.test.ts(x)` unitários (rodam em `test:unit` e no CI)
-- **56** arquivos de invariante de banco em `tests/invariants/` — RLS/isolamento cross-tenant,
+- **67** arquivos de invariante de banco em `tests/invariants/` — RLS/isolamento cross-tenant,
   RBAC, governança (G1–G6). Excluídos do `test:unit` de propósito; rodam via `pnpm test:db`
   **e no job `invariants` do CI**.
-- **19** specs Playwright em `tests/e2e/`. **3 rodam no CI** (`smoke`, `auth`,
-  `error-pages`, via `e2e.yml`, não-obrigatório). As outras 16 — incluindo
-  `vps-fresh-onboarding` e `vps-webhook-outbound-ssrf` — ainda não: dependem de fixture
-  semeada ou de serviço externo. Ver issue #63.
+- **32** specs Playwright em `tests/e2e/`. **28 rodam no CI** (via `e2e.yml`,
+  não-obrigatório). As 4 de fora dependem de serviço externo (WAHA/Redis/Resend/Nuvemshop) —
+  incluindo `vps-fresh-onboarding` — ou reprovam legitimamente (`capacidades-do-agente`).
+  Ver issue #63.
 
 ## Limitações conhecidas (estado em 2026-07-29, contra `origin/main` @ 789dfa6)
 
-- **10 das 20 specs E2E seguem fora do CI.** Se você mexeu em UI ou fluxo de usuário fora
-  de `smoke`/`auth`/`error-pages`, a prova é sua — nenhum gate automático cobre.
+- **4 das 32 specs E2E seguem fora do CI**, e o `e2e` ainda não é check obrigatório: um PR
+  que o quebre entra na `main` assim mesmo. Se você mexeu em UI coberta só por essas 4, a
+  prova é sua.
 - Rate limit HTTP existe em **2** pontos do código (webhook de captação e dispatcher de IA);
   login, signup, aceite de convite, crons e MCP estão sem. Não há lockout por conta no login.
 - Fallback do rate limit é **em memória** — sem Upstash configurado o limite é por processo.

@@ -41,18 +41,13 @@
  * Run: E2E_PORT=3020 npx tsx tests/capture-wave-5-cenarios.ts
  */
 
-import * as fs from "node:fs";
 import pg from "pg";
 
 import { CREDS, carimbar } from "./qa-helpers";
 import { resolveBand, type ScoreBand } from "@/lib/kanban/score-band";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const envVars: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) envVars[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const envVars = carregarEnvLocal();
 const pool = new pg.Pool({ connectionString: envVars.SUPABASE_DB_URL });
 const ORG = CREDS.org_id as string;
 

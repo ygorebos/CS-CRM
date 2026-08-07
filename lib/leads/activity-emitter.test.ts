@@ -48,11 +48,29 @@ describe("actorParaAtividade", () => {
   });
 
   it("agente vira 'ai' com actor_agent_id", () => {
-    expect(actorParaAtividade({ type: "ai_agent", id: "ag-1", role: "agent" })).toEqual({
+    expect(actorParaAtividade({ type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" })).toEqual({
       kind: "ai",
       userId: null,
       agentId: "ag-1",
     });
+  });
+
+  /**
+   * ⚠️ ESTE É O CASO QUE CUSTOU A ATIVIDADE INTEIRA.
+   *
+   * O runtime nativo põe o id do RUN em `actor.id` (é o que correlaciona a
+   * chamada de tool com o turno no audit), e `actor_agent_id` tem FK para
+   * `ai_agents`. Enquanto o emissor lia `id`, todo write tool chamado pelo agente
+   * configurado na tela derrubava o INSERT na FK: a mutação acontecia, a timeline
+   * não registrava, e a perda só aparecia em `event_log`.
+   *
+   * A polaridade certa é perder a AUTORIA, não a LINHA: sem `agent_id`, entra
+   * como sistema.
+   */
+  it("id de RUN em `id` NÃO vira actor_agent_id — perde a autoria, não a linha", () => {
+    expect(
+      actorParaAtividade({ type: "ai_agent", id: "run-abc", role: "agent" }),
+    ).toEqual({ kind: "ai", userId: null, agentId: null });
   });
 
   it("webhook vira 'system' — o produto agiu, não uma pessoa", () => {
@@ -80,7 +98,7 @@ describe("emitLeadActivity", () => {
     const { client, inserts } = supabaseFake();
     await emitLeadActivity(client, {
       ...base,
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
       evidence: { run_ids: ["run-1"] },
     });
     expect(inserts[0]).toMatchObject({
@@ -96,7 +114,7 @@ describe("emitLeadActivity", () => {
     const { client, inserts } = supabaseFake();
     await emitLeadActivity(client, {
       ...base,
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
     });
     expect(inserts[0]).toMatchObject({
       actor_kind: "system",
@@ -109,7 +127,7 @@ describe("emitLeadActivity", () => {
     const { client, inserts } = supabaseFake();
     await emitLeadActivity(client, {
       ...base,
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
       evidence: { run_ids: [], trace_ids: [] },
     });
     expect(inserts[0]).toMatchObject({ actor_kind: "system", evidence: null });
@@ -119,7 +137,7 @@ describe("emitLeadActivity", () => {
     const { client, inserts } = supabaseFake();
     await emitLeadActivity(client, {
       ...base,
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
       evidence: { trace_ids: ["trace-1"] },
     });
     expect(inserts[0]).toMatchObject({ actor_kind: "ai" });
@@ -133,7 +151,7 @@ describe("emitLeadActivity", () => {
     const { client, inserts } = supabaseFake();
     await emitLeadActivity(client, {
       ...base,
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
       evidence: { llm_call_ids: ["call-1"] },
     });
     expect(inserts[0]).toMatchObject({
@@ -146,7 +164,7 @@ describe("emitLeadActivity", () => {
     const { client, inserts } = supabaseFake();
     await emitLeadActivity(client, {
       ...base,
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
       evidence: { llm_call_ids: [] },
     });
     expect(inserts[0]).toMatchObject({ actor_kind: "system", evidence: null });
@@ -165,7 +183,7 @@ describe("emitLeadActivity", () => {
     await emitLeadActivity(client, {
       ...base,
       sourceId: "lead-1",
-      actor: { type: "ai_agent", id: "ag-1", role: "agent" },
+      actor: { type: "ai_agent", id: "ag-1", agent_id: "ag-1", role: "agent" },
       evidence: { run_ids: ["run-1"] },
     });
     expect(inserts[0]!.source_id).toBe("lead-1");

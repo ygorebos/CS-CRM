@@ -3,15 +3,9 @@
  * Run: npx tsx scripts/create-test-user.ts <email> [password]
  */
 import { createClient } from "@supabase/supabase-js";
-import * as fs from "node:fs";
-import * as path from "node:path";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const envFile = fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
-const env: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const env = carregarEnvLocal();
 
 const EMAIL = process.argv[2] ?? "teste@gmail.com";
 const PASSWORD = process.argv[3] ?? "E2E!Test1234";

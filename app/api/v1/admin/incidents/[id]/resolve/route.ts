@@ -111,5 +111,5 @@ export async function POST(
     },
   });
 
-  return ok({ data: { id, status: "resolved" } }, { requestId });
+  return ok({ id, status: "resolved" }, { requestId });
 }

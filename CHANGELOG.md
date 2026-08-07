@@ -8,6 +8,55 @@ Se você roda o DeskcommCRM numa VPS, **leia a seção da versão para a qual es
 
 ## [Não lançado]
 
+## [1.2.0] — 2026-08-06
+
+Versão grande: 122 correções e 62 novidades desde a 1.1.0. O tema é o agente de IA deixar de
+ser um respondedor e virar parte da operação — com papel próprio, capacidades declaradas e
+lugar na tela —, e o sistema parar de mentir quando algo dá errado.
+
+### Adicionado
+
+- **O agente publicado ganha papel próprio**, entre atendente e gerente: ele assume o lead,
+  devolve para uma pessoa quando precisa, e a volta aparece na linha do tempo em vez de sumir.
+- **Roteador de intenção por número.** Um WhatsApp só passa a atender vários assuntos: o
+  roteador entende o que o cliente quer e entrega para o agente certo.
+- **Fila de leads por atendente, com rodízio.** A distribuição deixa de ser combinada por fora
+  e vira porta na tela.
+- **Capacidades do agente.** Você escolhe o que ele pode fazer, vê quantas vezes usou cada uma,
+  e ele avisa quando falta uma capacidade em vez de falhar calado.
+- **Catálogo de modelos atualizado** nos três provedores — quem instala não escolhe mais entre
+  modelos de duas gerações atrás, pagando mais caro por pior.
+- **Aviso de mensagem presa.** Uma tarefa automática detecta mensagem que ficou "enviando" e
+  abre um aviso na Central, em vez de deixar o cliente sem resposta em silêncio.
+
+### Corrigido
+
+- **Duas partes do sistema respondiam à mesma mensagem do cliente.** Agora há um dono só.
+- **"O WhatsApp está fora do ar" quando o serviço estava de pé.** Toda falha de rede caía na
+  mesma frase, mandando reiniciar um container que nunca havia caído. Agora a mensagem
+  distingue endereço errado de serviço parado e diz onde mexer.
+- **O roteador recusava um número que existia**, com a mensagem "não encontrado nesta
+  organização", quando na verdade a consulta é que havia falhado.
+- **A tela de funis misturava organizações** do mesmo usuário.
+- **Excluir um canal** apagava o roteador junto, sem avisar, e deixava a Meta ainda entregando
+  mensagens. Reconectar dizia "conectado" com a linha ainda arquivada.
+- **Erro ao publicar o agente no onboarding criava um agente novo a cada clique.**
+- **O custo de IA sem agente dono sumia da auditoria** — as telas de consumo mostravam zero
+  numa instalação com tráfego real e provedor pago.
+
+### Segurança
+
+- **8 de 25 funções internas do banco estavam executáveis pela chave pública** que vai para o
+  navegador, incluindo uma que escreve recebendo a organização por parâmetro, sem checar se
+  você pertence a ela. Todas fechadas, com uma varredura que reprova a próxima.
+
+**⚠️ Requer atenção**
+
+Esta versão traz mudanças de banco (migrations 0100 a 0114). O `update.sh` aplica tudo sozinho
+e faz backup antes — você não precisa rodar nada à mão. Se a sua instalação está há muito tempo
+sem atualizar, é normal a etapa do banco demorar mais e imprimir vários avisos de "já existe":
+eles são esperados e o script só destaca o que não for.
+
 ## [1.1.0] — 2026-07-30
 
 ### Adicionado

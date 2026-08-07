@@ -22,12 +22,12 @@
  * Run: E2E_PORT=3020 npx tsx tests/sonda-ambiguo-na-caixa.ts
  */
 import { randomUUID } from "node:crypto";
-import * as fs from "node:fs";
 
 import { chromium } from "@playwright/test";
 import pg from "pg";
 
 import { BASE, CREDS, EVIDENCE, carimbar, login, shotPage } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
 const SUFIXO = carimbar([
   "lib/ai/agent-inbox-copy.ts",
@@ -36,12 +36,7 @@ const SUFIXO = carimbar([
   "app/app/ai/inbox/_components/AgentInboxList.tsx",
 ]);
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const env: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const env = carregarEnvLocal();
 
 const ORG = CREDS.org_id as string;
 const PIPELINE = (CREDS as { crm_vivo: { pipeline_id: string } }).crm_vivo.pipeline_id;

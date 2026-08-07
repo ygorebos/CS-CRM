@@ -1,5 +1,42 @@
-export type Role = "viewer" | "agent" | "manager" | "admin";
-export const ROLE_RANK: Record<Role, number> = { viewer: 1, agent: 2, manager: 3, admin: 4 };
+/**
+ * Papéis dentro do tenant.
+ *
+ * `ai_operator` é o papel do AGENTE PUBLICADO, e existe SÓ no escopo do token
+ * efêmero — nunca em `user_organizations`. Nenhuma pessoa o recebe, e o CHECK
+ * daquela tabela segue com os quatro papéis humanos de propósito: é isso que
+ * garante que ninguém ganhe autonomia de máquina por acidente de configuração.
+ *
+ * Ele senta ENTRE `agent` e `manager` porque descreve exatamente a faixa que
+ * faltava: capacidades que um atendente humano não tem (configurar a operação,
+ * mexer na régua de retorno) mas que o agente precisa para cumprir o invariante
+ * 4 da doutrina — nenhuma demanda sem próximo passo. Abrir essas capacidades
+ * para `agent` daria a uma PESSOA um poder que o produto não lhe dá pela tela;
+ * fechá-las em `manager` tira do agente o que ele existe para fazer.
+ *
+ * `fn_role_at_least` no banco NÃO conhece este papel, e está certo assim: ela
+ * consulta `fn_user_role_in_org`, que lê `user_organizations`. O agente não é
+ * usuário. A RLS segue intacta.
+ */
+export type Role = "viewer" | "agent" | "ai_operator" | "manager" | "admin";
+export const ROLE_RANK: Record<Role, number> = {
+  viewer: 1,
+  agent: 2,
+  ai_operator: 3,
+  manager: 4,
+  admin: 5,
+};
+
+/** Papéis que uma PESSOA pode ter. Espelha `user_organizations_role_check`. */
+export const PAPEIS_HUMANOS: ReadonlyArray<Role> = ["viewer", "agent", "manager", "admin"];
+
+/** Rótulo pt-BR para quem configura. `ai_operator` nunca aparece em seletor de time. */
+export const ROTULO_DO_PAPEL: Record<Role, string> = {
+  viewer: "Somente leitura",
+  agent: "Atendente",
+  ai_operator: "Assistente com autonomia de operação",
+  manager: "Gerente",
+  admin: "Administrador",
+};
 
 /**
  * Escopo de visualização de conversas por atendente (G4-01, spec 13 §3.5).

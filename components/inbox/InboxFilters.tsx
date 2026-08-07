@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useChannelSessions } from "@/hooks/channels/useChannelSessions";
+import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
 import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useConversationTagVocabulary } from "@/hooks/inbox/useConversationTags";
 import { useConversationCounts } from "@/hooks/inbox/useConversationCounts";
@@ -66,8 +66,16 @@ export function InboxFilters({ value, onChange }: Props) {
     mine: counts?.mine,
     all: counts?.all,
   };
+  // Filtrar por um número que saiu da lista (o operador acabou de excluir o
+  // canal) deixa o inbox mostrando um subconjunto — às vezes vazio — sem nada na
+  // tela dizendo que há filtro. O número some do dropdown junto com o canal, e o
+  // alternador inteiro sumiria com ele se sobrasse menos de dois.
+  const filtroForaDaLista =
+    value.channel_session_id != null &&
+    channels != null &&
+    !channels.some((c) => c.id === value.channel_session_id);
   // Alternador só aparece com 2+ números — com um só não há o que alternar.
-  const showChannelSwitch = (channels?.length ?? 0) >= 2;
+  const showChannelSwitch = (channels?.length ?? 0) >= 2 || filtroForaDaLista;
 
   // Debounce search input → propagate to parent.
   useEffect(() => {
@@ -110,9 +118,12 @@ export function InboxFilters({ value, onChange }: Props) {
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">Todos os números</SelectItem>
+            {filtroForaDaLista && value.channel_session_id != null && (
+              <SelectItem value={value.channel_session_id}>Número removido</SelectItem>
+            )}
             {channels?.map((c) => (
               <SelectItem key={c.id} value={c.id}>
-                {c.display_name || c.phone_number || c.waha_session_name}
+                {channelLabel(c)}
               </SelectItem>
             ))}
           </SelectContent>

@@ -82,7 +82,9 @@ export async function emitAgentActivityForContact(
     sourceModule: input.sourceModule,
     sourceId: input.sourceId ?? null,
     actor: input.agentId
-      ? { type: "ai_agent", id: input.agentId, role: "agent" }
+      ? // `agent_id` explícito: é ele que vai para a coluna com FK. Ver o ⚠️ de
+        // `Actor` em lib/api/handlers/types.ts.
+        { type: "ai_agent", id: input.agentId, agent_id: input.agentId, role: "agent" }
       : { type: "webhook_source", id: input.sourceModule },
     reason: input.reason,
     evidence: input.evidence ?? null,

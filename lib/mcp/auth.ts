@@ -39,7 +39,7 @@ export class McpAuthError extends Error {
   }
 }
 
-const VALID_ROLES = new Set<Role>(["viewer", "agent", "manager", "admin"]);
+const VALID_ROLES = new Set<Role>(["viewer", "agent", "ai_operator", "manager", "admin"]);
 
 function parseScopes(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];

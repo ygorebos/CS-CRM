@@ -1,13 +1,9 @@
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "fs";
-const env = fs.readFileSync(".env.local", "utf8");
-const urlMatch = env.match(/NEXT_PUBLIC_SUPABASE_URL=(.+)/);
-const keyMatch = env.match(/SUPABASE_SERVICE_ROLE_KEY=(.+)/);
-if (!urlMatch?.[1] || !keyMatch?.[1]) {
-  throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env.local");
-}
-const url = urlMatch[1].trim();
-const key = keyMatch[1].trim();
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
+const envEfetivo = carregarEnvLocal();
+const url = envEfetivo.NEXT_PUBLIC_SUPABASE_URL!.trim();
+const key = envEfetivo.SUPABASE_SERVICE_ROLE_KEY!.trim();
 const sb = createClient(url, key, { auth: { persistSession: false } });
 
 (async () => {

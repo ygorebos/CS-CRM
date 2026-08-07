@@ -77,11 +77,26 @@ const bodySchema = z.object({
  * o tenant escolheria etapas numa lista embaralhada. `position` não entra no
  * `select` porque o PostgREST ordena por coluna que não foi projetada.
  */
+/**
+ * A etapa como ESTA rota a lê: a régua do mapeamento mais a autoria da última
+ * mudança de configuração.
+ *
+ * ⚠️ A AUTORIA NÃO ENTRA EM `EtapaDoMapa`. Aquele tipo é o contrato do
+ * MAPEAMENTO (o que decide qual etapa representa qual passo do assistente), e
+ * `validarMapeamento`/`diffParaUpdates` trabalham em cima dele. Autoria é sobre
+ * quem mexeu, não sobre o que a etapa significa — misturar as duas coisas faria
+ * a regra do mapeamento carregar um campo que ela nunca lê.
+ */
+type EtapaComAutoria = EtapaDoMapa & {
+  last_change_actor_kind: string | null;
+  last_change_at: string | null;
+};
+
 async function lerFunil(
   supabase: Awaited<ReturnType<typeof createClient>>,
   orgId: string,
   pipelineId: string,
-): Promise<{ etapas: EtapaDoMapa[] } | null> {
+): Promise<{ etapas: EtapaComAutoria[] } | null> {
   const { data: pipeline, error: pipeErr } = await supabase
     .from("crm_pipelines")
     .select("id")
@@ -93,14 +108,17 @@ async function lerFunil(
 
   const { data, error } = await supabase
     .from("crm_stages")
-    .select("id, name, is_won, is_lost, agent_stage_hint")
+    // A autoria entra na MESMA leitura que a tela de etapas já faz. Uma segunda
+    // consulta só para ela seria um round-trip por render numa tela de
+    // configuração — e um caminho a mais para a lista e a autoria divergirem.
+    .select("id, name, is_won, is_lost, agent_stage_hint, last_change_actor_kind, last_change_at")
     .eq("organization_id", orgId)
     .eq("pipeline_id", pipelineId)
     .eq("is_archived", false)
     .order("position", { ascending: true });
   if (error) throw new Error(error.message);
 
-  return { etapas: (data ?? []) as unknown as EtapaDoMapa[] };
+  return { etapas: (data ?? []) as unknown as EtapaComAutoria[] };
 }
 
 /** Os sete passos sempre presentes: quem lê não precisa saber quais faltam. */
@@ -118,13 +136,15 @@ function mapaDeEtapas(etapas: EtapaDoMapa[]): Record<LeadStage, string | null> {
   return mapa;
 }
 
-function corpo(etapas: EtapaDoMapa[]) {
+function corpo(etapas: EtapaComAutoria[]) {
   return {
     etapas: etapas.map((e) => ({
       id: e.id,
       name: e.name,
       is_won: e.is_won,
       is_lost: e.is_lost,
+      last_change_actor_kind: e.last_change_actor_kind ?? null,
+      last_change_at: e.last_change_at ?? null,
     })),
     mapeamento: mapaDeEtapas(etapas),
   };

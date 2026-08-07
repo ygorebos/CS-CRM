@@ -8,6 +8,7 @@ import type { NextRequest } from "next/server";
 import { ok, fail, noContent } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { autoriaDaMudanca } from "@/lib/operacao/autoria";
 import { updateAutomationRuleSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -52,7 +53,14 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx): Promise<Response> 
 
   // Secrets de call_webhook nunca ficam em claro no jsonb (migration 0041);
   // secret_enc existente (round-trip do editor) passa intacto.
-  const patch: Record<string, unknown> = { ...parsed.data, updated_at: new Date().toISOString() };
+  // A autoria vai junto de TODA escrita, pelo mesmo helper que o agente usa: uma
+  // regra ligada é o estado mais perigoso do sistema, e a tela precisa dizer
+  // quem a ligou (migration 0101).
+  const patch: Record<string, unknown> = {
+    ...parsed.data,
+    updated_at: new Date().toISOString(),
+    ...autoriaDaMudanca({ type: "user", id: user.id, role: activeOrg.role }),
+  };
   if (parsed.data.actions !== undefined) {
     const safeActions = await encryptRuleActionSecrets(createAdminClient(), parsed.data.actions);
     if (safeActions === null) {

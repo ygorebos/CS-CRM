@@ -7,21 +7,33 @@
  * A garantia REAL de escopo (agent forçando ?filter=all não vaza) é da RLS —
  * provada em tests/invariants/gov-5b-inbox-scope-counts.test.ts (contagem sob a
  * role agent = escopo, não total da org). Aqui é a superfície de UI.
+ *
+ * O segundo bloco cobre o SELETOR DE NÚMERO, que ganhou comportamento quando o
+ * canal excluído sumiu da listagem: o alternador some com o penúltimo número, e
+ * some junto com ele o único controle capaz de desfazer um filtro que continua
+ * valendo — inbox filtrado, às vezes vazio, sem nada na tela dizendo por quê.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 import { InboxFilters, visibleInboxTabs, type InboxFiltersValue } from "@/components/inbox/InboxFilters";
+import type * as CanaisModule from "@/hooks/channels/useChannelSessions";
+import type { ChannelSession } from "@/hooks/channels/useChannelSessions";
 import type { ActiveOrg } from "@/lib/auth/types";
 
 const activeOrgRef: { current: ActiveOrg | null } = { current: null };
+/** `undefined` = listagem ainda carregando (ou que falhou) — não é "zero canais". */
+const canaisRef: { current: ChannelSession[] | undefined } = { current: [] };
 
 vi.mock("@/hooks/auth/AuthProvider", () => ({
   useAuth: () => ({ activeOrg: activeOrgRef.current }),
 }));
-vi.mock("@/hooks/channels/useChannelSessions", () => ({
-  useChannelSessions: () => ({ data: [] }),
-}));
+// Só a listagem é dublada: `channelLabel` do módulo real é o que resolve o rótulo
+// de cada opção do seletor, e é parte do que está sob teste aqui.
+vi.mock("@/hooks/channels/useChannelSessions", async (original) => {
+  const real = await original<typeof CanaisModule>();
+  return { ...real, useChannelSessions: () => ({ data: canaisRef.current }) };
+});
 vi.mock("@/hooks/inbox/useConversationTags", () => ({
   useConversationTagVocabulary: () => ({ data: [] }),
 }));
@@ -35,7 +47,29 @@ function setOrg(role: ActiveOrg["role"], visibility_mode: ActiveOrg["visibility_
   activeOrgRef.current = { orgId: "org-1", name: "Org", role, visibility_mode };
 }
 
-beforeEach(() => setOrg("agent", "own_and_unassigned"));
+function canal(over: Partial<ChannelSession> = {}): ChannelSession {
+  return {
+    id: "canal-1",
+    waha_session_name: "org_1111_aaa",
+    display_name: "Vendas",
+    phone_number: "5511999999999",
+    status: "WORKING",
+    status_reason: null,
+    last_health_check_at: null,
+    last_status_change_at: null,
+    daily_message_limit: 250,
+    is_warmup_complete: null,
+    created_at: "2026-08-01T00:00:00Z",
+    ...over,
+  };
+}
+
+const SELETOR = "Filtrar por número de WhatsApp";
+
+beforeEach(() => {
+  setOrg("agent", "own_and_unassigned");
+  canaisRef.current = [];
+});
 afterEach(cleanup);
 
 describe("visibleInboxTabs (lógica pura de visões)", () => {
@@ -84,5 +118,62 @@ describe("InboxFilters render — 3 visões + escopo", () => {
     expect(screen.getByRole("tab", { name: /Fila/ })).toHaveTextContent("3");
     expect(screen.getByRole("tab", { name: /Minhas/ })).toHaveTextContent("2");
     expect(screen.getByRole("tab", { name: /Todas/ })).toHaveTextContent("5");
+  });
+});
+
+describe("InboxFilters — seletor de número e o filtro órfão", () => {
+  it("um número só: não há o que alternar, o seletor não aparece", () => {
+    setOrg("manager", "all");
+    canaisRef.current = [canal()];
+    render(<InboxFilters value={VALUE} onChange={() => {}} />);
+    expect(screen.queryByLabelText(SELETOR)).not.toBeInTheDocument();
+  });
+
+  it("dois números: o seletor aparece com os dois", () => {
+    setOrg("manager", "all");
+    canaisRef.current = [canal(), canal({ id: "canal-2", display_name: "Suporte" })];
+    render(<InboxFilters value={VALUE} onChange={() => {}} />);
+    expect(screen.getByLabelText(SELETOR)).toBeInTheDocument();
+  });
+
+  /**
+   * ⭐ O caso que o canal excluído criou: sobrou UM número, o filtro aponta para
+   * o que sumiu. Pela regra dos "2+" o seletor sumiria levando junto o único
+   * jeito de voltar para "Todos os números" — e o inbox seguiria filtrado,
+   * possivelmente vazio, sem nada na tela explicando.
+   */
+  it("filtro aponta para número que saiu da lista: o seletor FICA e nomeia o número removido", () => {
+    setOrg("manager", "all");
+    canaisRef.current = [canal()];
+    render(
+      <InboxFilters value={{ ...VALUE, channel_session_id: "canal-excluido" }} onChange={() => {}} />,
+    );
+    const seletor = screen.getByLabelText(SELETOR);
+    expect(seletor).toBeInTheDocument();
+    expect(seletor).toHaveTextContent("Número removido");
+  });
+
+  it("filtro que casa com a lista: nada de 'Número removido'", () => {
+    setOrg("manager", "all");
+    canaisRef.current = [canal(), canal({ id: "canal-2", display_name: "Suporte" })];
+    render(<InboxFilters value={{ ...VALUE, channel_session_id: "canal-2" }} onChange={() => {}} />);
+    const seletor = screen.getByLabelText(SELETOR);
+    expect(seletor).toHaveTextContent("Suporte");
+    expect(seletor).not.toHaveTextContent("Número removido");
+  });
+
+  /**
+   * Listagem que ainda não chegou (ou que falhou) é `undefined`, não lista vazia.
+   * Chamar de "removido" um número que talvez esteja lá é a mesma família de
+   * mentira que a tela de conexões cometia ao renderizar "primeira instalação"
+   * quando a listagem falhava.
+   */
+  it("listagem ainda carregando: não afirma que o número foi removido", () => {
+    setOrg("manager", "all");
+    canaisRef.current = undefined;
+    render(
+      <InboxFilters value={{ ...VALUE, channel_session_id: "canal-1" }} onChange={() => {}} />,
+    );
+    expect(screen.queryByText("Número removido")).not.toBeInTheDocument();
   });
 });

@@ -25,7 +25,10 @@ const FILES_WITH_VERSION_COLUMNS = [
   "app/api/v1/ai/agents/route.ts",
   "app/api/v1/ai/agents/[id]/versions/route.ts",
   "app/api/v1/ai/agents/[id]/versions/[vid]/route.ts",
-  "app/api/v1/ai/agents/[id]/duplicate/route.ts",
+  // A cópia da rota /duplicate mudou de casa: a implementação agora é
+  // compartilhada com o botão "Duplicar" da lista, em lib/ai/agents/duplicate.ts.
+  // O arquivo vigiado é onde a lista mora, não onde ela morava.
+  "lib/ai/agents/duplicate.ts",
 ];
 
 /** Extrai o conteúdo da string atribuída a VERSION_COLUMNS. */

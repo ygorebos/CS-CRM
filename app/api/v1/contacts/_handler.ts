@@ -95,10 +95,26 @@ export async function listContactsHandler(
     .limit(q.limit + 1);
 
   if (q.search) {
-    const s = q.search.trim();
-    const digits = s.replace(/\D/g, "");
+    // ⚠️ `%` e `_` são curingas do LIKE, e `,`/`(`/`)` são delimitadores do DSL
+    // do `.or()` — um nome com vírgula ("Silva, Maria") injetaria uma condição
+    // extra na string do filtro. Mesmo escape de conversations/_handler.ts.
+    const s = q.search.trim().replace(/[%_]/g, (m) => `\\${m}`).replace(/[,()]/g, " ");
+    const digits = q.search.replace(/\D/g, "");
     const orParts = [
       `name.ilike.%${s}%`,
+      // ⚠️ `display_name` ESTAVA DE FORA, e é a coluna que a tela MOSTRA.
+      //
+      // Contato que entra pelo WhatsApp nasce só com `display_name` (o pushName);
+      // `name` fica nulo até alguém editar à mão. `resolveContactName` e o resto
+      // da UI preferem `display_name` — então a busca ignorava exatamente o nome
+      // que o usuário vê e digita. Medido nesta instalação: 15 de 33 contatos
+      // têm `display_name` e nenhum `name`.
+      //
+      // Achado por um turno de agente REAL (IA 360 · wave 2): pedido para marcar
+      // um retorno para "Cliente Retorno E2E", o modelo chamou esta busca, levou
+      // zero resultados para um contato que EXISTE, e desistiu — a demanda
+      // morreria por uma coluna faltando no OR.
+      `display_name.ilike.%${s}%`,
       `email.ilike.%${s}%`,
       `phone_number.ilike.%${s}%`,
     ];

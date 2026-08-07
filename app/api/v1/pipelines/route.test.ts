@@ -9,7 +9,7 @@ vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
 
-import { ORG_ID, PIPE, authOk, funilRow, makeDb } from "@/tests/helpers/stages-db-double";
+import { ORG_ID, OUTRA_ORG, PIPE, authOk, funilRow, makeDb } from "@/tests/helpers/stages-db-double";
 
 function reqPost(body: unknown) {
   return new NextRequest("http://localhost/api/v1/pipelines", {
@@ -175,5 +175,40 @@ describe("POST /api/v1/pipelines", () => {
       headers: { "content-type": "application/json" },
     });
     expect((await POST(req)).status).toBe(400);
+  });
+});
+
+/**
+ * ⭐ ISOLAMENTO ENTRE ORGANIZAÇÕES NA LISTAGEM DE FUNIS.
+ *
+ * Achado em QA de tela, não por leitura: o manager da `e2e-test-org`, com ela
+ * ativa, abriu a lista e recebeu como PRIMEIRO item um funil da segunda
+ * organização de que ele também é membro. A RLS autoriza as duas (ele é membro
+ * das duas); quem devia recortar para a org ATIVA era a rota, e o
+ * `ctx.organization_id` chegava ao handler sem ser usado.
+ *
+ * O caso só existe para quem tem mais de uma organização — por isso passou: os
+ * testes anteriores usavam um usuário de uma org só, e a RLS mascarava a falta
+ * do filtro. É o cenário do produto multi-tenant, não um canto.
+ */
+describe("GET /api/v1/pipelines — org ativa", () => {
+  it("não devolve funil de OUTRA organização do mesmo usuário", async () => {
+    authOk();
+    const db = makeDb({
+      pipelines: [
+        funilRow({ id: "p-minha", name: "Pedidos" }),
+        funilRow({ id: "p-alheia", name: "Funil da outra empresa", organization_id: OUTRA_ORG }),
+      ],
+    });
+    const { GET } = await import("./route");
+    const res = await GET();
+
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { data: Array<{ id: string; organization_id: string }> };
+    expect(body.data.map((p) => p.id)).toEqual(["p-minha"]);
+    // A asserção acima passaria com a lista vazia; esta separa "filtrou certo"
+    // de "não devolveu nada".
+    expect(body.data).toHaveLength(1);
+    expect(db.escritas).toEqual([]);
   });
 });

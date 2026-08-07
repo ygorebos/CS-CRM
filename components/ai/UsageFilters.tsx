@@ -79,7 +79,7 @@ export function UsageFilters({ agents, initial }: Props) {
   return (
     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <div className="space-y-1">
-        <Label className="text-xs text-muted-foreground">Agent</Label>
+        <Label className="text-xs text-muted-foreground">Agente</Label>
         <Select value={agentId} onValueChange={setAgentId}>
           <SelectTrigger>
             <SelectValue />
@@ -96,7 +96,7 @@ export function UsageFilters({ agents, initial }: Props) {
       </div>
 
       <div className="space-y-1">
-        <Label className="text-xs text-muted-foreground">Tipo de invocação</Label>
+        <Label className="text-xs text-muted-foreground">Tipo de uso</Label>
         <Select value={kind} onValueChange={setKind}>
           <SelectTrigger>
             <SelectValue />

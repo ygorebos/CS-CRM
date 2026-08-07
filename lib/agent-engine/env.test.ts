@@ -38,3 +38,22 @@ describe("loadEnv — vazio é ausente (contrato BYOK do README)", () => {
     expect(() => loadEnv(rest)).toThrowError(/SUPABASE_DB_URL/);
   });
 });
+
+/**
+ * A metade que NADA guardava. Medido: remover `OPENAI_API_KEY` deste schema não
+ * reprova nenhum teste E passa no `tsc` — o parâmetro de `llmEdgeConfigFromEnv`
+ * declara a chave como opcional, então um env sem ela é um tipo válido. O
+ * resultado seria o bug de origem voltando em silêncio: chave no `.env`, worker
+ * subindo, agente OpenAI morrendo com "org sem credencial LLM utilizável".
+ */
+describe("loadEnv — a chave da OpenAI existe no contrato do worker", () => {
+  it("OPENAI_API_KEY é reconhecida e chega ao env do worker", () => {
+    const env = loadEnv({ ...REQUIRED, OPENAI_API_KEY: "sk-proj-abc" });
+    expect(env.OPENAI_API_KEY).toBe("sk-proj-abc");
+  });
+
+  it("vazia continua sendo ausente — mesmo contrato BYOK das demais", () => {
+    const env = loadEnv({ ...REQUIRED, OPENAI_API_KEY: "" });
+    expect(env.OPENAI_API_KEY).toBeUndefined();
+  });
+});

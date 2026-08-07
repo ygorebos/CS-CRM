@@ -133,8 +133,9 @@ export async function GET(): Promise<NextResponse> {
   });
 
   return ok({
-    // `null` aqui não é "erro": é o estado de quem ainda não conectou o canal
-    // oficial, e a tela precisa distingui-lo de "conectado, porém sem template".
+    // `null` aqui não é "erro": é o estado de quem não tem canal oficial ATIVO —
+    // nunca conectou, ou conectou e excluiu —, e a tela precisa distingui-lo de
+    // "conectado, porém sem template".
     waba: sessao?.wabaId ?? null,
     templates,
   });

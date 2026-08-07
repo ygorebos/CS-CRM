@@ -15,6 +15,7 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { test, expect } from "@playwright/test";
 
 import { generateTotp, msUntilNextTotpWindow } from "./utils/totp";
+import { carregarEnvLocal } from "../../scripts/lib/env-de-teste";
 
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
 
@@ -25,12 +26,8 @@ interface Creds {
 }
 
 function readServiceEnv(): { url: string; serviceRole: string } {
-  const raw = fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
-  const env: Record<string, string> = {};
-  for (const line of raw.split("\n")) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-  }
+  // `process.env` vence o `.env.local` — ver scripts/lib/env-de-teste.ts.
+  const env = carregarEnvLocal();
   return { url: env.NEXT_PUBLIC_SUPABASE_URL!, serviceRole: env.SUPABASE_SERVICE_ROLE_KEY! };
 }
 

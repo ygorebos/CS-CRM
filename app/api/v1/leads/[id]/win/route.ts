@@ -4,12 +4,18 @@
  * Closes a lead as won by moving it to the pipeline's `is_won=true` stage.
  * The DB trigger `fn_crm_lead_close_on_stage` sets status='won' + closed_at (P-02).
  * Idempotent: already-won leads return 200 with the current row.
+ *
+ * A regra vive em `lib/leads/encerramento.ts`, compartilhada com a capacidade de
+ * encerramento da IA (IA 360 · wave 2). Duas implementações fariam a IA e o
+ * humano fecharem negócio por critérios diferentes.
  */
 import { randomUUID } from "node:crypto";
 import { type NextRequest } from "next/server";
-import { audit } from "@/lib/audit";
+
+import { ApiError } from "@/lib/api/types";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
+import { encerraDemanda } from "@/lib/leads/encerramento";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -25,86 +31,25 @@ export async function POST(
   // spec 13 §4: escrita é agent+ (viewer é read-only).
   const authz = await requireRole("agent", { requestId, resource: "crm_leads" });
   if (!authz.ok) return authz.response;
-  const user = authz.user;
 
-  const { data: lead, error: selErr } = await supabase
-    .from("crm_leads")
-    .select("*")
-    .eq("id", leadId)
-    .maybeSingle();
-
-  if (selErr) return fail("internal_error", selErr.message, 500, { requestId });
-  if (!lead) return fail("not_found", "Lead não encontrado.", 404, { requestId });
-
-  if (lead.status === "won") {
-    return ok(lead, { requestId });
-  }
-
-  // Find the won stage of the pipeline.
-  const { data: wonStage, error: stErr } = await supabase
-    .from("crm_stages")
-    .select("id")
-    .eq("pipeline_id", lead.pipeline_id)
-    .eq("is_won", true)
-    .limit(1)
-    .maybeSingle();
-
-  if (stErr) return fail("internal_error", stErr.message, 500, { requestId });
-  if (!wonStage) {
-    return fail(
-      "pipeline_no_won_stage",
-      "Pipeline não tem stage de fechamento como ganho.",
-      422,
-      { requestId },
-    );
-  }
-
-  // Intentional close: don't enforce OCC. Trigger handles status + closed_at.
-  const { error: updErr } = await supabase
-    .from("crm_leads")
-    .update({
-      stage_id: wonStage.id,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", leadId);
-
-  if (updErr) return fail("internal_error", updErr.message, 500, { requestId });
-
-  const { data: fresh } = await supabase
-    .from("crm_leads")
-    .select("*")
-    .eq("id", leadId)
-    .maybeSingle();
-
-  const finalLead = fresh ?? lead;
-
-  await supabase
-    .rpc("emit_event", {
-      p_event_type: "lead.won",
-      p_entity_kind: "crm_lead",
-      p_entity_id: leadId,
-      p_payload: {
-        from_stage_id: lead.stage_id,
-        to_stage_id: wonStage.id,
-        value_cents: finalLead.value_cents,
-        currency: finalLead.currency,
+  try {
+    const { lead } = await encerraDemanda(
+      supabase,
+      {
+        organization_id: authz.org.orgId,
+        actor: { type: "user", id: authz.user.id },
+        requestId,
       },
-      p_metadata: { request_id: requestId, actor_user_id: user.id },
-      p_organization_id: lead.organization_id,
-    })
-    .then(({ error }) => {
-      if (error) console.error("[lead.win] emit_event failed", error.message);
-    });
-
-  await audit({
-    action: "lead.won",
-    actorUserId: user.id,
-    organizationId: lead.organization_id,
-    resourceType: "crm_lead",
-    resourceId: leadId,
-    requestId,
-    metadata: { from_stage_id: lead.stage_id, to_stage_id: wonStage.id },
-  });
-
-  return ok(finalLead, { requestId });
+      { leadId, desfecho: "won" },
+    );
+    return ok(lead, { requestId });
+  } catch (err) {
+    if (err instanceof ApiError) {
+      return fail(err.code, err.message, err.status, {
+        details: err.details as Record<string, unknown> | undefined,
+        requestId,
+      });
+    }
+    throw err;
+  }
 }

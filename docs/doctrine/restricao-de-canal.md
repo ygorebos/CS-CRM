@@ -46,7 +46,11 @@ if (!caps.freeformOutsideWindow) { /* ... */ }
 - **Por quê:** cada `if (provider === ...)` é uma chance de alguém escrever o ramo novo e
   esquecer o antigo. É assim que uma implementação regride a outra.
 - **Verificação:** `scripts/lint-channels.ts` reprova o vazamento no `gov:verify`. Provider
-  novo não exige tocar em feature nenhuma.
+  novo não exige tocar em feature nenhuma. O reconhecimento do nome mora em
+  `scripts/lint-channels.pattern.ts` — separado justamente para poder ser testado, porque o
+  lint em si varre disco e chama `process.exit` ao ser importado. São **duas** fronteiras,
+  uma por grafia (`waha_session_name` / `WAHA_API_KEY` vs. `WahaClient`); a #118 mostrou que
+  uma catraca que enxerga só uma delas dá verde afirmando o que não verificou.
 
 ### 2. Toda restrição declara ORIGEM e FÍSICA
 
@@ -124,6 +128,17 @@ ver, tela para mudar, e caminho visível de falha.**
 - **Anti-exemplo real:** existir disparo de template por follow-up sem nenhuma área para
   ver ou configurar templates. O mecanismo funciona, mas é operável só por quem lê o banco —
   ou seja, não é operável.
+- **Segundo anti-exemplo, e mais caro (issue #144):** o rodízio de atendimento
+  (`settings.routing.mode`) e a restrição de visibilidade por atendente
+  (`settings.visibility_mode`) existiam INTEIROS — worker, RLS, invariantes, tudo — e não
+  tinham nenhuma tela. `visibility_mode` era lido em `app/app/layout.tsx` e escrito por
+  ninguém. Um contribuidor abriu issue pedindo a feature que já estava construída, porque do
+  lado de fora ela não existia.
+- **A armadilha que o mesmo caso revelou:** a rota de escrita EXISTIA e era um no-op
+  silencioso. A única policy de escrita de `organizations` é `fn_is_platform_admin()`; pelo
+  client de sessão o UPDATE de um manager casa zero linhas, e o PostgREST devolve sucesso.
+  A tela dizia "salvo" e nada era gravado. **Rota que grava e nunca foi exercitada por uma
+  tela não conta como superfície** — conte só o que uma spec de frontend prova.
 - **Verificação:** para todo estado configurável existe (a) rota de leitura na UI,
   (b) rota de escrita na UI, e (c) o que acontece quando falta configuração é **visível**
   (item de inbox / banner), nunca um `return` mudo no worker.

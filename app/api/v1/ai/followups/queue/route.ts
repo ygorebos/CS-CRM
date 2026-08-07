@@ -26,6 +26,7 @@ import type { NextRequest } from "next/server";
 
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
+import { situacaoDoRetorno } from "@/lib/followup/retorno";
 import { createClient } from "@/lib/supabase/server";
 
 export const dynamic = "force-dynamic";
@@ -206,7 +207,9 @@ export async function GET(req: NextRequest): Promise<Response> {
   // --- fonte 2: promessas (cron_jobs kind='at' + job_kind='followup_turn') ---
   let promiseQuery = supabase
     .from("cron_jobs")
-    .select("id, contact_id, next_run_at, enabled, payload, contacts:contact_id(id, name, display_name, phone_number)")
+    .select(
+      "id, contact_id, next_run_at, enabled, cancelled_at, payload, contacts:contact_id(id, name, display_name, phone_number)",
+    )
     .eq("organization_id", activeOrg.orgId)
     .eq("kind", "at")
     .eq("job_kind", "followup_turn")
@@ -245,7 +248,15 @@ export async function GET(req: NextRequest): Promise<Response> {
       agent_name: null,
       node_or_reason: payload.reason ?? "—",
       next_fire_at: j.next_run_at,
-      status: j.enabled ? "agendada" : "concluída",
+      // `enabled=false` significava DUAS coisas — disparou ou alguém desmarcou —
+      // e a fila chamava as duas de "concluída". Com o cancelamento pela tela
+      // (0102), isso viraria uma mentira frequente: a pessoa clicaria em cancelar
+      // e leria "concluída", como se o cliente tivesse recebido a mensagem.
+      status: situacaoDoRetorno({ enabled: j.enabled, cancelled_at: j.cancelled_at }) === "cancelado"
+        ? "cancelada"
+        : j.enabled
+          ? "agendada"
+          : "concluída",
       detail: payload.promise ?? null,
     };
   });

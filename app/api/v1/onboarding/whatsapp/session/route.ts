@@ -1,6 +1,14 @@
+import { randomUUID } from "node:crypto";
+
 import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import {
+  reactivateChannelSession,
+  type ChannelReactivationActor,
+} from "@/lib/channels/reactivate";
 import { getWahaClient } from "@/lib/waha/client";
 import { createClient } from "@/lib/supabase/server";
 
@@ -25,15 +33,65 @@ function defaultSessionName(orgId: string): string {
   return `org_${orgId.slice(0, 8)}`;
 }
 
-async function ensureChannelSession(orgId: string, sessionName: string): Promise<string> {
+/**
+ * A linha de `channel_sessions` deste onboarding — criando, reutilizando ou
+ * RESSUSCITANDO.
+ *
+ * O nome da sessão aqui é derivado do org (`org_<8>`), então a linha do
+ * onboarding é sempre a MESMA. Quem excluiu o número e voltou para reconectar
+ * cai exatamente nela, arquivada: devolvê-la como está subiria a sessão no
+ * transporte e deixaria um canal que recebe e não entrega nada (webhook, ingest
+ * e envio filtram `archived_at`) — e recusá-la fecharia o onboarding para sempre,
+ * porque o nome nunca muda. Retomar o pareamento é ressuscitar.
+ *
+ * `phone_number` volta a NULL de propósito: o número só se sabe depois do
+ * escaneamento, pode ser outro aparelho, e o health check só preenche o campo
+ * quando ele está vazio — manter o antigo o congelaria errado na tela para
+ * sempre. De quebra, a linha para de disputar o par (org, número) da trava da
+ * 0106 enquanto ninguém escaneou.
+ *
+ * Retomar o pareamento é uma das duas portas de volta, então carrega o ATOR:
+ * `reactivateChannelSession` audita a ressurreição, e sem quem pediu a trilha
+ * mostraria um canal excluído voltando a entregar sem dono.
+ */
+async function ensureChannelSession(
+  orgId: string,
+  sessionName: string,
+  actor: ChannelReactivationActor,
+): Promise<string> {
   const supabase = await createClient();
-  const { data: existing } = await supabase
-    .from("channel_sessions")
-    .select("id")
-    .eq("organization_id", orgId)
-    .eq("waha_session_name", sessionName)
-    .maybeSingle();
-  if (existing?.id) return existing.id as string;
+  const buscar = (colunas: string) =>
+    supabase
+      .from("channel_sessions")
+      .select(colunas)
+      .eq("organization_id", orgId)
+      .eq("waha_session_name", sessionName)
+      .maybeSingle();
+  const { data: existingRaw } = await queryTolerantToMissingArchived(
+    () => buscar(`id, ${ARCHIVED_AT}`),
+    () => buscar("id"),
+  );
+  const existing = existingRaw as { id: string; archived_at?: string | null } | null;
+  if (existing?.id) {
+    if (!existing.archived_at) return existing.id;
+    const { error: reErr } = await reactivateChannelSession(
+      supabase,
+      {
+        organizationId: orgId,
+        channelSessionId: existing.id,
+        archivedAt: existing.archived_at ?? null,
+      },
+      {
+        status: "STARTING",
+        last_status_change_at: new Date().toISOString(),
+        consecutive_health_fails: 0,
+        phone_number: null,
+      },
+      actor,
+    );
+    if (reErr) throw new Error(`channel_session_reactivate_failed: ${reErr.message}`);
+    return existing.id;
+  }
   const { data: created, error } = await supabase
     .from("channel_sessions")
     .insert({
@@ -73,6 +131,7 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
+  const requestId = randomUUID();
   const user = await loadAuthUser();
   if (!user) return fail("unauthenticated", "Sessão expirada", 401);
   const activeOrg = await resolveActiveOrg(user);
@@ -82,7 +141,11 @@ export async function POST(req: Request) {
   const sessionName = defaultSessionName(activeOrg.orgId);
 
   // 1) Make sure we have a row in channel_sessions.
-  const channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName);
+  const channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName, {
+    userId: user.id,
+    requestId,
+    metadata: { provider: CHANNEL_PROVIDER_WAHA, origin: "onboarding" },
+  });
 
   // 1b) `?restart=1` = pedido explícito de QR novo. O start sozinho não resolve
   // uma sessão FAILED: o WAHA responde 422 ("already exists") e o usuário fica
@@ -99,13 +162,21 @@ export async function POST(req: Request) {
   // 2) Start the session in WAHA. Idempotent — WAHA returns 422 if already started; treat as ok.
   try {
     const remote = (await waha.startSession(sessionName)) as WahaSessionResponse;
-    return ok({ status: remote.status ?? "STARTING", session: sessionName, channel_session_id: channelSessionId });
+    // `requestId` também na resposta: é ele que liga o `X-Request-Id` que o
+    // operador vê ao evento `channel.reactivated` que a ressurreição gravou.
+    return ok(
+      { status: remote.status ?? "STARTING", session: sessionName, channel_session_id: channelSessionId },
+      { requestId },
+    );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";
     if (msg.includes("422") || msg.includes("409")) {
       // Session already exists — just fetch status.
       const remote = (await waha.getSessionQr(sessionName)) as WahaSessionResponse;
-      return ok({ status: remote.status ?? "RUNNING", session: sessionName, channel_session_id: channelSessionId });
+      return ok(
+        { status: remote.status ?? "RUNNING", session: sessionName, channel_session_id: channelSessionId },
+        { requestId },
+      );
     }
     return NextResponse.json(
       { error: { code: "waha_start_failed", message: msg } },

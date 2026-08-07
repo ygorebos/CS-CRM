@@ -9,18 +9,14 @@
  *
  * Roda com: E2E_PORT=3000 npx tsx tests/sonda-split-na-tela.ts
  */
-import * as fs from "node:fs";
 
 import { chromium } from "@playwright/test";
 import { createClient } from "@supabase/supabase-js";
 
 import { BASE, login } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const env = Object.fromEntries(
-  fs.readFileSync(".env.local", "utf8").split("\n")
-    .filter((l) => l.includes("=") && !l.trimStart().startsWith("#"))
-    .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")]),
-);
+const env = carregarEnvLocal();
 const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
 });

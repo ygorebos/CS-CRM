@@ -178,7 +178,7 @@ export const crmCreateLead: McpToolDefinition<typeof createInputShape> = {
     "Cria um lead no pipeline informado. Use após qualificar um contato. Position é gerenciado pelo servidor.",
   inputSchema: createInputShape,
   category: "write",
-  requiresRole: "manager",
+  requiresRole: "agent",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
     const parsed = createLeadSchema.parse({
@@ -235,7 +235,7 @@ export const crmUpdateLead: McpToolDefinition<typeof updateInputShape> = {
     "Atualiza campos editáveis de um lead. Stage transitions são via crm_move_lead_stage; status é gerenciado por triggers.",
   inputSchema: updateInputShape,
   category: "write",
-  requiresRole: "manager",
+  requiresRole: "agent",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
     const { lead_id, ...rest } = input;
@@ -271,7 +271,7 @@ export const crmMoveLeadStage: McpToolDefinition<typeof moveInputShape> = {
     "Move um lead para outro stage dentro do MESMO pipeline. Cross-pipeline é proibido (use clone). Audit registra from/to stage e reason.",
   inputSchema: moveInputShape,
   category: "write",
-  requiresRole: "manager",
+  requiresRole: "agent",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
     const lead = await moveLeadHandler(

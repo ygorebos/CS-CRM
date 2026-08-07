@@ -1,22 +1,30 @@
 /**
- * GET  /api/v1/webhook-sources — lista as fontes de webhook da org ativa.
- * POST /api/v1/webhook-sources — cria uma fonte (gera path_token no server).
+ * GET  /api/v1/webhook-sources — lista as entradas automáticas de contatos da org ativa.
+ * POST /api/v1/webhook-sources — cria uma (gera path_token no server).
  *
- * path_token NÃO é segredo forte (é a identidade pública da URL, como o
- * webhook_path_token do WAHA) — diferente de api_tokens, ele volta no corpo
- * de GET/POST pra UI montar a URL de captação.
+ * `path_token` NÃO é segredo forte (é a identidade pública da URL, como o
+ * webhook_path_token do WAHA) — diferente de api_tokens, ele volta no corpo de
+ * GET/POST para a UI montar a URL de captação.
  *
  * `secret` é write-only na leitura: GET devolve só `has_secret` (padrão
  * api-tokens — o plaintext aparece apenas na resposta do POST/PATCH que o
- * definiu). Cifragem at-rest (spec §10) é follow-up junto com os secrets de
- * config de regra.
+ * definiu).
+ *
+ * ⚠️ A REGRA VIVE EM `lib/operacao/entradas-automaticas.ts`, compartilhada com o
+ * agente de IA (BRIEFING §3, Decisão 4). Aqui só há transporte e a cifragem do
+ * segredo, que depende do admin client e por isso fica na borda.
  */
-import { randomBytes, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
+import { respostaDeRecusa } from "@/lib/api/recusa";
 import { ok, fail } from "@/lib/api/wrappers";
-import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import {
+  criarEntradaAutomatica,
+  listarEntradasAutomaticas,
+  type DepsDaOperacao,
+} from "@/lib/operacao/entradas-automaticas";
 import { createWebhookSourceSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -28,27 +36,25 @@ export async function GET(): Promise<Response> {
   const requestId = randomUUID();
   const authz = await requireRole("manager", { requestId, resource: "webhook_sources" });
   if (!authz.ok) return authz.response;
-  const { org: activeOrg } = authz;
 
   const supabase = await createClient();
-  const { data, error } = await supabase
-    .from("webhook_sources")
-    .select("*")
-    .eq("organization_id", activeOrg.orgId)
-    .order("created_at", { ascending: false });
-  if (error) return fail("internal_error", error.message, 500, { requestId });
-  const masked = (data ?? []).map(({ secret_encrypted, ...rest }) => ({
-    ...rest,
-    has_secret: secret_encrypted !== null,
-  }));
-  return ok(masked, { requestId });
+  try {
+    const entradas = await listarEntradasAutomaticas({
+      supabase,
+      organizationId: authz.org.orgId,
+      actor: { type: "user", id: authz.user.id, role: authz.org.role },
+      requestId,
+    });
+    return ok(entradas, { requestId });
+  } catch (err) {
+    return respostaDeRecusa(err, requestId);
+  }
 }
 
 export async function POST(req: NextRequest): Promise<Response> {
   const requestId = randomUUID();
   const authz = await requireRole("manager", { requestId, resource: "webhook_sources" });
   if (!authz.ok) return authz.response;
-  const { user, org: activeOrg } = authz;
 
   let raw: unknown = {};
   try {
@@ -63,8 +69,6 @@ export async function POST(req: NextRequest): Promise<Response> {
       details: parsed.error.flatten(),
     });
   }
-
-  const pathToken = randomBytes(24).toString("base64url");
 
   // Secret nunca é armazenado em claro (migration 0041): cifra via admin RPC
   // (grant service_role). Sem a chave de cifra configurada, recusa em vez de
@@ -83,35 +87,24 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   const supabase = await createClient();
-  const { data: created, error: insErr } = await supabase
-    .from("webhook_sources")
-    .insert({
-      organization_id: activeOrg.orgId,
-      created_by_user_id: user.id,
+  const deps: DepsDaOperacao = {
+    supabase,
+    organizationId: authz.org.orgId,
+    actor: { type: "user", id: authz.user.id, role: authz.org.role },
+    requestId,
+  };
+
+  try {
+    const criada = await criarEntradaAutomatica(deps, {
       name: parsed.data.name,
-      path_token: pathToken,
-      secret_encrypted: secretEncrypted,
       default_pipeline_id: parsed.data.default_pipeline_id,
       default_stage_id: parsed.data.default_stage_id,
-      field_map: parsed.data.field_map ?? {},
       redirect_to: parsed.data.redirect_to ?? null,
-    })
-    .select("*")
-    .single();
-  if (insErr || !created) {
-    return fail("internal_error", insErr?.message ?? "webhook_source_insert_failed", 500, { requestId });
+      field_map: parsed.data.field_map,
+      secret_encrypted: secretEncrypted,
+    });
+    return ok(criada, { requestId, status: 201 });
+  } catch (err) {
+    return respostaDeRecusa(err, requestId);
   }
-
-  void audit({
-    action: "webhook.source_created",
-    actorUserId: user.id,
-    organizationId: activeOrg.orgId,
-    resourceType: "webhook_source",
-    resourceId: created.id,
-    requestId,
-    metadata: { name: parsed.data.name },
-  });
-
-  const { secret_encrypted: _enc, ...createdPublic } = created as Record<string, unknown>;
-  return ok({ ...createdPublic, has_secret: secretEncrypted !== null }, { requestId, status: 201 });
 }

@@ -85,7 +85,7 @@ export function UsageChart({ payload }: Props) {
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
-      <ChartCard title="Custo / dia (R$)">
+      <ChartCard title="Quanto gastou por dia (R$)">
         {!hasCost ? (
           <EmptyChart />
         ) : (
@@ -127,7 +127,7 @@ export function UsageChart({ payload }: Props) {
         )}
       </ChartCard>
 
-      <ChartCard title="Tokens / dia">
+      <ChartCard title="Volume de texto processado por dia">
         {!hasTokens ? (
           <EmptyChart />
         ) : (
@@ -169,7 +169,7 @@ export function UsageChart({ payload }: Props) {
         )}
       </ChartCard>
 
-      <ChartCard title="Latência p50/p95 (ms)">
+      <ChartCard title="Tempo de resposta por dia (segundos)">
         {!hasLatency ? (
           <EmptyChart />
         ) : (
@@ -191,11 +191,21 @@ export function UsageChart({ payload }: Props) {
                 tick={{ fontSize: 11 }}
                 tickLine={false}
                 axisLine={false}
-                tickFormatter={formatNumber}
-                width={50}
+                // O eixo TAMBÉM em segundos. Traduzir só o título e o tooltip
+                // deixaria a régua contradizendo o rótulo — o gráfico diria
+                // "segundos" e mostraria 24.000 na lateral.
+                tickFormatter={(v: number) =>
+                  (v / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 0 })
+                }
+                width={40}
               />
               <Tooltip
-                formatter={(value, name) => [`${formatNumber(Number(value))} ms`, name]}
+                // Segundos, não milissegundos: 17.621 ms não diz nada a quem
+                // atende; 17,6 s diz.
+                formatter={(value, name) => [
+                  `${(Number(value) / 1000).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s`,
+                  name,
+                ]}
                 labelFormatter={(label) => formatDateTick(String(label))}
                 contentStyle={tooltipStyle}
               />
@@ -203,7 +213,7 @@ export function UsageChart({ payload }: Props) {
               <Line
                 type="monotone"
                 dataKey="p50"
-                name="p50"
+                name="a maioria responde em"
                 stroke="hsl(199 89% 48%)"
                 strokeWidth={2}
                 dot={false}
@@ -211,7 +221,7 @@ export function UsageChart({ payload }: Props) {
               <Line
                 type="monotone"
                 dataKey="p95"
-                name="p95"
+                name="pior caso comum"
                 stroke="hsl(0 84% 60%)"
                 strokeWidth={2}
                 dot={false}
@@ -221,7 +231,7 @@ export function UsageChart({ payload }: Props) {
         )}
       </ChartCard>
 
-      <ChartCard title="Taxa de handoff (%)">
+      <ChartCard title="Quanto foi para uma pessoa (%)">
         {!hasHandoff ? (
           <EmptyChart />
         ) : (

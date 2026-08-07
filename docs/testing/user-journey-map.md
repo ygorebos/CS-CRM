@@ -41,6 +41,7 @@ MFA obrigatório pra admin logo após o wizard (`MfaEnrollGate`).
 | J1.12 | Tentar `/app/inbox` antes de concluir | redirect pro onboarding, sem loop |
 | J1.13 | Reabrir `/onboarding` depois de concluído | redirect pro app (wizard não reabre) |
 | J1.14 | Stepper com Nuvemshop desabilitado | numeração/etapas não quebram visualmente |
+| J1.15 | Setup IA: erro de banco ao listar os números (a publicação não pode ser decidida) | UI **não mente**: agente criado como rascunho, causa técnica na tela e saída pro próximo passo; clicar de novo NÃO cria um 2º agente · **PASS** (`tests/unit/onboarding-agente-nao-publicado.test.ts`, `tests/unit/onboarding-setup-ai-aviso.test.tsx`) |
 
 ## J2 — Conectar WhatsApp e Central de Conexões `[P0]`
 
@@ -67,6 +68,12 @@ MFA obrigatório pra admin logo após o wizard (`MfaEnrollGate`).
 | J3.7 | AI Gateway key ausente | feedback visível (hoje: skip silencioso — candidato a bug de UX) |
 | J3.8 | Central de avisos do agente (sino) | eventos aparecem com copy leiga |
 | J3.9 | Propostas do flywheel: aplicar bullet | nova versão publicada, badge atualiza |
+| J3.10 | Escolher o que o agente pode fazer, por jornada de trabalho | 6 pacotes em português, com explicação e contagem — não uma lista de `crm_*` monoespaçado · **PASS** (`tests/e2e/capacidades-do-agente.spec.ts`) |
+| J3.11 | Ligar "Atender e responder" NÃO dá direito de mandar WhatsApp | a capacidade de risco crítico fica destacada, exigindo marcação individual; desligar a jornada leva ela junto · **PASS** |
+| J3.12 | Modo avançado: ficha por capacidade + nome técnico | o `name` técnico só aparece aqui; fora dele o leigo lê rótulo, o que toca e risco · **PASS** |
+| J3.13 | A escolha sobrevive ao salvar e recarregar | o servidor aceita a lista (mesmo teto de 20 da tela) e o estado volta igual · **PASS** |
+| J3.14 | Ver se o que está ligado está funcionando (aba Capacidades) | usos, falhas, quantos vieram de teste, última vez — e o que fazer com cada número · **PASS** (números escritos pelo emissor real de audit) |
+| J3.15 | Teto de 20 recusa a passagem, explicando em português | **NÃO EXERCITÁVEL HOJE**: com 16 capacidades no catálogo, ligar tudo não chega a 20. Coberto por teste unitário; vira exercitável quando as waves de capacidades entregarem |
 
 ## J4 — CRM e Pipelines `[P1]`
 
@@ -122,6 +129,56 @@ MFA obrigatório pra admin logo após o wizard (`MfaEnrollGate`).
 | J6.8 | call_webhook com URL interna (SSRF) | bloqueado com erro claro |
 | J6.9 | Run falho → botão Reenviar | novo run; sucesso após receiver voltar |
 | J6.10 | Automação SEM cron configurado | hoje: morre em silêncio — **candidato a bug de produto** |
+
+## J8 — O cliente não morre por falta de resposta `[P1]`
+
+Contexto do código: pacote `reter` do catálogo (IA 360 · wave 2). A demanda esfria, o
+agente marca o retorno pela capacidade que o dono ligou na tela, o humano vê e pode
+desmarcar, e o agente descobre que desmarcaram. Spec: `tests/e2e/retorno-anti-morte.spec.ts`
+(seed pela capacidade REAL — `scripts/seed-e2e-retorno.ts`, nunca INSERT à mão).
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J8.1 | Negócio 5 dias sem movimento com retorno marcado pelo agente | Radar mostra **"Em voo"** e "Assistente retorna em 2d" — não "crítico" | PASS |
+| J8.2 | Linha do tempo do negócio após o agendamento | entrada `Retorno agendado — <motivo>`, com o agente nomeado | PASS |
+| J8.3 | Fila de acompanhamento mostra a promessa | linha "Promessa" com status **Agendada** e botão Cancelar | PASS |
+| J8.4 | Humano desmarca pela fila | diálogo diz o que acontece; status vira **Cancelada** (não "Concluída") | PASS |
+| J8.5 | O agente consulta os retornos depois do cancelamento | vê `situacao: cancelado` **com o motivo** — é o que o impede de reagendar | PASS |
+| J8.6 | Repetir a jornada | seed reseta o retorno; o teste roda de novo sem intervenção | PASS |
+
+Evidência: `.superpowers/evidence/w2-retorno-{no-radar,na-fila-agendada,dialogo-de-cancelamento,na-fila-cancelada}.png`.
+
+**Sabotagem que confirma que o caso não passa por acaso:** devolvendo `podeCancelar` ao
+estado anterior à wave (promessa não cancelável), J8.4 reprova com timeout no clique —
+1 failed / 1 passed. Restaurado, 2 passed.
+## J8 — Passar o atendimento para uma pessoa, e receber de volta `[P1]`
+
+Contexto do código: o agente abre um chamado (`agent_cases`) quando esbarra num
+bloqueio; a passagem em si (`performHumanHandoff` / `triggerHandoff`) liga **três**
+travas — `contacts.force_human`, `conversations.bot_silenced_until` e
+`assignee_kind='user'`. A volta é `POST /conversations/[id]/reactivate-bot`, hoje
+atrás do botão "Devolver ao automático" no cabeçalho da conversa.
+
+Spec: `tests/e2e/escalacao-ciclo.spec.ts`. Seed: `scripts/seed-e2e-escalacao.ts`
+(chama as funções REAIS `openCase` e `performHumanHandoff` — um seed que ligasse
+as travas com `UPDATE` próprio provaria o teste contra uma cópia da regra).
+Evidência: `.superpowers/evidence/ia-360-w3/`.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J8.1 | O chamado aberto pelo agente aparece em `/app/ai/cases` | linha na fila com o título e o bloqueio | PASS |
+| J8.2 | A pessoa escolhe "Concluí" e escreve o que combinou | o chamado fecha (`resolved`) e o texto fica registrado | PASS |
+| J8.3 | A conversa DIZ que o automático está pausado | aviso visível no cabeçalho — conversa com o robô calado não pode ter a cara de uma conversa normal | FAIL(BUG-04) → PASS |
+| J8.4 | Existe caminho de volta pela tela | botão "Devolver ao automático" | FAIL(BUG-04) → PASS |
+| J8.5 | Devolver solta as **três** travas | `force_human=false`, silêncio nulo, dono nulo, `assignee_kind='ai'` | FAIL(BUG-01) → PASS |
+| J8.6 | A volta aparece na linha do tempo do negócio | atividade "Voltou para o atendimento automático" | FAIL(BUG-02) → PASS |
+| J8.7 | A **ida** aparece na linha do tempo | atividade "Passou para humano" também pelo caminho do harness/casos | FAIL(BUG-05) → PASS |
+| J8.8 | O agente retoma **sabendo** o que a pessoa fez | a abertura do turno (`ritualBlocks`) cita a decisão dela, sem apagar o acumulado anterior | PASS |
+| J8.9 | Status da conversa escalada em português | o cabeçalho mostrava `pending` cru | FAIL → PASS |
+
+Bugs desta jornada estão detalhados em `HANDOFF-ia-360.md` (BUG-01 a BUG-05).
+
+---
 
 ## J7 — Exploração completa `[P2]`
 

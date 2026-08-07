@@ -17,16 +17,11 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
-import * as fs from "node:fs";
 
 import { CREDS, carimbar } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const env: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const env = carregarEnvLocal();
 const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
 });

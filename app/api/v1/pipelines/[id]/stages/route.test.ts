@@ -9,7 +9,7 @@ vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
 
-import { ORG_ID, OUTRA_ORG, PIPE, authOk, etapa, funil, makeDb } from "@/tests/helpers/stages-db-double";
+import { ORG_ID, OUTRA_ORG, PIPE, authOk, comAutoria, etapa, funil, makeDb } from "@/tests/helpers/stages-db-double";
 
 const ctx = { params: Promise.resolve({ id: PIPE }) };
 
@@ -105,15 +105,17 @@ describe("POST /api/v1/pipelines/[id]/stages", () => {
     expect(res.status).toBe(201);
     expect(db.escritas).toHaveLength(1);
     expect(db.escritas[0]?.tipo).toBe("insert");
-    expect(db.escritas[0]?.patch).toEqual({
-      organization_id: ORG_ID,
-      pipeline_id: PIPE,
-      name: "Pós-venda",
-      slug: "pos_venda",
-      // A última posição do funil é 4000 (a fixture chega embaralhada): a etapa
-      // nova entra DEPOIS dela, não no meio.
-      position: 5000,
-    });
+    expect(db.escritas[0]?.patch).toEqual(
+      comAutoria({
+        organization_id: ORG_ID,
+        pipeline_id: PIPE,
+        name: "Pós-venda",
+        slug: "pos_venda",
+        // A última posição do funil é 4000 (a fixture chega embaralhada): a etapa
+        // nova entra DEPOIS dela, não no meio.
+        position: 5000,
+      }),
+    );
 
     const body = (await res.json()) as { data: { etapas: Array<{ id: string; name: string }> } };
     expect(body.data.etapas.map((e) => e.name)).toEqual([

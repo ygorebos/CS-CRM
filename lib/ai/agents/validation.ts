@@ -9,6 +9,7 @@
  */
 import { z } from "zod";
 import { VALID_TOOL_IDS } from "@/lib/mcp/tools/catalog";
+import { TETO_TOOLS_POR_AGENTE } from "@/lib/mcp/tools/selecao-por-pacote";
 
 export const PROVIDERS = ["anthropic", "openai", "google"] as const;
 export type Provider = (typeof PROVIDERS)[number];
@@ -65,7 +66,9 @@ const versionShapeSchema = z
     credential_id: UUID,
     tool_ids: z
       .array(z.string().min(1).max(80))
-      .max(20)
+      // O mesmo teto que a tela mostra ("13 de 20") é o que o servidor recusa —
+      // ver `lib/mcp/tools/selecao-por-pacote.ts` para o porquê do número.
+      .max(TETO_TOOLS_POR_AGENTE)
       .default([])
       .refine(
         (ids) => ids.every((id) => (VALID_TOOL_IDS as readonly string[]).includes(id)),
@@ -89,6 +92,24 @@ const versionShapeSchema = z
     split_messages: z.boolean().default(false),
     split_max_chars: z.number().int().min(80).max(4000).default(600),
     followup: followupConfigSchema,
+    // ── Papel OPERADOR (spec 16 §3.2) ───────────────────────────────────────
+    // Todos com `.default(...)`, e é o que mantém retrocompatível: agent e
+    // version que já existem, e qualquer payload que não conheça o papel,
+    // seguem válidos e leem o papel como DESLIGADO.
+    operator_enabled: z.boolean().default(false),
+    // `.nullable()` e não opcional: null é o valor que SIGNIFICA "herda o modelo
+    // do Conversador". Omitir seria indistinguível de "ainda não decidi".
+    operator_model: z.string().trim().min(1).max(120).nullable().default(null),
+    // Teto PRÓPRIO, não compartilhado com `tool_ids`: é assim que separar os
+    // papéis resolve o estouro do teto por divisão em vez de aumentar o número.
+    operator_tool_ids: z
+      .array(z.string().min(1).max(80))
+      .max(TETO_TOOLS_POR_AGENTE)
+      .default([])
+      .refine(
+        (ids) => ids.every((id) => (VALID_TOOL_IDS as readonly string[]).includes(id)),
+        { message: "tool_id_invalid" },
+      ),
   })
   .strict();
 

@@ -27,16 +27,12 @@ import pg from "pg";
 import { emitVetoActivity } from "@/lib/leads/veto-activity";
 
 import { BASE, CARD_ATTR, CREDS, EVIDENCE, carimbar, gotoBoard, login, loginAs, shotPage } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
 /** Hash dos bytes do recorte do card: prova que a IMAGEM mudou, não que algo rodou. */
 const hashDoRecorte = (b: Buffer): string => createHash("sha1").update(b).digest("hex").slice(0, 12);
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const envVars: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) envVars[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const envVars = carregarEnvLocal();
 const admin = createClient(envVars.NEXT_PUBLIC_SUPABASE_URL!, envVars.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
 });

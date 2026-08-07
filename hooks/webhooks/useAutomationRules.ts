@@ -19,6 +19,9 @@ export interface AutomationRuleRow {
   run_count: number;
   created_at: string;
   updated_at: string;
+  /** Quem mexeu por último (migration 0101). `null` nas regras anteriores a ela. */
+  last_change_actor_kind: string | null;
+  last_change_at: string | null;
 }
 
 const RULES_KEY = ["automation-rules"];

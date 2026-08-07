@@ -21,6 +21,7 @@ import type { AddressInfo } from "node:net";
 import * as path from "node:path";
 
 import { test, expect, type Page, type Locator } from "@playwright/test";
+import { carregarEnvLocal } from "../../scripts/lib/env-de-teste";
 
 const APP_URL = `http://localhost:${process.env.E2E_PORT ?? "3001"}`;
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
@@ -38,8 +39,8 @@ function loadCreds(): Creds {
 }
 
 function loadInternalSecret(): string {
-  const envFile = fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
-  const secret = envFile.match(/^INTERNAL_SECRET=(.*)$/m)?.[1]?.trim();
+  const envDeTeste = carregarEnvLocal();
+  const secret = envDeTeste.INTERNAL_SECRET;
   if (!secret) throw new Error("INTERNAL_SECRET não encontrado em .env.local");
   return secret;
 }

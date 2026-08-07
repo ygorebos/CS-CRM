@@ -94,17 +94,28 @@ export function UsageDashboardClient({ agents, initial }: Props) {
               value={brl.format(q.data.totals.cost_cents / 100)}
             />
             <StatCard
-              label="Invocações"
+              label="Atendimentos com IA"
               value={q.data.totals.invocations.toLocaleString("pt-BR")}
             />
             <StatCard
-              label="Handoff rate"
+              label="Passaram para uma pessoa"
               value={`${(q.data.totals.handoff_rate * 100).toFixed(2)}%`}
+              hint="quanto mais alto, mais a IA precisou de ajuda"
             />
+            {/*
+              "p95" quer dizer: em 95 das 100 respostas o tempo foi ATÉ isso.
+              É a medida honesta para tempo de resposta (a média esconde os
+              casos ruins), mas o rótulo não pode ser a sigla — quem lê a tela
+              precisa saber o que fazer com o número, não decorar estatística.
+            */}
             <StatCard
-              label="p95 latência"
-              value={`${q.data.totals.p95_latency_ms.toLocaleString("pt-BR")} ms`}
-              hint={`p50 ${q.data.totals.p50_latency_ms.toLocaleString("pt-BR")} ms`}
+              label="Tempo de resposta"
+              value={`${(q.data.totals.p95_latency_ms / 1000).toLocaleString("pt-BR", {
+                maximumFractionDigits: 1,
+              })} s`}
+              hint={`a maioria responde em ${(
+                q.data.totals.p50_latency_ms / 1000
+              ).toLocaleString("pt-BR", { maximumFractionDigits: 1 })} s; este é o pior caso comum`}
             />
           </div>
 

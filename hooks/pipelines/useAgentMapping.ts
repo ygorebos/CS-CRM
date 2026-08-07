@@ -24,6 +24,9 @@ export interface EtapaDoFunil {
   name: string;
   is_won: boolean;
   is_lost: boolean;
+  /** Quem mexeu nesta etapa por último (migration 0101). `null` antes dela. */
+  last_change_actor_kind?: string | null;
+  last_change_at?: string | null;
 }
 
 /** Os sete passos sempre presentes; `null` = "não mover o card". */

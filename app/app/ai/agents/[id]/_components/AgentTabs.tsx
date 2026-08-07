@@ -7,6 +7,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { AgentForm, type ChannelSessionLite } from "./AgentForm";
 import { TestPanel } from "./TestPanel";
 import { RunsTable } from "./RunsTable";
+import { UsoDasCapacidades } from "./UsoDasCapacidades";
 import { VersionHistory } from "./VersionHistory";
 import { ProposalsPanel } from "./ProposalsPanel";
 import type { AgentRow } from "@/hooks/ai/useAgent";
@@ -26,7 +27,7 @@ interface Props {
 
 export function AgentTabs(props: Props) {
   const [tab, setTab] = React.useState<
-    "configuration" | "test" | "runs" | "history" | "proposals"
+    "configuration" | "test" | "capacidades" | "runs" | "history" | "proposals"
   >("configuration");
   const hasVersion = !!(props.draft || props.published);
 
@@ -41,6 +42,7 @@ export function AgentTabs(props: Props) {
         <TabsTrigger value="test" disabled={!hasVersion}>
           Teste
         </TabsTrigger>
+        <TabsTrigger value="capacidades">Capacidades</TabsTrigger>
         <TabsTrigger value="runs">Execuções</TabsTrigger>
         <TabsTrigger value="history">Histórico</TabsTrigger>
         <TabsTrigger value="proposals">Propostas</TabsTrigger>
@@ -66,6 +68,10 @@ export function AgentTabs(props: Props) {
           published={props.published}
           readOnly={props.readOnly}
         />
+      </TabsContent>
+
+      <TabsContent value="capacidades" className="m-0">
+        <UsoDasCapacidades agentId={props.agent.id} active={tab === "capacidades"} />
       </TabsContent>
 
       <TabsContent value="runs" className="m-0">

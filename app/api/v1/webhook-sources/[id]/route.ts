@@ -8,6 +8,7 @@ import type { NextRequest } from "next/server";
 import { ok, fail, noContent } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
 import { requireRole } from "@/lib/auth/require-role";
+import { autoriaDaMudanca } from "@/lib/operacao/autoria";
 import { updateWebhookSourceSchema } from "@/lib/schemas";
 import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -53,7 +54,14 @@ export async function PATCH(req: NextRequest, ctx: RouteCtx): Promise<Response> 
   // secret plaintext do input vira secret_encrypted (migration 0041); a coluna
   // em claro não existe mais. `secret: null` remove o segredo da fonte.
   const { secret: patchedSecret, ...restPatch } = parsed.data;
-  const patch: Record<string, unknown> = { ...restPatch, updated_at: new Date().toISOString() };
+  // A autoria vai junto de TODA escrita, pelo mesmo helper que o agente usa: a
+  // tela precisa distinguir o que ela mesma mudou do que o assistente mudou, e
+  // duas contas de "quem mexeu" divergiriam no primeiro ajuste (migration 0101).
+  const patch: Record<string, unknown> = {
+    ...restPatch,
+    updated_at: new Date().toISOString(),
+    ...autoriaDaMudanca({ type: "user", id: user.id, role: activeOrg.role }),
+  };
   if (patchedSecret !== undefined) {
     if (patchedSecret === null) {
       patch.secret_encrypted = null;

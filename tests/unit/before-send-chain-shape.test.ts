@@ -32,6 +32,7 @@ const ORDEM_ESPERADA = [
   "promise",
   "semantic_promise",
   "case_promise",
+  "internal_vocabulary",
   "disclosure",
 ] as const;
 
@@ -63,8 +64,17 @@ describe("forma da cadeia before_send", () => {
     // O par (tamanho, versão) é o que amarra os dois. Acrescentar um gate sem
     // bumpar deixa o trace de auditoria mentindo sobre qual cadeia rodou — e o
     // trace é justamente a prova que as Fases 0–2 usam para dizer "não regrediu".
-    expect(BEFORE_SEND_GATES).toHaveLength(9);
-    expect(BEFORE_SEND_CHAIN_VERSION).toBe(5);
+    expect(BEFORE_SEND_GATES).toHaveLength(10);
+    expect(BEFORE_SEND_CHAIN_VERSION).toBe(6);
+  });
+
+  it("internal_vocabulary roda ANTES do disclosure — inspeciona o texto do modelo, não o emendado", () => {
+    // O disclosureGate pode EMENDAR o corpo (`amendBody`, modo inject). Se o gate de
+    // vocabulário rodasse depois, ele julgaria um texto que o runtime costurou com o
+    // template do tenant — e devolveria ao modelo a culpa por uma frase que não é dele.
+    const nomes = BEFORE_SEND_GATES.map((g) => g.name);
+    expect(nomes.indexOf("internal_vocabulary")).toBeLessThan(nomes.indexOf("disclosure"));
+    expect(nomes.indexOf("internal_vocabulary")).toBe(nomes.indexOf("case_promise") + 1);
   });
 
   it("nenhum gate repetido — nome duplicado quebraria a leitura do trace", () => {

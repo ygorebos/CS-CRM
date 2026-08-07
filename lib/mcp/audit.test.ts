@@ -39,6 +39,24 @@ describe("auditMcpToolCall", () => {
     expect(e.actorApiTokenId).toBe(ctx.apiTokenId);
   });
 
+  it("escreve os campos de que o painel de uso depende para ler", async () => {
+    // Contrato entre as duas pontas. `fn_agent_tool_usage` (migration 0103)
+    // agrega por `action='mcp.tool_called'`, lê `metadata->>'tool_name'`,
+    // conta falha por `metadata->>'success' = 'false'` e amarra a chamada ao
+    // agente por `request_id = ai_agent_runs.id`. Renomear qualquer um destes
+    // aqui zera o painel na tela sem quebrar teste nenhum do emissor — e "0
+    // usos" é indistinguível de "nunca usada".
+    await auditMcpToolCall({
+      ctx, toolName: "crm_move_lead_stage", args: {}, durationMs: 9,
+      success: false, errorMessage: "stage_not_found",
+    });
+    const e = auditSpy.mock.calls[0]![0];
+    expect(e.action).toBe("mcp.tool_called");
+    expect(e.requestId).toBe(ctx.requestId);
+    expect(e.metadata.tool_name).toBe("crm_move_lead_stage");
+    expect(e.metadata.success).toBe(false);
+  });
+
   it("redige segredos nos argumentos", async () => {
     await auditMcpToolCall({
       ctx, toolName: "crm_get_contact", args: { cpf: "12345678900", query: "joana" },

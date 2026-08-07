@@ -3,6 +3,7 @@
 import { headers } from "next/headers";
 import { revalidatePath } from "next/cache";
 
+import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { audit } from "@/lib/audit";
 import { tenantSchema, type TenantInput } from "@/lib/schemas/settings";
@@ -27,7 +28,26 @@ export async function updateTenant(input: TenantInput): Promise<UpdateTenantResu
     return { ok: false, error: "forbidden_role" };
   }
 
-  const supabase = await createClient();
+/**
+ * A ESCRITA EM `organizations` VAI PELO ADMIN CLIENT — e não é preguiça.
+ *
+ * A única policy de escrita da tabela é `orgs_write_platform_admin`, com
+ * `USING (fn_is_platform_admin())`. Pelo client de sessão, o UPDATE de quem não
+ * é super-admin de plataforma casa ZERO linhas — e o PostgREST devolve sucesso,
+ * porque "nenhuma linha casou o filtro" não é erro. Resultado: a tela dizia
+ * "salvo", nada era gravado, e recarregar mostrava o estado antigo.
+ *
+ * Medido em Postgres com o baseline aplicado (issue #144): sob `authenticated`
+ * com o JWT de um manager, `update organizations` devolve 0 linhas; sob
+ * postgres, 1. Ninguém tinha notado porque o dono do repo e o owner criado pelo
+ * `bootstrap-owner.ts` SÃO platform_admin — quem tropeça é o segundo admin
+ * convidado e qualquer manager.
+ *
+ * O gate continua sendo o de cima (papel resolvido de fonte confiável), e o
+ * filtro por `organization_id` é explícito, como a doutrina exige de todo
+ * handler que usa service role.
+ */
+  const supabase = createAdminClient();
   const hdrs = await headers();
   const requestId = hdrs.get("x-request-id");
   const ip = hdrs.get("x-forwarded-for")?.split(",")[0]?.trim() ?? null;

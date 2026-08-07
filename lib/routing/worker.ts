@@ -129,7 +129,7 @@ async function processEvent(event: EventRow, now: Date): Promise<RoutingOutcome>
 
   const { data: conv } = await admin
     .from("conversations")
-    .select("id, organization_id, assigned_to_user_id, status")
+    .select("id, organization_id, contact_id, assigned_to_user_id, status")
     .eq("id", conversationId)
     .eq("organization_id", orgId)
     .maybeSingle();
@@ -181,7 +181,16 @@ async function processEvent(event: EventRow, now: Date): Promise<RoutingOutcome>
         await markDone(event, "assign_lost_race");
         return "assign_lost_race";
       }
-      await markDone(event, "assigned", { assigned_to_user_id: action.userId });
+      const leads = await adotarLeadsDoContato(
+        admin,
+        orgId,
+        strOrNull((conv as { contact_id?: unknown }).contact_id),
+        action.userId,
+      );
+      await markDone(event, "assigned", {
+        assigned_to_user_id: action.userId,
+        leads_adotados: leads,
+      });
       return "assigned";
     }
     case "skip": {
@@ -290,4 +299,76 @@ function strOrNull(v: unknown): string | null {
   if (typeof v !== "string") return null;
   const t = v.trim();
   return t.length > 0 ? t : null;
+}
+
+/**
+ * O rodízio distribui CONVERSA. Sem esta função ele não distribui LEAD — e é o
+ * lead que o dono do negócio olha no funil (issue #144).
+ *
+ * ## Por que isto existe
+ *
+ * `fn_conversation_assign` grava `conversations.assigned_to_user_id` e não toca
+ * em `crm_leads.owner_user_id` (medido: a função inteira só faz `update
+ * public.conversations`). Enquanto `visibility_mode` era `all` ou
+ * `own_and_unassigned`, ninguém notava: o lead sem dono aparecia para todo
+ * mundo. No modo `own` — exatamente o que a issue #144 pede — lead sem dono não
+ * aparece para NINGUÉM. O atendente receberia a conversa e o funil dele ficaria
+ * vazio. A restrição funcionaria e a fila não existiria.
+ *
+ * ## As três condições, e por que cada uma
+ *
+ * Adota só o lead que está `open` (negócio fechado não muda de dono), do
+ * `contact_id` da conversa, e **sem dono nenhum** — nem humano (`owner_user_id`)
+ * nem agente de IA (`owner_agent_id`). Roubar lead com dono transformaria o
+ * rodízio numa reatribuição silenciosa a cada mensagem nova do mesmo contato,
+ * que é o oposto de "cada um com a sua carteira".
+ *
+ * `owner_kind` entra junto com `owner_user_id` de propósito: o CHECK aceita
+ * kind nulo, então um lead com dono e sem kind some do filtro por dono e das
+ * métricas por kind — drift silencioso já registrado em `leads/_handler.ts`.
+ *
+ * Best-effort por decisão: a conversa JÁ foi atribuída quando chegamos aqui.
+ * Deixar uma exceção subir faria o evento voltar para a fila e tentar atribuir
+ * de novo uma conversa que já tem dono — troca um funil incompleto por um
+ * retry inútil. O que falhou vira log, e a próxima mensagem do contato tenta
+ * de novo.
+ */
+export async function adotarLeadsDoContato(
+  admin: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  contactId: string | null,
+  userId: string,
+): Promise<number> {
+  if (!contactId) return 0;
+  try {
+    const { data, error } = await admin
+      .from("crm_leads")
+      .update({
+        owner_user_id: userId,
+        owner_kind: "user",
+        updated_at: new Date().toISOString(),
+      })
+      .eq("organization_id", orgId)
+      .eq("contact_id", contactId)
+      .eq("status", "open")
+      .is("owner_user_id", null)
+      .is("owner_agent_id", null)
+      .select("id");
+    if (error) {
+      logger.warn("[routing-worker] não consegui dar dono ao lead do contato", {
+        organization_id: orgId,
+        contact_id: contactId,
+        error: error.message,
+      });
+      return 0;
+    }
+    return (data ?? []).length;
+  } catch (err) {
+    logger.warn("[routing-worker] adoção de lead lançou", {
+      organization_id: orgId,
+      contact_id: contactId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 0;
+  }
 }

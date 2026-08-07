@@ -48,6 +48,8 @@ interface ConversationShape {
   isBlocked?: boolean;
   sessionStatus?: string | null;
   provider?: string;
+  /** Canal excluído pelo usuário (migration 0106) — a linha sobrevive, o canal não. */
+  archivedAt?: string | null;
 }
 
 function conversationRow(shape: ConversationShape = {}): Row {
@@ -72,6 +74,7 @@ function conversationRow(shape: ConversationShape = {}): Row {
             provider: shape.provider ?? 'waha',
             waha_session_name: 'default',
             status: shape.sessionStatus ?? 'WORKING',
+            archived_at: shape.archivedAt ?? null,
           },
   };
 }
@@ -83,14 +86,32 @@ function conversationRow(shape: ConversationShape = {}): Row {
  *   rpc('emit_event')
  * O update é merge raso — igual ao que o Postgres faz com um SET de colunas.
  */
-function makeSupabase(conversation: Row, templateRow: Row | null = null) {
+function makeSupabase(
+  conversation: Row,
+  templateRow: Row | null = null,
+  /** `semColunaArquivada`: banco em que a migration 0106 ainda não rodou. */
+  opts: { semColunaArquivada?: boolean } = {},
+) {
   const state: { message: Row | null } = { message: null };
 
   const client = {
     from(table: string) {
       if (table === 'conversations') {
         return {
-          select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: conversation, error: null }) }) }),
+          select: (cols?: string) => ({
+            eq: () => ({
+              maybeSingle: async () =>
+                opts.semColunaArquivada === true && (cols ?? '').includes('archived_at')
+                  ? {
+                      data: null,
+                      error: {
+                        code: '42703',
+                        message: 'column channel_sessions_1.archived_at does not exist',
+                      },
+                    }
+                  : { data: conversation, error: null },
+            }),
+          }),
           update: () => ({ eq: async () => ({ error: null }) }),
         };
       }
@@ -425,5 +446,49 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
     expect(linha.status).toBe('failed');
     expect(linha.error_message).toMatch(/template_missing/);
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⭐ A promessa do `comment on column` de 0100 ("não é mais elegível para envio")
+   * virando comportamento. `failed` e não `queued` porque fila implica "sai depois",
+   * e por este canal não sai nunca: o número já foi deslogado no transporte, e o
+   * ledger do agente lê `queued` como algo a reconciliar mais tarde.
+   */
+  it('8. canal ARQUIVADO: failed/channel_archived, nada sai pela rede', async () => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const msg = await sendMessageHandler(
+      makeSupabase(conversationRow({ archivedAt: '2026-08-05T10:00:00.000Z' })),
+      ctx,
+      textInput(),
+    );
+
+    expect(msg.status).toBe('failed');
+    expect(msg.error_code).toBe('channel_archived');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⭐ Este é O caminho de saída do sistema (UI, automação, MCP e agente passam
+   * por aqui). Num clone que subiu o CÓDIGO sem aplicar a migration 0106 — cenário
+   * medido neste projeto —, pedir `archived_at` direto derrubaria TODO envio com
+   * 42703. Sem a coluna nada está arquivado, então repetir sem ela é o resultado
+   * exato, não um paliativo.
+   */
+  it('9. banco sem a coluna archived_at (migration não aplicada): o envio segue normalmente', async () => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn(async (..._args: unknown[]) => Response.json({ key: { id: 'TEXT9' } }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const msg = await sendMessageHandler(
+      makeSupabase(conversationRow(), null, { semColunaArquivada: true }),
+      ctx,
+      textInput(),
+    );
+
+    expect(msg.status).toBe('sent');
+    expect(msg.external_id).toBe('TEXT9');
   });
 });

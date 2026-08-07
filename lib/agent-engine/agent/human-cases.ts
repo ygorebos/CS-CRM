@@ -37,6 +37,26 @@ export interface CaseIds {
   agentId?: string | null;
 }
 
+/**
+ * O vocabulário de `agent_case_events.kind`, do lado do TypeScript.
+ *
+ * Existe para ser comparado com o CHECK do banco em
+ * `tests/invariants/vocabulario-banco-x-typescript.test.ts` — é a única classe de
+ * divergência que o compilador não enxerga, e o sintoma seria um `23514` num
+ * INSERT de caminho pouco exercitado (o registro do agente no chamado é
+ * exatamente um desses).
+ */
+export type CaseEventKind =
+  | 'opened'
+  | 'human_replied'
+  | 'lead_asked'
+  | 'lead_provided'
+  | 'lead_unresponsive'
+  | 'resolved'
+  | 'escalated'
+  | 'cancelled'
+  | 'agent_noted';
+
 /** Whitelist EXATA do payload de open_human_case — mesmo padrão .strict() da F2-10/F3-02. */
 export const openHumanCaseInputSchema = z.strictObject({
   title: z.string().min(1).max(200),
@@ -313,6 +333,93 @@ export async function escalateCase(
      union all
      select $1::uuid, id, 'escalated', 'human', $3::uuid, null::text, null::text from updated`,
     [tenantId, caseId, actorUserId, reason],
+  );
+  return transitioned(rowCount);
+}
+
+/**
+ * O AGENTE registrando o que aconteceu num chamado ABERTO.
+ *
+ * Ator `agent` e kind `agent_noted` (0100) porque a alternativa seria reusar
+ * 'lead_provided'/'human_replied' — e aí a linha do tempo do chamado diria que
+ * quem falou foi o lead ou a pessoa. Timeline que mente sobre o autor é pior que
+ * timeline curta: ela é OBEDECIDA.
+ *
+ * A guarda de estado mora no `where exists` do próprio INSERT (mesma disciplina
+ * do `openCase`): registrar em chamado já fechado seria escrever história depois
+ * do fato, e checar antes num statement separado abriria corrida entre a
+ * checagem e a escrita.
+ *
+ * @returns false quando o chamado não existe, é de outra organização ou já fechou.
+ */
+export async function registrarNotaDoAgente(
+  db: Queryable,
+  tenantId: string,
+  caseId: string,
+  body: string,
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `insert into agent_case_events (organization_id, case_id, kind, actor_kind, body)
+     select $1::uuid, c.id, 'agent_noted', 'agent', $3::text
+       from agent_cases c
+      where c.organization_id = $1 and c.id = $2 and c.status = any($4::text[])`,
+    [tenantId, caseId, body, OPEN_STATUSES],
+  );
+  return transitioned(rowCount);
+}
+
+/** Como um chamado pode terminar pela mão do agente. */
+export type DesfechoDoChamado = 'resolvido' | 'sem_necessidade';
+
+const STATUS_DO_DESFECHO: Record<DesfechoDoChamado, string> = {
+  resolvido: 'resolved',
+  sem_necessidade: 'cancelled',
+};
+
+const EVENTO_DO_DESFECHO: Record<DesfechoDoChamado, CaseEventKind> = {
+  resolvido: 'resolved',
+  sem_necessidade: 'cancelled',
+};
+
+/**
+ * awaiting_human|awaiting_lead -> resolved|cancelled, pela mão do AGENTE.
+ *
+ * Separado de `resolveCaseFromHuman` de propósito: aquela grava
+ * `actor_kind='human'` + `human_action='resolved'`, que é a afirmação de que uma
+ * PESSOA decidiu. Chamá-la a partir do agente colocaria uma decisão humana
+ * inventada no registro do chamado — e é desse registro que sai o resumo entregue
+ * ao próximo atendente.
+ *
+ * Aceita os DOIS estados abertos (diferente das transições do humano, que só
+ * saem de `awaiting_human`): o caso comum é o chamado ficar `awaiting_lead`, o
+ * lead resolver sozinho, e ninguém ter como fechar aquilo — chamado imortal na
+ * fila de outra pessoa.
+ */
+export async function encerrarChamadoPeloAgente(
+  db: Queryable,
+  tenantId: string,
+  caseId: string,
+  input: { desfecho: DesfechoDoChamado; nota: string },
+): Promise<boolean> {
+  const { rowCount } = await db.query(
+    `with updated as (
+       update agent_cases
+          set status = $3, closed_at = now(), updated_at = now()
+        where organization_id = $1 and id = $2 and status = any($6::text[])
+        returning id
+     )
+     insert into agent_case_events (organization_id, case_id, kind, actor_kind, body)
+     select $1::uuid, id, 'agent_noted', 'agent', $5::text from updated
+     union all
+     select $1::uuid, id, $4::text, 'agent', null::text from updated`,
+    [
+      tenantId,
+      caseId,
+      STATUS_DO_DESFECHO[input.desfecho],
+      EVENTO_DO_DESFECHO[input.desfecho],
+      input.nota,
+      OPEN_STATUSES,
+    ],
   );
   return transitioned(rowCount);
 }

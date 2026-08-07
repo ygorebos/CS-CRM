@@ -41,7 +41,7 @@ export const crmSendWhatsappMessage: McpToolDefinition<typeof inputShape> = {
     "Envia uma mensagem WhatsApp outbound para uma conversa existente. Forneça `idempotency_key` para evitar duplicação em retries (TTL 24h).",
   inputSchema: inputShape,
   category: "write",
-  requiresRole: "manager",
+  requiresRole: "agent",
   requiresScope: "mcp:write",
   handler: async (input, ctx) => {
     const parsed = sendMessageSchema.parse({

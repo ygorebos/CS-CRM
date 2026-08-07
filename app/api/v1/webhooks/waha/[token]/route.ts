@@ -14,6 +14,7 @@ import type { NextRequest, NextResponse } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchWahaEvent, type WahaEnvelope } from "@/lib/waha/ingest";
 import { authenticateWahaWebhook } from "@/lib/waha/webhook-auth";
@@ -43,13 +44,21 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
 
   const admin = createAdminClient();
 
-  const { data: session, error: sessErr } = await admin
-    .from("channel_sessions")
-    .select(
-      "id, organization_id, waha_session_name, webhook_secret_encrypted, status, is_warmup_complete, warmup_started_at",
-    )
-    .eq("webhook_path_token", token)
-    .maybeSingle();
+  // Canal ARQUIVADO não ingere: o usuário mandou excluí-lo e a sessão já foi
+  // removida do WAHA. O que ainda pode chegar é evento em voo (ou retentativa),
+  // e aceitá-lo ressuscitaria o canal no inbox — com o operador sem conseguir
+  // responder, porque o arquivamento deixa a sessão STOPPED.
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select(
+        "id, organization_id, waha_session_name, webhook_secret_encrypted, status, is_warmup_complete, warmup_started_at",
+      )
+      .eq("webhook_path_token", token);
+  const { data: session, error: sessErr } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null).maybeSingle(),
+    () => base().maybeSingle(),
+  );
 
   if (sessErr) {
     return fail("internal_error", sessErr.message, 500, { requestId });

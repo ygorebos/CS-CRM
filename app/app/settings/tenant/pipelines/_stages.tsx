@@ -27,6 +27,7 @@ import { LEAD_STAGES, type LeadStage } from "@/lib/agent-engine/agent/lead-state
 import { ApiError } from "@/lib/api/types";
 import { ROTULO_DO_PASSO } from "@/lib/leads/agent-mapping";
 import { Archive, CaretDown, CaretUp, Plus, Warning } from "@/lib/ui/icons";
+import { SeloDeAutoria } from "@/components/operacao/SeloDeAutoria";
 
 import { mensagemDeErro } from "./_mapping";
 
@@ -456,6 +457,15 @@ export function StagesSection({
                   Arquivar
                 </Button>
               </div>
+
+              {/* Uma coluna que apareceu no quadro sem o dono ter criado precisa
+                  dizer de onde veio — senão o assistente muda o funil e a única
+                  pista fica no log que nenhuma tela lê. */}
+              <SeloDeAutoria
+                kind={etapa.last_change_actor_kind ?? null}
+                em={etapa.last_change_at ?? null}
+                className={`etapa-autoria-${etapa.id}`}
+              />
 
               {passo && (
                 <p className="text-xs text-text-muted" data-testid={`passo-de-${etapa.id}`}>

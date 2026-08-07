@@ -16,7 +16,7 @@
  */
 import type { Pool, PoolClient, QueryResult, QueryResultRow } from 'pg';
 
-export type JobKind = 'inbound_turn' | 'followup_turn' | 'watchdog' | 'flywheel' | 'case_reply_turn';
+export type JobKind = 'inbound_turn' | 'followup_turn' | 'watchdog' | 'flywheel' | 'case_reply_turn' | 'operator_turn';
 export type JobStatus = 'pending' | 'running' | 'done' | 'failed' | 'dead';
 
 export interface JobRow {

@@ -6,17 +6,13 @@
  *   cron_jobs → job_queue → turno do agente → mensagem
  * e cada seta é um consumidor diferente. Drenar o cron avança UM elo.
  */
-import * as fs from "node:fs";
 
 import pg from "pg";
 
 import { tickCron } from "@/lib/agent-engine/cron/scheduler";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const env = Object.fromEntries(
-  fs.readFileSync(".env.local", "utf8").split("\n")
-    .filter((l) => l.includes("=") && !l.trimStart().startsWith("#"))
-    .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")]),
-);
+const env = carregarEnvLocal();
 
 const log = {
   debug: () => {}, info: () => {}, warn: () => {}, error: () => {},

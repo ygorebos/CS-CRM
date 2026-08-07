@@ -85,7 +85,15 @@ export async function GET(
       .from("lgpd_requests")
       .select("*", { count: "exact", head: true })
       .eq("organization_id", id)
-      .eq("status", "pending"),
+      // `pending` não existe em `lgpd_requests_status_check`
+      // (received/processing/completed/failed/expired), então este contador era
+      // sempre 0 e a tela jurava que o tenant não devia nada à LGPD. Aqui
+      // pendente = TUDO que ainda não fechou, sem recorte de prazo. O KPI de
+      // plataforma (`app/api/v1/admin/dashboard/kpis/route.ts`) parte do mesmo
+      // "não fechado" mas soma só o que vence nos próximos 5 dias — os dois
+      // números divergem de propósito: este é o total do tenant, aquele é a
+      // fila de SLA da plataforma.
+      .not("status", "in", "(completed,failed)"),
     admin
       .from("ai_invocations")
       .select("*", { count: "exact", head: true })
@@ -100,7 +108,9 @@ export async function GET(
       .eq("organization_id", id),
     admin
       .from("tenant_integrations")
-      .select("id, provider, status, connected_at")
+      // `connected_at` não existe: a linha passa a existir quando a integração
+      // é conectada, então `created_at` é essa mesma data com o nome real.
+      .select("id, provider, status, created_at")
       .eq("organization_id", id)
       .eq("provider", "nuvemshop")
       .limit(1),
@@ -124,7 +134,9 @@ export async function GET(
 
   const integrations = {
     nuvemshop_status: nuvemshopIntegration?.status ?? null,
-    nuvemshop_connected_at: nuvemshopIntegration?.connected_at ?? null,
+    // Nome de SAÍDA preservado: é o que TenantOverview já lê. Só a coluna de
+    // origem estava errada.
+    nuvemshop_connected_at: nuvemshopIntegration?.created_at ?? null,
   };
 
   // Audit lightweight — fire-and-forget

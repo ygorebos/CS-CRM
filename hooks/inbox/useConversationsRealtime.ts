@@ -18,6 +18,13 @@ export interface ContactSummary {
    *  só para saber SE existe foto; a imagem vem de /api/v1/contacts/{id}/avatar,
    *  que assina a URL. Opcional: conversas em cache de antes do campo existir. */
   avatar_storage_path?: string | null;
+  /**
+   * A trava irrevogável pelo agente: ligada, NENHUM envio automático sai (o
+   * guard de before-send lê esta coluna). É o sinal mais honesto de "a pessoa
+   * está no comando desta conversa" — e o que decide se o botão de devolver o
+   * atendimento aparece. Opcional: conversas em cache de antes do campo existir.
+   */
+  force_human?: boolean | null;
 }
 
 export type ConversationWithContact = Conversation & {

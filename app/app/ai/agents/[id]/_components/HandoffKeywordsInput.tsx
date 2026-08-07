@@ -31,7 +31,7 @@ export function HandoffKeywordsInput({ value, onChange, disabled }: Props) {
 
   return (
     <div className="space-y-2">
-      <Label htmlFor="handoff_kw">Palavras-chave de handoff</Label>
+      <Label htmlFor="handoff_kw">Palavras que chamam uma pessoa na hora</Label>
       <div className="flex flex-wrap gap-1 rounded border border-border/60 p-2">
         {value.map((kw) => (
           <button
@@ -61,7 +61,7 @@ export function HandoffKeywordsInput({ value, onChange, disabled }: Props) {
               add(draft);
             }
           }}
-          placeholder="Adicionar palavra-chave (Enter)"
+          placeholder="Digite uma expressão e aperte Enter"
           disabled={disabled || value.length >= 20}
           maxLength={60}
         />

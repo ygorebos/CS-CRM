@@ -11,6 +11,7 @@ const DOT_COLOR: Record<ConnectionHealth, string> = {
   connecting: "bg-warning",
   down: "bg-error",
   none: "bg-muted-foreground/40",
+  unknown: "bg-muted-foreground/40",
 };
 
 const DOT_LABEL: Record<ConnectionHealth, string> = {
@@ -18,6 +19,7 @@ const DOT_LABEL: Record<ConnectionHealth, string> = {
   connecting: "Conectando…",
   down: "Uma conexão caiu",
   none: "Nenhuma conexão",
+  unknown: "Não foi possível verificar as conexões",
 };
 
 /**
@@ -25,8 +27,11 @@ const DOT_LABEL: Record<ConnectionHealth, string> = {
  * (30s) para o usuário ver de relance quando um número cai — sem precisar abrir nada.
  */
 export function ConnectionHealthDot({ className }: { className?: string }) {
-  const { data } = useChannelSessions({ refetchInterval: 30_000 });
-  const health = deriveOverallHealth(data);
+  const { data, isError } = useChannelSessions({ refetchInterval: 30_000 });
+  // Listagem que falhou não vira "Nenhuma conexão": a bolinha é o único sinal
+  // ambiente de canal caído, e dizer "nenhuma" a quem tem número ligado é o
+  // mesmo engano da Central de Conexões — o operador conclui que perdeu tudo.
+  const health = isError ? "unknown" : deriveOverallHealth(data);
   return (
     <span
       className={cn(

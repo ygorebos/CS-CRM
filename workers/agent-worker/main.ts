@@ -23,6 +23,7 @@ import type pg from 'pg';
 import { createInboundTurnHandler } from '@/lib/agent-engine/agent/inbound-turn';
 import { createFollowupTurnHandler, type FollowupTurnDeps } from '@/lib/agent-engine/agent/followup-turn';
 import { createCaseReplyTurnHandler } from '@/lib/agent-engine/agent/case-reply-turn';
+import { createOperatorTurnHandler } from '@/lib/agent-engine/agent/operator-turn';
 import { completeTurnForEnrollment, createPgAdminClient } from '@/lib/followup/turn-bridge';
 import { seedPlatformPlaybook } from '@/lib/agent-engine/agent/playbook-seed';
 import { runCronLoop } from '@/lib/agent-engine/cron/scheduler';
@@ -422,6 +423,11 @@ export async function main(): Promise<void> {
   handlers.set('inbound_turn', createInboundTurnHandler(turnDeps));
   handlers.set('followup_turn', createFollowupTurnHandler(turnDeps));
   handlers.set('case_reply_turn', createCaseReplyTurnHandler(turnDeps));
+  // Spec 16 §3.2 — o papel OPERADOR. Registrado sempre; quem decide se ele age é
+  // `operator_enabled` na versão publicada (default false), lido a cada job. Um
+  // worker que não conhecesse o kind faria os jobs morrerem em 'dead' sem que
+  // ninguém entendesse por quê.
+  handlers.set('operator_turn', createOperatorTurnHandler(turnDeps));
   await startWorker(env, handlers, log);
 }
 

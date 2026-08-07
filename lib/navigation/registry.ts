@@ -394,6 +394,18 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     section: "Sua empresa",
   },
   {
+    // A porta que faltava (issue #144): rodízio de atendimento e restrição de
+    // visibilidade existiam inteiros no backend e não tinham NENHUMA tela — só
+    // dava para ligar com UPDATE à mão no banco.
+    href: "/app/settings/atendimento",
+    label: "Distribuição de atendimento",
+    description: "Quem recebe cada cliente novo, e o que cada atendente enxerga.",
+    icon: UsersThree,
+    group: "organizacao",
+    section: "Sua empresa",
+    minRole: "manager",
+  },
+  {
     href: "/app/settings/tenant",
     label: "Organização",
     description: "Dados da empresa, retenção de dados e encarregado de LGPD.",

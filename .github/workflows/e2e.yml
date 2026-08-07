@@ -1,7 +1,11 @@
 name: e2e
 
-# Issue #63: as 20 specs de tests/e2e/ não rodavam em lugar nenhum. Este job
-# fecha o buraco começando pelo subconjunto que não depende de serviço externo.
+# Issue #63: as specs de tests/e2e/ não rodavam em lugar nenhum. Este job fecha o
+# buraco com o subconjunto que não depende de serviço externo — hoje 29 de 33.
+#
+# A execução é dividida em DUAS invocações do playwright de propósito: o
+# limitador de login do produto é por IP (60/300s) e no CI todos os specs vêm do
+# mesmo 127.0.0.1. Ver o comentário do passo "E2E — parte 1 de 2".
 #
 # NÃO-BLOQUEANTE por ausência, não por mordaça: `e2e` não está na lista de
 # checks obrigatórios da branch protection, então falhar aqui não segura merge.
@@ -81,27 +85,99 @@ jobs:
             echo "SUPABASE_SERVICE_ROLE_KEY=$(grep '^SERVICE_ROLE_KEY=' /tmp/sb.env | cut -d'"' -f2)"
           } >> "$GITHUB_ENV"
 
-      - name: Build de produção
-        run: pnpm build
+      # O `.env.e2e` é o ambiente da suíte, e ele NASCE aqui — não é opcional.
+      #
+      # `playwright.config.ts` passou a exigi-lo e a falhar alto quando falta,
+      # de propósito: sem ele o `next start` carrega o `.env.local`, que num
+      # checkout de trabalho aponta para PRODUÇÃO. O modo de falha que isso
+      # substitui é a suíte escrever organizações e usuários de teste no banco
+      # real, passando verde.
+      #
+      # No CI o `.env.local` aponta para o Supabase local, então o risco não é o
+      # mesmo — mas o contrato é único, e um workflow que contorna o gate seria
+      # o começo de ele não valer para ninguém.
+      - name: Gerar o .env.e2e (ambiente da suíte)
+        run: pnpm e2e:env
+
+      # E publica o arquivo no ambiente do JOB, para que servidor e testes leiam
+      # literalmente a mesma fonte.
+      #
+      # Sem isto havia duas: o `.env.e2e` (que o playwright.config injeta no
+      # `next start`) e um bloco `env:` copiado à mão em cada passo de teste. As
+      # duas divergiram — `INTERNAL_SECRET` valia `e2e-placeholder…` no servidor
+      # e `ci-placeholder…` no processo de teste. Sintoma medido: 401 em toda
+      # chamada a rota interna, 8 specs vermelhas (6 de system-update no
+      # heartbeat, o drain do anti-SSRF, e o invite-lifecycle).
+      #
+      # Medido no Playwright 1.5x: `webServer.env` MESCLA com o ambiente herdado
+      # (uma var só do shell chega ao servidor) e VENCE nas colisões. Ou seja,
+      # copiar valores à mão nunca ia empatar com o arquivo — só uma fonte
+      # empata.
+      #
+      # De brinde, o processo de teste passa a ver as chaves de CIFRA de verdade
+      # (32 bytes, geradas pelo script) em vez do rótulo de 21 caracteres que o
+      # bloco `env:` fixava e que o app recusa.
+      - name: Publicar o .env.e2e no ambiente do job
+        run: grep -vE '^[[:space:]]*(#|$)' .env.e2e >> "$GITHUB_ENV"
+
+      # `pnpm e2e:build`, não `pnpm build`: as três `NEXT_PUBLIC_*` são embutidas
+      # no BUNDLE durante o build. Buildar com um env e trocar só no `next start`
+      # deixaria a URL errada dentro do JavaScript que roda no browser — servidor
+      # falando com um banco e cliente com outro, no mesmo teste.
+      - name: Build de produção (com o ambiente do E2E)
+        run: pnpm e2e:build
         env:
           NEXT_TELEMETRY_DISABLED: "1"
 
       - name: Instalar o browser
         run: pnpm exec playwright install --with-deps chromium
 
-      # O seed lê `.env.local` do cwd (não de process.env), então o arquivo é
-      # escrito aqui. Ele cria 1 org + 4 usuários com os 4 papéis e um TOTP
-      # verified de secret conhecido no admin — sem isso, todo spec que loga
-      # fica de fora, que era a maior parte da suíte.
+      # `.env.local` é CÓPIA do `.env.e2e`, não uma terceira redação dele.
+      #
+      # O arquivo precisa existir porque alguns seeds leem `.env.local` do disco,
+      # não de `process.env`. Ele era montado à mão aqui, com os valores
+      # redigitados — e foi a terceira fonte do mesmo `INTERNAL_SECRET`, com o
+      # terceiro valor. Copiar não pode divergir; redigitar já divergiu.
+      #
+      # No CI as duas apontam para o mesmo stack local, então a cópia não
+      # reintroduz o risco que o `.env.e2e` existe para evitar (o `.env.local` de
+      # um checkout de trabalho apontar para produção).
+      #
+      # O seed cria 1 org + 4 usuários com os 4 papéis e um TOTP verified de
+      # secret conhecido no admin — sem ele, todo spec que loga fica de fora, que
+      # era a maior parte da suíte.
       - name: Semear credenciais de teste
         run: |
-          cat > .env.local <<EOF
-          NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL
-          NEXT_PUBLIC_SUPABASE_ANON_KEY=$NEXT_PUBLIC_SUPABASE_ANON_KEY
-          SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY
-          INTERNAL_SECRET=ci-placeholder-nao-e-segredo
-          EOF
+          cp .env.e2e .env.local
           pnpm exec tsx scripts/seed-e2e-credentials.ts
+
+      # `SUPABASE_DB_URL` no `.env.local` (e não só no `env:` do passo de teste):
+      # `seed-e2e-escalacao.ts` abre um `pg.Pool` direto, e o `.env.local` é a
+      # única fonte que ele lê. Sem a linha, o `pg` cai no default 5432 e morre
+      # com ECONNREFUSED — o stack local do Supabase publica o Postgres na 54322.
+      # Medido: foi exatamente assim que a primeira execução deste passo falhou.
+      #
+      # A maioria das specs roda o próprio seed num `beforeAll`. Estas TRÊS não
+      # — ou o cabeçalho manda rodar à mão, ou a fixture é de outra spec.
+      #
+      # `seed-e2e-followup-agent` (credencial de IA + sessão de canal) é o caso
+      # sutil: `followup-builder` o roda no próprio `beforeAll`, mas
+      # `agente-novo-e-uso` PRECISA das mesmas fixtures e vem ANTES na ordem
+      # alfabética — em banco fresco os comboboxes de credencial e canal abrem
+      # com a opção desabilitada e o clique estoura por timeout. Medido: o
+      # ensaio local passou porque o banco tinha as fixtures de uma rodada
+      # anterior; o CI, fresco, reprovou. Rodar aqui torna a precondição
+      # explícita em vez de depender da ordem dos arquivos.
+      #
+      # `--env-file` só na segunda, e a diferença não é capricho: o seed de
+      # capacidades importa `lib/env.ts` (via lib/ai/embed.ts), que lê
+      # `process.env`; o de escalação parseia o `.env.local` por conta própria.
+      # Sem a flag o de capacidades morre na validação Zod das 3 vars do Supabase.
+      - name: Semear as fixtures que as specs não semeiam sozinhas
+        run: |
+          pnpm exec tsx scripts/seed-e2e-escalacao.ts
+          pnpm exec tsx --env-file=.env.local scripts/seed-e2e-capacidades-ausentes.ts
+          pnpm exec tsx scripts/seed-e2e-followup-agent.ts
 
       # O que ficou DE FORA (e por quê) é declarado no passo de summary —
       # cobertura parcial silenciosa se lê como cobertura total.
@@ -110,14 +186,32 @@ jobs:
       # `required()` no lib/env.ts vira obrigatória, inclusive as de serviço que
       # estes specs nem tocam. Os valores abaixo são PLACEHOLDERS FALSOS, só
       # para o boot passar da validação Zod — nenhum segredo real entra aqui.
-      - name: E2E (subconjunto sem dependência externa)
+      # DUAS INVOCAÇÕES, e não uma — o motivo é medido, não estético.
+      #
+      # `lib/auth/rate-limit.ts` limita login a 60 por IP a cada 300s. No CI todo
+      # spec loga do mesmo 127.0.0.1, e ao subir a suíte de 15 para 29 specs o
+      # pico passou a ser 69–73 tentativas na janela: a suíte estourava o próprio
+      # teto do produto. O sintoma não é honesto — o login simplesmente não
+      # redireciona, e a spec sorteada pelo momento da saturação é a que falha.
+      # Foi assim que `risk-radar` caiu na main e `rbac-roles` num PR, sem
+      # nenhuma das duas ter mudado.
+      #
+      # Sem Upstash configurado, o limitador cai para memória DO PROCESSO (o log
+      # diz: "redis incr failed; falling back to in-memory"), e o
+      # `reuseExistingServer: false` do playwright.config.ts faz cada invocação
+      # subir o SEU `next start`. Duas invocações = dois processos = dois
+      # contadores, e o pico por processo volta para ~40.
+      #
+      # A alternativa seria afrouxar o teto por env — mexer num controle de
+      # segurança para acomodar o teste, que é a troca errada.
+      #
+      # `--workers=1` não é preciosismo: os specs compartilham UMA conta admin
+      # com MFA, e código TOTP é de uso único por janela no GoTrue. Com dois
+      # workers, dois specs gerando o mesmo código no mesmo intervalo de 30s
+      # fazem o segundo ser recusado como replay. Foi o que derrubava a
+      # `reset-password-mfa` (issue #80): ela passa sozinha e falha em paralelo.
+      - name: E2E — parte 1 de 2
         run: |
-          # --workers=1 não é preciosismo: os specs compartilham UMA conta admin
-          # com MFA, e código TOTP é de uso único por janela no GoTrue. Com dois
-          # workers, dois specs gerando o mesmo código no mesmo intervalo de 30s
-          # fazem o segundo ser recusado como replay. Foi o que derrubava a
-          # `reset-password-mfa` (issue #80): ela passa sozinha e falha em
-          # paralelo. Paralelizar de novo exige conta própria por spec.
           pnpm exec playwright test --workers=1 \
             smoke.spec.ts auth.spec.ts error-pages.spec.ts \
             password-recovery.spec.ts signup-journey.spec.ts \
@@ -126,16 +220,30 @@ jobs:
             kanban-owner-filter.spec.ts queue-assign.spec.ts \
             risk-radar.spec.ts invite-lifecycle.spec.ts system-update.spec.ts
         env:
-          INTERNAL_SECRET: ci-placeholder-nao-e-segredo
-          CPF_ENCRYPTION_KEY: ci-placeholder-nao-e-segredo
-          WAHA_BYO_ENCRYPTION_KEY: ci-placeholder-nao-e-segredo
-          AI_CRED_AES_KEY: ci-placeholder-nao-e-segredo
-          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
-          WAHA_API_BASE_URL: http://127.0.0.1:3999
-          WAHA_API_KEY: ci-placeholder-nao-e-segredo
-          WAHA_WEBHOOK_BASE_URL: http://127.0.0.1:3001
-          UPSTASH_REDIS_REST_URL: http://127.0.0.1:3998
-          UPSTASH_REDIS_REST_TOKEN: ci-placeholder-nao-e-segredo
+          # Só o que NÃO vem do `.env.e2e`: isto é ajuste de CI, não config do
+          # produto. CI = 1 IP para todos os specs, e o teto de produção
+          # (60/5min) é irreal aqui. O teto por CONTA (5 falhas) NÃO muda — é
+          # ele que barra brute force.
+          AUTH_RATE_LIMIT_LOGIN_IP: "1000"
+
+      - name: E2E — parte 2 de 2 (processo novo, contador de login zerado)
+        run: |
+          pnpm exec playwright test --workers=1 \
+            agente-novo-e-uso.spec.ts agente-organiza-operacao.spec.ts \
+            central-de-avisos-capacidades.spec.ts escalacao-ciclo.spec.ts \
+            navegacao.spec.ts olhar-telas-do-epico.spec.ts pipelines-gestao.spec.ts \
+            qa-agente-usa-as-maos.spec.ts qa-selo-no-funil-usado.spec.ts \
+            qa-telas-descobertas-w4.spec.ts retorno-anti-morte.spec.ts \
+            followup-builder.spec.ts followup-queue.spec.ts \
+            distribuicao-atendimento.spec.ts followup-journey.spec.ts \
+            webhooks.spec.ts \
+            capacidades-do-agente.spec.ts
+        env:
+          # Só o que NÃO vem do `.env.e2e`: isto é ajuste de CI, não config do
+          # produto. CI = 1 IP para todos os specs, e o teto de produção
+          # (60/5min) é irreal aqui. O teto por CONTA (5 falhas) NÃO muda — é
+          # ele que barra brute force.
+          AUTH_RATE_LIMIT_LOGIN_IP: "1000"
 
       - name: Declarar o que este job ainda NÃO cobre
         if: always()
@@ -143,17 +251,18 @@ jobs:
           {
             echo "## E2E — cobertura deste job"
             echo ""
-            echo "**Rodou (15 de 20 specs):** smoke, auth, error-pages, password-recovery,"
+            echo "**Rodou (32 de 33 specs):** smoke, auth, error-pages, password-recovery,"
             echo "signup-journey, rbac-roles, inbox-scope, reset-password-mfa,"
             echo "degradacao-silenciosa, vps-webhook-outbound-ssrf, kanban-owner-filter,"
-            echo "queue-assign, risk-radar, invite-lifecycle, system-update."
+            echo "queue-assign, risk-radar, invite-lifecycle, system-update,"
+            echo "agente-novo-e-uso, agente-organiza-operacao, central-de-avisos-capacidades,"
+            echo "escalacao-ciclo, navegacao, olhar-telas-do-epico, pipelines-gestao,"
+            echo "qa-agente-usa-as-maos, qa-selo-no-funil-usado, qa-telas-descobertas-w4,"
+            echo "retorno-anti-morte, followup-builder, followup-queue,"
+            echo "distribuicao-atendimento, followup-journey, capacidades-do-agente, webhooks."
             echo ""
-            echo "**Não rodou (5):**"
-            echo "- precisa de WAHA: followup-journey, webhooks"
+            echo "**Não rodou (1):**"
             echo "- precisa de WAHA + Redis + Resend + Nuvemshop: vps-fresh-onboarding (P0)"
-            echo "- seed próprio falha neste ambiente (medido): followup-builder"
-            echo "  (seed-e2e-followup-agent.ts não grava followup_agent_fixtures) e"
-            echo "  followup-queue (followup_promise ausente em .e2e-creds.json)."
             echo ""
             echo "Expandir é trabalho de seguimento — issue #63."
           } >> "$GITHUB_STEP_SUMMARY"

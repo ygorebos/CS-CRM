@@ -11,12 +11,12 @@
  *
  * Run: npx tsx tests/sonda-decisao-chega-no-agente.ts
  */
-import * as fs from "node:fs";
 
 import { Pool } from "pg";
 
 import { getLeadContext } from "../lib/agent-engine/edge/crm/get-lead-context";
 import { carimbar } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
 carimbar([
   "tests/sonda-decisao-chega-no-agente.ts",
@@ -24,14 +24,7 @@ carimbar([
   "app/api/v1/leads/[id]/next-action/route.ts",
 ]);
 
-const DB = fs
-  .readFileSync(".env.local", "utf8")
-  .split("\n")
-  .find((l) => l.startsWith("SUPABASE_DB_URL="))!
-  .split("=")
-  .slice(1)
-  .join("=")
-  .replace(/"/g, "");
+const DB = carregarEnvLocal().SUPABASE_DB_URL!;
 
 async function main(): Promise<void> {
   const pool = new Pool({ connectionString: DB });

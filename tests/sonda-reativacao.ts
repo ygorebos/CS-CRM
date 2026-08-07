@@ -6,21 +6,15 @@
  * chega ao fim e a demanda NÃO morre em silêncio — sai do card, entra na
  * timeline e vira item de caixa com ação nomeada.
  */
-import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { createClient } from "@supabase/supabase-js";
 
 import { venceReativacoes } from "@/lib/leads/reactivation";
 import { observaTravessias } from "@/lib/leads/risk-worker";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const e = Object.fromEntries(
-  fs
-    .readFileSync(".env.local", "utf8")
-    .split("\n")
-    .filter((l) => l.includes("=") && !l.trimStart().startsWith("#"))
-    .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")]),
-);
+const e = carregarEnvLocal();
 const admin = createClient(e.NEXT_PUBLIC_SUPABASE_URL!, e.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
 });

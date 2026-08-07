@@ -57,6 +57,8 @@ export const ACTION_CODES: string[] = [
   "contact.blocked",
   "ai.handoff_triggered",
   "ai.reactivated_by_agent",
+  "ai.case_noted_by_agent",
+  "ai.case_closed_by_agent",
   "conversation.usable_for_rag_toggled",
   "rag.conversations_batch_run",
   "lgpd.redact_received",

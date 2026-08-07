@@ -60,6 +60,8 @@ export interface UpdateRouterInput {
   name?: string;
   is_active?: boolean;
   fallback_agent_id?: string | null;
+  /** Mesclada com a config existente pelo PATCH — mandar um campo não apaga os outros. */
+  config?: Record<string, unknown>;
 }
 
 const LIST_KEY = ["routers"];

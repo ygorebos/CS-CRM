@@ -18,6 +18,13 @@ export type AgentStatus = "published" | "draft" | "paused" | "archived" | "inval
 export function deriveAgentStatus(agent: AgentRow): AgentStatus {
   if (agent.archived_at) return "archived";
   if (!agent.published_version_id) return "draft";
+  // `is_active` só tem semântica no rag_bot legado. Para mcp_agent, "no ar" é
+  // published_version_id + não arquivado — é assim que o dispatcher do CRM e o
+  // agent-engine escolhem o agente, e nenhum dos dois lê a coluna. Consultá-la
+  // aqui marcava como "Pausado" um agente que está respondendo, sem saída pela
+  // UI: "Despausar" fica disabled para mcp_agent, unpauseAgentAction recusa com
+  // publish_required, e republicar não mexe em is_active.
+  if (agent.kind === "mcp_agent") return "published";
   return agent.is_active ? "published" : "paused";
 }
 

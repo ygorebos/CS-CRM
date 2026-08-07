@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { listSelectableChannels } from "@/lib/channels/selectable";
 import { createClient } from "@/lib/supabase/server";
 import type { RouterListItem } from "@/hooks/ai/useRouters";
-import type { ChannelSessionLite } from "../agents/[id]/_components/AgentForm";
 import { RoutersClient } from "./_client";
 
 export const dynamic = "force-dynamic";
@@ -20,17 +20,14 @@ export default async function RoutersPage() {
 
   const supabase = await createClient();
 
-  const [{ data: routerRows }, { data: memberRows }, { data: channelRows }] = await Promise.all([
+  const [{ data: routerRows }, { data: memberRows }, channelSessions] = await Promise.all([
     supabase
       .from("ai_routers")
       .select("id, name, channel_session_id, is_active, fallback_agent_id, updated_at")
       .eq("organization_id", activeOrg.orgId)
       .order("created_at", { ascending: false }),
     supabase.from("ai_router_members").select("router_id").eq("organization_id", activeOrg.orgId),
-    supabase
-      .from("channel_sessions")
-      .select("id, display_name, status, phone_number, waha_session_name")
-      .eq("organization_id", activeOrg.orgId),
+    listSelectableChannels(supabase, activeOrg.orgId),
   ]);
 
   const counts = new Map<string, number>();
@@ -41,13 +38,6 @@ export default async function RoutersPage() {
   const routers: RouterListItem[] = (routerRows ?? []).map((r) => ({
     ...r,
     member_count: counts.get(r.id) ?? 0,
-  }));
-
-  const channelSessions: ChannelSessionLite[] = (channelRows ?? []).map((c) => ({
-    id: c.id,
-    display_name: c.display_name ?? c.waha_session_name,
-    status: c.status,
-    phone_number: c.phone_number ?? null,
   }));
 
   return (

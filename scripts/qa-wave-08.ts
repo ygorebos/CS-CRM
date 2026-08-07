@@ -7,22 +7,9 @@ import { chromium, type BrowserContext, type APIRequestContext } from "@playwrig
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "fs";
 import * as path from "path";
-// inline minimal .env.local loader (avoid extra deps)
-{
-  const envPath = path.resolve(process.cwd(), ".env.local");
-  if (fs.existsSync(envPath)) {
-    for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-      if (m && m[1] && !process.env[m[1]]) {
-        let v = m[2] ?? "";
-        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-          v = v.slice(1, -1);
-        }
-        process.env[m[1]] = v;
-      }
-    }
-  }
-}
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
+// `process.env` vence o `.env.local` (scripts/lib/env-de-teste.ts).
+carregarEnvLocal();
 
 const BASE_URL = "http://localhost:3000";
 const ARTIFACTS_DIR = path.resolve(process.cwd(), "test-results/wave-08");

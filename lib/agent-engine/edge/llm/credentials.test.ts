@@ -5,7 +5,12 @@ vi.mock("@/lib/crypto/aes_gcm", () => ({
   decryptKey: () => "chave-byok-da-org",
 }));
 
-import { resolveOrgLlmConfig, LlmNotConfiguredError, type LlmEdgeConfig } from "./credentials";
+import {
+  llmEdgeConfigFromEnv,
+  resolveOrgLlmConfig,
+  LlmNotConfiguredError,
+  type LlmEdgeConfig,
+} from "./credentials";
 
 /** Pool falso: 1ª query devolve settings->'llm', 2ª devolve credenciais BYOK. */
 function poolFake(settingsLlm: unknown, credenciais: unknown[]) {
@@ -62,5 +67,47 @@ describe("resolveOrgLlmConfig — chave de plataforma por provider", () => {
     await expect(
       resolveOrgLlmConfig(poolFake({ provider: "openai" }, SEM_BYOK), {}, "org-1"),
     ).rejects.toBeInstanceOf(LlmNotConfiguredError);
+  });
+});
+
+/**
+ * A ponte que faltava. Os testes acima provam que `resolveOrgLlmConfig` USA
+ * `openaiApiKey` — e passavam. Só que nenhum caminho do agente PREENCHIA o campo:
+ * `llmEdgeConfigFromEnv` montava apenas a chave da Anthropic, e o único lugar que
+ * preenchia a da OpenAI era o worker de transcrição, na mão.
+ *
+ * Guardar a função de consumo não guarda o call site: a instalação tinha a chave
+ * no `.env`, o teste do consumidor estava verde, e o agente OpenAI morria com
+ * "org sem credencial LLM utilizável".
+ */
+describe("llmEdgeConfigFromEnv — o que sai do .env chega ao turno", () => {
+  it("leva a chave da OpenAI, não só a da Anthropic", () => {
+    const cfg = llmEdgeConfigFromEnv({
+      ANTHROPIC_API_KEY: "sk-ant-x",
+      OPENAI_API_KEY: "sk-proj-y",
+    });
+    expect(cfg.anthropicApiKey).toBe("sk-ant-x");
+    expect(cfg.openaiApiKey).toBe("sk-proj-y");
+  });
+
+  it("chave ausente continua ausente — string vazia não vira credencial", () => {
+    const cfg = llmEdgeConfigFromEnv({ ANTHROPIC_API_KEY: "sk-ant-x", OPENAI_API_KEY: "" });
+    expect(cfg).not.toHaveProperty("openaiApiKey");
+  });
+
+  it("só OpenAI configurada: a config sai utilizável mesmo sem a Anthropic", () => {
+    const cfg = llmEdgeConfigFromEnv({ OPENAI_API_KEY: "sk-proj-y" });
+    expect(cfg).not.toHaveProperty("anthropicApiKey");
+    expect(cfg.openaiApiKey).toBe("sk-proj-y");
+  });
+
+  it("o caminho inteiro: chave do .env resolve um modelo OpenAI numa org sem BYOK", async () => {
+    const cfg = llmEdgeConfigFromEnv({ OPENAI_API_KEY: "sk-proj-do-env" });
+    const out = await resolveOrgLlmConfig(
+      poolFake({ provider: "openai", default_model: "gpt-5-mini" }, SEM_BYOK),
+      cfg,
+      "org1",
+    );
+    expect(out.apiKey).toBe("sk-proj-do-env");
   });
 });

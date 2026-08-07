@@ -26,6 +26,34 @@ export const routingConfigSchema = z.object({
 });
 export type RoutingConfig = z.infer<typeof routingConfigSchema>;
 
+/**
+ * `organizations.settings.visibility_mode` — o escopo de leitura do role
+ * `agent` em conversas, mensagens e leads (spec 13 §3.5, decisão G1-06a).
+ *
+ * Mora em `settings.visibility_mode`, IRMÃO de `settings.routing` e não dentro
+ * dele: as funções de RLS (`fn_can_view_lead`, `fn_can_view_conversation`) leem
+ * esse caminho exato. Aninhar aqui por arrumação quebraria a RLS em silêncio.
+ *
+ * O tipo canônico é o de `lib/auth/types.ts` (usado pelo layout e pelo inbox);
+ * aqui só se declara a validação do input externo. A `satisfies` abaixo é o que
+ * impede as duas listas de divergirem sem ninguém notar.
+ */
+export const VISIBILITY_MODES = ["all", "own_and_unassigned", "own"] as const;
+export type VisibilityModeInput = (typeof VISIBILITY_MODES)[number];
+
+/**
+ * Corpo do PATCH de `/api/v1/settings/routing`.
+ *
+ * `visibility_mode` é OPCIONAL de propósito: um cliente que só quer mudar o modo
+ * de roteamento continua mandando o mesmo corpo de antes, e a visibilidade fica
+ * como está. Mandar `visibility_mode` sem querer mudá-la é o erro que faria uma
+ * org perder a restrição por descuido de um cliente antigo.
+ */
+export const atendimentoConfigPatchSchema = routingConfigSchema.extend({
+  visibility_mode: z.enum(VISIBILITY_MODES).optional(),
+});
+export type AtendimentoConfigPatch = z.infer<typeof atendimentoConfigPatchSchema>;
+
 /** Uma janela de disponibilidade: dow 0=domingo … 6=sábado, "HH:MM"–"HH:MM". */
 export const scheduleWindowSchema = z
   .object({

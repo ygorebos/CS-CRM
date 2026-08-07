@@ -156,6 +156,7 @@ function buildFollowupOpeningMessage(
   leadState: LeadStateRow | null,
   context: LeadContext,
   notesIndexBlock: string,
+  projeta = false,
 ): string {
   return [
     'Follow-up agendado: você havia combinado retornar a este lead — NÃO houve nova mensagem dele desde então.',
@@ -163,7 +164,7 @@ function buildFollowupOpeningMessage(
     '## Contexto temporal do follow-up',
     temporalBlock,
     '',
-    ...ritualBlocks(previous, leadState, context, notesIndexBlock),
+    ...ritualBlocks(previous, leadState, context, notesIndexBlock, projeta),
     '',
     'Retome a conversa com naturalidade usando a tool send_message — NUNCA escreva a resposta como texto direto',
     '(texto fora de tool é descartado pelo runtime). Use get_lead_context se precisar reler o contexto.',
@@ -220,15 +221,37 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
     // Ids de envio resolvidos da conversa 1:1 mais recente do contato (fonte
     // confiável, mesmo banco — a tabela-espelho leads morreu na fusão). Um follow-up
     // só existe para contato que já conversou; ausência é anomalia → dead-letter.
-    const { rows } = await pool.query<{ id: string; channel_session_id: string | null }>(
-      `select id, channel_session_id from conversations
-       where organization_id = $1 and contact_id = $2 and is_group = false
-       order by last_message_at desc nulls last limit 1`,
+    //
+    // `to_jsonb(cs) ->> 'archived_at'` em vez de `cs.archived_at`: a coluna nasce na
+    // migration 0106 e, num clone que subiu o código sem aplicá-la, referenciá-la
+    // direto derrubaria TODO follow-up com 42703. `to_jsonb` de uma linha sem a
+    // chave devolve NULL — que é o valor certo, porque sem a coluna nada está
+    // arquivado.
+    const { rows } = await pool.query<{
+      id: string;
+      channel_session_id: string | null;
+      channel_archived_at: string | null;
+    }>(
+      `select c.id,
+              c.channel_session_id,
+              to_jsonb(cs) ->> 'archived_at' as channel_archived_at
+         from conversations c
+         left join channel_sessions cs
+           on cs.id = c.channel_session_id and cs.organization_id = c.organization_id
+        where c.organization_id = $1 and c.contact_id = $2 and c.is_group = false
+        order by c.last_message_at desc nulls last limit 1`,
       [tenantId, leadId],
     );
     const conv = rows[0];
     if (conv === undefined || conv.channel_session_id === null) {
       throw new Error('followup_turn sem conversa/número do contato — impossível retomar o contato');
+    }
+    // Canal excluído pelo usuário: o número já foi deslogado no transporte. O envio
+    // seria recusado lá na frente pelo handler, mas o turno inteiro (chamada de
+    // modelo inclusive) já teria sido pago para produzir um texto que não sai.
+    // Dead-letter com o motivo escrito, em vez de fila retentando contra o vazio.
+    if (conv.channel_archived_at !== null) {
+      throw new Error('followup_turn para canal arquivado — o número foi excluído da Central de Conexões');
     }
 
     const clock = deps.clock ?? ((): Date => new Date());
@@ -265,7 +288,7 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
     await runAgentTurn(deps, job, pool, ctx, {
       channelSessionId: conv.channel_session_id,
       conversationId: conv.id,
-      buildOpening: ({ previous, leadState, context, notesIndexBlock }) => {
+      buildOpening: ({ previous, leadState, context, notesIndexBlock, projeta }) => {
         const temporalBlock = buildTemporalBlock({
           now: clock(),
           reason: payload.reason,
@@ -273,7 +296,7 @@ export function createFollowupTurnHandler(deps: FollowupTurnDeps) {
           promisedAt: payload.promised_at,
           lastInbound: lastInboundOf(context),
         });
-        return buildFollowupOpeningMessage(temporalBlock, previous, leadState, context, notesIndexBlock);
+        return buildFollowupOpeningMessage(temporalBlock, previous, leadState, context, notesIndexBlock, projeta);
       },
     });
   };
@@ -326,9 +349,9 @@ async function runFlowDrivenTurn(
     await runAgentTurn(deps, job, pool, ctx, {
       channelSessionId: target.channelSessionId,
       conversationId: target.conversationId,
-      buildOpening: ({ previous, leadState, context, notesIndexBlock }) => {
+      buildOpening: ({ previous, leadState, context, notesIndexBlock, projeta }) => {
         const temporalBlock = buildTemporalBlock({ now: clock(), lastInbound: lastInboundOf(context) });
-        const opening = buildFollowupOpeningMessage(temporalBlock, previous, leadState, context, notesIndexBlock);
+        const opening = buildFollowupOpeningMessage(temporalBlock, previous, leadState, context, notesIndexBlock, projeta);
         if (!input.promptHint) return opening;
         return `${opening}\n\n## Orientação do passo do fluxo\n${input.promptHint}`;
       },

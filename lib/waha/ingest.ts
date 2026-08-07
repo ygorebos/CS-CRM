@@ -15,6 +15,7 @@ import { audit } from "@/lib/audit";
 import type { createAdminClient } from "@/lib/supabase/admin";
 import { ackToStatus } from "@/lib/types/messaging";
 import { bareWaMessageId, chatIdFromWaMessageId } from "@/lib/waha/message-id";
+import { logger } from "@/lib/logger";
 
 type Admin = ReturnType<typeof createAdminClient>;
 
@@ -416,7 +417,23 @@ async function handleInbound(
     console.error("[waha.ingest] message insert failed", insertErr.message);
     return;
   }
-  if (insertErr?.code === "23505") return;
+  if (insertErr?.code === "23505") {
+    // O `return` está certo — reingerir duplicaria a mensagem do cliente. Mas
+    // sair MUDO era o defeito: "5 mensagens, 4 jobs" fica indistinguível entre
+    // dedup legítimo e mensagem perdida por outro caminho, e a pergunta "cadê o
+    // turno dessa?" passa a não ter resposta no log.
+    //
+    // Não é erro, é evento esperado — por isso `info` e não `error`. O que ele
+    // paga é a CONTAGEM: sem a linha, o silêncio de um dedup normal e o de uma
+    // perda têm a mesma cara.
+    logger.info("waha.ingest: inbound ja ingerido, dedup por external_id", {
+      organization_id: session.organization_id,
+      conversation_id: conversationId,
+      external_id: p.id,
+      direcao: "inbound",
+    });
+    return;
+  }
 
   await markConversation(admin, session.organization_id, conversationId, "inbound", previewFromMessage(p), now);
 
@@ -567,7 +584,10 @@ async function handleOutboundFromUserPhone(
     .maybeSingle();
   if (jaRegistrada) return; // nasceu no envio; quem atualiza o status é o ack
 
-  const contactId = await upsertContact(admin, session.organization_id, parsed, chatId, notifyNameOf(p));
+  // fromMe: o pushName do payload é o do OPERADOR, não do destinatário —
+  // repassá-lo batizaria o contato do cliente com o nome da loja (e o
+  // coalesce do fn_upsert_wa_contact congelaria o nome errado).
+  const contactId = await upsertContact(admin, session.organization_id, parsed, chatId, null);
   if (!contactId) return;
   const conversationId = await upsertConversation(admin, session.organization_id, contactId, session.id);
   if (!conversationId) return;
@@ -598,7 +618,15 @@ async function handleOutboundFromUserPhone(
     console.error("[waha.ingest] outbound insert failed", insertErr.message);
     return;
   }
-  if (insertErr?.code === "23505") return;
+  if (insertErr?.code === "23505") {
+    // Mesma razão do inbound: dedup é esperado, invisível não.
+    logger.info("waha.ingest: outbound ja ingerido, dedup por external_id", {
+      organization_id: session.organization_id,
+      external_id: p.id,
+      direcao: "outbound",
+    });
+    return;
+  }
 
   await markConversation(admin, session.organization_id, conversationId, "outbound", previewFromMessage(p), now);
 

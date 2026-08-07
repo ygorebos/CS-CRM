@@ -8,6 +8,7 @@ import { useAuth } from "@/hooks/auth/AuthProvider";
 import { useClaimConversation } from "@/hooks/inbox/useClaimConversation";
 import { useReleaseConversation } from "@/hooks/inbox/useReleaseConversation";
 import { useCloseConversation } from "@/hooks/inbox/useCloseConversation";
+import { useResumeAiAttendance } from "@/hooks/inbox/useResumeAiAttendance";
 import { ReassignDialog } from "@/components/inbox/ReassignDialog";
 import { SnoozeButton } from "@/components/inbox/SnoozeButton";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
@@ -18,6 +19,12 @@ interface Props {
 
 const STATUS_LABEL: Record<string, string> = {
   open: "Aberta",
+  // É EXATAMENTE o estado em que a passagem para humano deixa a conversa
+  // (`performHumanHandoff`: 'ai_handling' → 'pending'), e o rótulo faltava — toda
+  // conversa escalada mostrava `pending` cru no rosto do atendente. O
+  // `conversationStatusSchema` não lista 'pending' porque valida ENTRADA da API;
+  // quem escreve este estado é o motor, e a tela precisa saber lê-lo.
+  pending: "Aguardando atendente",
   claimed: "Em atendimento",
   ai_handling: "IA atendendo",
   closed: "Fechada",
@@ -29,6 +36,7 @@ export function ConversationHeader({ conversation }: Props) {
   const claim = useClaimConversation();
   const release = useReleaseConversation();
   const close = useCloseConversation();
+  const retomar = useResumeAiAttendance();
   const [reassignOpen, setReassignOpen] = useState(false);
 
   const c = conversation.contacts ?? null;
@@ -38,6 +46,18 @@ export function ConversationHeader({ conversation }: Props) {
   const isMineAssigned = conversation.assigned_to_user_id === user.id;
   const isOpen = status === "open" || conversation.assigned_to_user_id == null;
 
+  /**
+   * A conversa saiu do atendimento automático? As DUAS travas contam: o silêncio
+   * na conversa e o `force_human` no contato. Olhar só o silêncio deixaria de
+   * oferecer a volta justamente no caso em que ela mais falta — o contato travado
+   * com a conversa já liberada, em que nenhum envio automático sai e nada na tela
+   * explica por quê.
+   */
+  const silenciada =
+    conversation.bot_silenced_until !== null && conversation.bot_silenced_until !== undefined;
+  const emAtendimentoHumano =
+    (silenciada || c?.force_human === true) && status !== "closed" && status !== "archived";
+
   return (
     <div className="flex items-center justify-between gap-3 border-b border-border bg-background px-4 py-3">
       <div className="min-w-0">
@@ -46,6 +66,14 @@ export function ConversationHeader({ conversation }: Props) {
           <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
             {STATUS_LABEL[status] ?? status}
           </Badge>
+          {/* Sem esta marca, a conversa em que o robô está calado tem exatamente
+              a mesma cara de uma conversa normal — e ninguém entende por que as
+              respostas automáticas pararam. */}
+          {emAtendimentoHumano && (
+            <Badge variant="outline" className="h-4 px-1.5 text-[10px]" data-testid="badge-atendimento-humano">
+              Automático pausado
+            </Badge>
+          )}
         </div>
         {phone && (
           <p className="mt-0.5 flex items-center gap-1 text-xs text-muted-foreground">
@@ -78,6 +106,19 @@ export function ConversationHeader({ conversation }: Props) {
             onClick={() => release.mutate({ conversation_id: conversation.id })}
           >
             Liberar
+          </Button>
+        )}
+        {/* A volta. Fica ANTES de transferir/fechar porque é a ação que a pessoa
+            procura quando terminou o que tinha para fazer aqui. */}
+        {emAtendimentoHumano && (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={retomar.isPending}
+            data-testid="devolver-ao-automatico"
+            onClick={() => retomar.mutate({ conversation_id: conversation.id })}
+          >
+            {retomar.isPending ? "Devolvendo..." : "Devolver ao automático"}
           </Button>
         )}
         {status !== "closed" && status !== "archived" && (

@@ -85,6 +85,22 @@ const PARES: Array<{
     simbolo: "LeadStatus",
   },
   {
+    tabela: "ai_invocations",
+    coluna: "invocation_kind",
+    // lib/ai/log-invocation.ts → InvocationKind.
+    //
+    // Par nascido de divergência REAL, achada junto com a issue #160: o tipo
+    // oferecia quatro valores que o CHECK recusa (`sentiment_check`,
+    // `embed_chunk`, `embed_query`, `intent_classify`) e omitia dois que ele
+    // aceita (`triage_classify`, `embedding_generate`). Nenhum estava em uso,
+    // então não havia sintoma — o defeito era uma armadilha carregada: o insert
+    // é fire-and-forget, então quem escolhesse um deles pelo autocomplete
+    // colheria um `23514` que nunca chega à tela de ninguém. É o mesmo modo de
+    // falha que deixou esta tabela VAZIA numa VPS com tráfego real.
+    arquivo: "lib/ai/log-invocation.ts",
+    simbolo: "InvocationKind",
+  },
+  {
     tabela: "agent_inbox_items",
     coluna: "kind",
     // lib/agent-engine/db/repository.ts → InboxKind.
@@ -101,6 +117,19 @@ const PARES: Array<{
     // banco de dev conta o que aconteceu com ele, não o que o sistema promete.
     arquivo: "lib/agent-engine/db/repository.ts",
     simbolo: "InboxKind",
+  },
+  {
+    tabela: "agent_case_events",
+    coluna: "kind",
+    // lib/agent-engine/agent/human-cases.ts → CaseEventKind.
+    //
+    // O par nasce no MESMO commit da 0100, que acrescentou 'agent_noted' à
+    // constraint. Antes dele o TypeScript não tinha lista nenhuma: cada INSERT
+    // escrevia o kind como string literal, e o único aviso de divergência seria
+    // um 23514 em produção, num caminho fire-and-forget (o registro do agente no
+    // chamado) que ninguém exercita em dev.
+    arquivo: "lib/agent-engine/agent/human-cases.ts",
+    simbolo: "CaseEventKind",
   },
   {
     tabela: "system_update_runs",

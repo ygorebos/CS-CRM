@@ -23,6 +23,7 @@ export type ActivityType =
   | "ai_turn"
   | "send_vetoed"
   | "handoff_triggered"
+  | "handoff_resolved"
   | "next_action_approved"
   | "next_action_dismissed"
   | "lead_edited"
@@ -30,7 +31,10 @@ export type ActivityType =
   | "lead_reactivated"
   | "reactivation_accepted"
   | "reactivation_dismissed"
-  | "reactivation_expired";
+  | "reactivation_expired"
+  | "followup_scheduled"
+  | "followup_cancelled"
+  | "demand_closed";
 
 export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   stage_changed: "Mudou de estágio",
@@ -38,6 +42,11 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   ai_turn: "Atendimento da IA",
   send_vetoed: "Envio bloqueado",
   handoff_triggered: "Passou para humano",
+  // A IDA existia e a VOLTA não: a linha do tempo mostrava o cliente saindo para
+  // uma pessoa e nunca voltando, como se o atendimento tivesse parado ali. Meia
+  // continuidade lida como continuidade — e é justamente na volta que quem lê
+  // precisa saber que o combinado com a pessoa foi repassado ao agente.
+  handoff_resolved: "Voltou para o atendimento automático",
   // A RECUSA é sinal, não ausência de sinal: "o humano viu e disse não" é o que
   // impede o agente de repropor o mesmo. Ignorar sem registro faz a IA insistir
   // no que já foi negado — por isso os dois lados geram atividade.
@@ -60,6 +69,18 @@ export const ACTIVITY_LABELS: Record<ActivityType, string> = {
   reactivation_accepted: "Retomada de contato aprovada",
   reactivation_dismissed: "Retomada de contato descartada",
   reactivation_expired: "Sugestão de retomada venceu sem decisão",
+  // O RETORNO É O ANTI-MORTE (invariante 4): marcar e desmarcar são os dois
+  // acontecimentos que decidem se a demanda continua viva. Sem as duas linhas,
+  // o negócio some do radar (ou volta a ele) e a timeline não sabe explicar por
+  // quê — e é justamente o cancelamento que o agente precisa enxergar ao
+  // retomar, para não repropor o que uma pessoa já desmarcou.
+  followup_scheduled: "Retorno agendado",
+  followup_cancelled: "Retorno cancelado",
+  // ENCERRAR É O OUTRO LADO do invariante 4: uma demanda aberta precisa de
+  // próximo passo OU de desfecho registrado. Fechar como ganho ou perdido era
+  // invisível na timeline — só existia em audit e event_log, que ninguém lê na
+  // tela — e o dossiê de um negócio fechado terminava sem dizer que fechou.
+  demand_closed: "Demanda encerrada",
 };
 
 /** Quando o tipo é legado/desconhecido, a linha ainda é honesta — sem jargão. */

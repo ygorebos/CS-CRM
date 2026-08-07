@@ -21,20 +21,15 @@
  * Run: E2E_PORT=3020 npx tsx tests/sonda-veto-na-tela.ts
  */
 import { randomUUID } from "node:crypto";
-import * as fs from "node:fs";
 
 import { chromium } from "@playwright/test";
 import pg from "pg";
 
 import { emitVetoActivity } from "@/lib/leads/veto-activity";
 import { BASE, CREDS, EVIDENCE, login, shotPage } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const env: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const env = carregarEnvLocal();
 
 /**
  * A org sai do arquivo que o seed gera, NÃO de um literal. Cravar o UUID faria

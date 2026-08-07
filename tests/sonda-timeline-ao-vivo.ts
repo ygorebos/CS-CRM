@@ -19,6 +19,7 @@ import { execFileSync } from "node:child_process";
 import { chromium } from "@playwright/test";
 
 import { BASE, carimbar, login } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
 carimbar([
   "tests/sonda-timeline-ao-vivo.ts",
@@ -26,14 +27,7 @@ carimbar([
   "app/api/v1/leads/_handler.ts",
 ]);
 
-const DB = fs
-  .readFileSync(".env.local", "utf8")
-  .split("\n")
-  .find((l) => l.startsWith("SUPABASE_DB_URL="))!
-  .split("=")
-  .slice(1)
-  .join("=")
-  .replace(/"/g, "");
+const DB = carregarEnvLocal().SUPABASE_DB_URL!;
 
 const sql = (q: string): string =>
   execFileSync("psql", [DB, "-tA", "-c", q], { encoding: "utf8" }).trim();
@@ -61,9 +55,10 @@ async function main(): Promise<void> {
     // Assina o MESMO canal do hook, com o token real da sessão (o cookie é
     // httpOnly, então o token vem pela rota — sem ele o canal fica anônimo e a
     // RLS filtra tudo, que foi o defeito da wave 3).
-    const env = fs.readFileSync(".env.local", "utf8");
-    const url = env.split("\n").find((l) => l.startsWith("NEXT_PUBLIC_SUPABASE_URL="))!.split("=").slice(1).join("=").replace(/"/g, "");
-    const anon = env.split("\n").find((l) => l.startsWith("NEXT_PUBLIC_SUPABASE_ANON_KEY="))!.split("=").slice(1).join("=").replace(/"/g, "");
+    // `process.env` vence o `.env.local` (scripts/lib/env-de-teste.ts).
+    const amb = carregarEnvLocal();
+    const url = amb.NEXT_PUBLIC_SUPABASE_URL!;
+    const anon = amb.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 
     const assinou = await page.evaluate(async ({ contato, url, anon }) => {
       const w = window as unknown as { __eventos: string[]; __status: string };

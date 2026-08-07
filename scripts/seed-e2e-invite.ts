@@ -18,9 +18,12 @@ import { execFileSync } from "node:child_process";
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { anunciarDestino, credenciaisSupabaseDeTeste } from "./lib/env-de-teste";
 
-const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const credenciais = credenciaisSupabaseDeTeste();
+anunciarDestino("seed-e2e-invite", credenciais);
+const url = credenciais.url;
+const serviceKey = credenciais.serviceRole;
 if (!url || !serviceKey) {
   console.error("[seed-invite] faltam NEXT_PUBLIC_SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY");
   process.exit(1);

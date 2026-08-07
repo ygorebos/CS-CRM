@@ -13,7 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { usePipelines, usePipelineStages } from "@/hooks/webhooks/useWebhookSources";
-import { useChannelSessions } from "@/hooks/channels/useChannelSessions";
+import { channelLabel, useChannelSessions } from "@/hooks/channels/useChannelSessions";
 import { useAssignableMembers } from "@/hooks/inbox/useAssignableMembers";
 
 export type ActionItem =
@@ -140,8 +140,7 @@ function SendWhatsappForm({
           <SelectContent>
             {(sessions ?? []).map((s) => (
               <SelectItem key={s.id} value={s.id} disabled={s.status !== "WORKING"}>
-                {(s.display_name ?? s.waha_session_name) +
-                  (s.status !== "WORKING" ? " — desconectado" : "")}
+                {channelLabel(s) + (s.status !== "WORKING" ? " — desconectado" : "")}
               </SelectItem>
             ))}
           </SelectContent>

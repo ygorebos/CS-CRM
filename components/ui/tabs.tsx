@@ -14,7 +14,17 @@ const TabsList = React.forwardRef<
   <TabsPrimitive.List
     ref={ref}
     className={cn(
-      "inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground",
+      // `max-w-full overflow-x-auto` porque uma fila de abas cresce com o
+      // produto e nunca encolhe: no detalhe do agente são SEIS, e em 390px de
+      // largura a fila mede 814px — a página inteira passava a rolar na
+      // horizontal, que é o pior jeito de uma tela quebrar (o conteúdo some
+      // para o lado e nada indica que existe). Medido antes/depois com
+      // `documentElement.scrollWidth - clientWidth`.
+      //
+      // Aqui e não na tela do agente de propósito: TODA `TabsList` do app tem a
+      // mesma fragilidade, e consertar só onde eu esbarrei deixaria as irmãs
+      // quebradas com um álibi de "já foi tratado".
+      "inline-flex h-9 max-w-full items-center justify-center overflow-x-auto rounded-lg bg-muted p-1 text-muted-foreground",
       className
     )}
     {...props}

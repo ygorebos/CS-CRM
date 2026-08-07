@@ -81,7 +81,7 @@ export function TriggerEditor({ value, onChange, disabled }: Props) {
   return (
     <div className="space-y-4">
       <div>
-        <Label>Eventos</Label>
+        <Label>O que faz ele responder</Label>
         <div className="mt-1 flex flex-wrap gap-2">
           {(["message"] as const).map((ev) => {
             const checked = value.events.includes(ev);
@@ -104,7 +104,9 @@ export function TriggerEditor({ value, onChange, disabled }: Props) {
                   }
                   disabled={disabled}
                 />
-                {ev}
+                {/* `message` é o nome do evento no wire; na tela vale o que ele
+                    significa para quem lê. */}
+                {ev === "message" ? "Uma mensagem nova do cliente" : ev}
               </label>
             );
           })}
@@ -119,7 +121,7 @@ export function TriggerEditor({ value, onChange, disabled }: Props) {
             disabled={disabled}
             id="ignore_groups"
           />
-          <Label htmlFor="ignore_groups">Ignorar grupos</Label>
+          <Label htmlFor="ignore_groups">Não responder em grupos</Label>
         </div>
         <div className="flex items-center gap-2">
           <Switch
@@ -128,29 +130,31 @@ export function TriggerEditor({ value, onChange, disabled }: Props) {
             disabled={disabled}
             id="ignore_self"
           />
-          <Label htmlFor="ignore_self">Ignorar mensagens enviadas pelo número</Label>
+          <Label htmlFor="ignore_self">Não responder às mensagens que saem do seu próprio número</Label>
         </div>
       </div>
 
       <div className="space-y-1">
-        <Label htmlFor="keyword_regex">Filtro por regex (opcional)</Label>
+        <Label htmlFor="keyword_regex">Só responder quando a mensagem falar de algo específico (opcional)</Label>
         <Input
           id="keyword_regex"
           value={value.filters.keyword_regex ?? ""}
           onChange={(e) =>
             patchFilters({ keyword_regex: e.target.value.trim() === "" ? null : e.target.value })
           }
-          placeholder="Ex.: (?i)\\b(pedido|status)\\b"
+          placeholder="Ex.: pedido|status|orçamento"
           disabled={disabled}
           spellCheck={false}
         />
         <p className="text-xs text-muted-foreground">
-          Quando preenchido, agent só responde se a mensagem casar com o regex.
+          Deixe em branco para o agente responder a tudo. Se preencher, ele só entra
+          quando a mensagem contiver uma dessas palavras — separe por barra vertical
+          (|). Aceita expressão regular, para quem já conhece.
         </p>
       </div>
 
       <div className="space-y-1">
-        <Label>Concorrência</Label>
+        <Label>Quantos atendimentos ao mesmo tempo</Label>
         <Select
           value={value.concurrency}
           onValueChange={(v) => onChange({ ...value, concurrency: v as TriggerValue["concurrency"] })}
@@ -160,8 +164,8 @@ export function TriggerEditor({ value, onChange, disabled }: Props) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="one_per_conversation">1 por conversa</SelectItem>
-            <SelectItem value="one_per_contact">1 por contato</SelectItem>
+            <SelectItem value="one_per_conversation">Um de cada vez por conversa</SelectItem>
+            <SelectItem value="one_per_contact">Um de cada vez por cliente</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -174,13 +178,13 @@ export function TriggerEditor({ value, onChange, disabled }: Props) {
             disabled={disabled}
             id="bh_enabled"
           />
-          <Label htmlFor="bh_enabled">Restringir a horário comercial</Label>
+          <Label htmlFor="bh_enabled">Só atender em horário de funcionamento</Label>
         </div>
         {bh ? (
           <div className="space-y-2">
             <div className="grid grid-cols-3 gap-2">
               <div className="space-y-1">
-                <Label htmlFor="bh_tz">Timezone</Label>
+                <Label htmlFor="bh_tz">Fuso horário</Label>
                 <Input
                   id="bh_tz"
                   value={bh.timezone}

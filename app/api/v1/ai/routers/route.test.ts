@@ -46,12 +46,21 @@ interface AdminCfg {
   membersSelect?: { data?: unknown[] | null; error?: unknown };
   insertResult?: { data?: unknown; error?: unknown };
   sessionFound?: boolean;
+  /** Banco sem a migration 0106: a consulta COM `archived_at` volta 42703. */
+  sessionSemColunaArchived?: boolean;
+  /** Falha real da consulta (não é coluna ausente) — não pode virar 404. */
+  sessionError?: { code?: string; message?: string };
 }
 
 function makeAdminStub(cfg: AdminCfg) {
   return {
     from(table: string) {
       if (table === "channel_sessions") {
+        // `usouIs` distingue a tentativa COM filtro de arquivado da tentativa de
+        // fallback SEM ele. Sem essa distinção o dublê responderia igual às duas
+        // e o teste de banco desatualizado passaria mesmo se a rota nunca
+        // tentasse o fallback — um teste que não consegue reprovar.
+        let usouIs = false;
         const builder = {
           select() {
             return builder;
@@ -59,7 +68,23 @@ function makeAdminStub(cfg: AdminCfg) {
           eq() {
             return builder;
           },
+          is() {
+            usouIs = true;
+            return builder;
+          },
           maybeSingle() {
+            if (cfg.sessionError) {
+              return Promise.resolve({ data: null, error: cfg.sessionError });
+            }
+            if (cfg.sessionSemColunaArchived && usouIs) {
+              return Promise.resolve({
+                data: null,
+                error: {
+                  code: "42703",
+                  message: 'column channel_sessions_1.archived_at does not exist',
+                },
+              });
+            }
             return Promise.resolve(
               cfg.sessionFound === false ? { data: null, error: null } : { data: { id: SESSION_ID }, error: null },
             );
@@ -221,6 +246,47 @@ describe("POST /api/v1/ai/routers", () => {
     expect(res.status).toBe(404);
     const body = (await res.json()) as { error: { code: string } };
     expect(body.error.code).toBe("channel_session_not_found");
+    expect(audit).not.toHaveBeenCalled();
+  });
+
+  // ─── O 404 que mentia ──────────────────────────────────────────────────────
+  // Estes dois casos guardam a diferença entre "esse número não é seu" e "não
+  // consegui verificar". Em produção eles eram a MESMA resposta: o banco estava
+  // sem a migration 0106, o PostgREST devolvia 42703, o `error` era descartado e
+  // o dono via "Número de WhatsApp não encontrado nesta organização" sobre um
+  // número WORKING que a tela ao lado listava.
+  it("banco sem a coluna archived_at (42703) → refaz sem o filtro e CRIA, em vez de 404", async () => {
+    mockAuthzOk("admin");
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminStub({
+        sessionSemColunaArchived: true,
+        insertResult: { data: { id: "new-router-1" }, error: null },
+      }) as never,
+    );
+
+    const { POST } = await import("./route");
+    const res = await POST(postReq({ name: "Roteador", channel_session_id: SESSION_ID }));
+
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { data: { id: string } };
+    expect(body.data).toEqual({ id: "new-router-1" });
+  });
+
+  it("falha real da consulta → 500, nunca 404 (não afirmar ausência que não foi verificada)", async () => {
+    mockAuthzOk("admin");
+    vi.mocked(createAdminClient).mockReturnValue(
+      makeAdminStub({
+        sessionError: { code: "57014", message: "canceling statement due to statement timeout" },
+        insertResult: { data: { id: "new-router-1" }, error: null },
+      }) as never,
+    );
+
+    const { POST } = await import("./route");
+    const res = await POST(postReq({ name: "Roteador", channel_session_id: SESSION_ID }));
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("internal_error");
     expect(audit).not.toHaveBeenCalled();
   });
 

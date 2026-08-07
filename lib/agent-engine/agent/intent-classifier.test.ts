@@ -6,7 +6,8 @@ const members = [
   { agentId: 'a1', intentName: 'vendas', intentDescription: 'Quer comprar ou saber preço', examples: ['quanto custa'] },
   { agentId: 'a2', intentName: 'suporte', intentDescription: 'Problema técnico', examples: [] },
 ];
-const router = { id: 'r1', name: 'R', classifierModel: 'claude-haiku-4-5', sticky: true, minConfidence: 0.6, fallbackAgentId: null, members };
+const router = { id: 'r1', name: 'R', classifierModel: 'claude-haiku-4-5',
+    classifierProvider: null, sticky: true, minConfidence: 0.6, fallbackAgentId: null, members };
 
 describe('buildClassifierPrompt', () => {
   it('lista as intenções com descrição e a opção none', () => {
@@ -60,5 +61,34 @@ describe('classifyIntent', () => {
       { log: { info: vi.fn(), warn, error: vi.fn() } as never, runModelCall } as never);
     expect(out).toBeNull();
     expect(warn).toHaveBeenCalled();
+  });
+});
+
+describe('classifyIntent — provedor do classificador', () => {
+  const log = () => ({ info: vi.fn(), warn: vi.fn(), error: vi.fn() }) as never;
+
+  it('router com provedor próprio manda llmOverride junto do modelo', async () => {
+    const runModelCall = vi.fn().mockResolvedValue({ result: { text: '{"intent":"vendas","confidence":0.9}' } });
+    await classifyIntent({} as never, {} as never,
+      {
+        tenantId: 'o1', leadId: null, jobId: null, signal: 'quanto custa',
+        router: { ...router, classifierModel: 'gpt-5-mini', classifierProvider: 'openai' },
+      },
+      { log: log(), runModelCall } as never);
+    const call = runModelCall.mock.calls[0]![2];
+    expect(call.model).toBe('gpt-5-mini');
+    // Sem isto o id de modelo da OpenAI seria enviado ao provedor da ORG.
+    expect(call.llmOverride).toEqual({ provider: 'openai' });
+  });
+
+  it('sem provedor próprio NÃO manda override — a organização continua decidindo', async () => {
+    const runModelCall = vi.fn().mockResolvedValue({ result: { text: '{"intent":"vendas","confidence":0.9}' } });
+    await classifyIntent({} as never, {} as never,
+      {
+        tenantId: 'o1', leadId: null, jobId: null, signal: 'oi',
+        router: { ...router, classifierProvider: null },
+      },
+      { log: log(), runModelCall } as never);
+    expect(runModelCall.mock.calls[0]![2]).not.toHaveProperty('llmOverride');
   });
 });

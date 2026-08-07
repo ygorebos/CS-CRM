@@ -61,10 +61,11 @@ export default async function CredentialsPage() {
   return (
     <div className="flex h-full flex-col gap-6 p-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Credenciais de IA</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">Chaves de acesso à IA</h1>
         <p className="text-sm text-muted-foreground">
-          Chaves BYO (Bring-Your-Own) por provider. Cifradas em repouso (AES-GCM)
-          e nunca expostas via API após criação.
+          A conta de inteligência artificial é sua: você contrata direto na Anthropic,
+          OpenAI ou Google e cola a chave aqui. Ela é guardada criptografada e nunca
+          mais aparece na tela depois de salva — nem para você.
         </p>
       </header>
       <CredentialsList

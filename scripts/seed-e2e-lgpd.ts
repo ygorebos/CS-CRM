@@ -21,13 +21,22 @@
 import { createClient } from "@supabase/supabase-js";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { anunciarDestino, credenciaisSupabaseDeTeste } from "./lib/env-de-teste";
 
-const envFile = fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
-const env: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+// `process.env` VENCE o `.env.local` (ver scripts/lib/env-de-teste.ts).
+//
+// A versão anterior lia `.env.local` DIRETO do disco, ignorando o ambiente — e
+// por isso a suíte E2E semeava no banco de PRODUÇÃO mesmo com o `.env.e2e`
+// injetado no webServer do Playwright: este script nunca olhava para lá.
+const credenciais = credenciaisSupabaseDeTeste();
+anunciarDestino("seed-e2e-lgpd", credenciais);
+const env = {
+  NEXT_PUBLIC_SUPABASE_URL: credenciais.url,
+  SUPABASE_SERVICE_ROLE_KEY: credenciais.serviceRole,
+  NEXT_PUBLIC_SUPABASE_ANON_KEY: credenciais.anonKey,
+  NEXT_PUBLIC_APP_URL: credenciais.appUrl,
+  SUPABASE_DB_URL: credenciais.dbUrl,
+} as Record<string, string>;
 
 const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },

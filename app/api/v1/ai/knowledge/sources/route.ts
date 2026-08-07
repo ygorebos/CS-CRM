@@ -77,7 +77,10 @@ export async function GET(_req: NextRequest): Promise<Response> {
     return fail("internal_error", "Erro ao listar fontes de conhecimento.", 500, { requestId });
   }
 
-  return ok({ data: data ?? [] }, { requestId });
+  // `ok()` já embrulha em `{ data }`. Com `{ data: data ?? [] }` o corpo saía
+  // `{ data: { data: [...] } }` e o hook fazia `.filter` sobre o envelope —
+  // TypeError, lista de fontes só aparecia pelo SSR e nunca atualizava.
+  return ok(data ?? [], { requestId });
 }
 
 // ---------------------------------------------------------------------------
@@ -223,5 +226,5 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.warn("[ai-knowledge-sources] emit_event failed (non-blocking):", emitErr.message);
   }
 
-  return ok({ data: { id: ksId, items_count: itemsCount } }, { status: 201, requestId });
+  return ok({ id: ksId, items_count: itemsCount }, { status: 201, requestId });
 }

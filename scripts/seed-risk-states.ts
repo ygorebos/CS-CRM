@@ -12,20 +12,16 @@
  * emitir atividade de timeline — o acervo esfriou há dias e "esfriou agora"
  * seria falso. Ver `lib/leads/risk-seed.ts` para as três decisões.
  */
-import * as fs from "node:fs";
 
 import { createClient } from "@supabase/supabase-js";
 
 import { semeiaEstadosDeRisco } from "@/lib/leads/risk-seed";
+import { carregarEnvLocal } from "./lib/env-de-teste";
 
 function env(): Record<string, string> {
-  return Object.fromEntries(
-    fs
-      .readFileSync(".env.local", "utf8")
-      .split("\n")
-      .filter((l) => l.includes("=") && !l.trimStart().startsWith("#"))
-      .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")]),
-  );
+  // `process.env` vence o `.env.local`, e a ausência do arquivo não é erro —
+  // ver scripts/lib/env-de-teste.ts.
+  return carregarEnvLocal();
 }
 
 async function main(): Promise<void> {

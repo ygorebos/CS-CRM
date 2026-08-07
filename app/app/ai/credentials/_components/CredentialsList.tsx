@@ -41,11 +41,11 @@ export function CredentialsList({ initialData, canWrite, usageMap }: Props) {
     return (
       <>
         <Card className="flex flex-col items-center gap-3 p-10 text-center">
-          <h2 className="font-medium">Nenhuma credencial cadastrada</h2>
+          <h2 className="font-medium">Nenhuma chave cadastrada ainda</h2>
           <p className="max-w-md text-sm text-muted-foreground">
-            Adicione uma chave BYO de Anthropic, OpenAI ou Google para que seus
-            agents possam usar os modelos. As chaves são cifradas e nunca
-            retornadas em texto claro.
+            Seus agentes só conseguem pensar depois que você cola aqui uma chave da
+            Anthropic, da OpenAI ou do Google. A cobrança vai direto para a sua conta
+            no provedor, e a chave fica guardada criptografada.
           </p>
           {canWrite && (
             <Button className="mt-1" onClick={() => setAddOpen(true)}>

@@ -109,12 +109,38 @@ export async function authRateLimited(
  *    script; o teto por IP é mais folgado por causa de NAT corporativo.
  *  - signup e convite: fluxos raros por pessoa, teto baixo.
  */
+/** Teto de produção por IP no login. Congelado por teste — ver `LOGIN_IP_DEFAULT` abaixo. */
+const LOGIN_IP_DEFAULT = 60;
+
+/**
+ * O teto por IP do login é o ÚNICO limite configurável, e existe por um defeito
+ * de ambiente, não de produto: no CI todo teste sai do mesmo IP por construção
+ * (um runner), então 28 specs × vários logins estouram 60/5min e o e2e reprova
+ * com "Muitas tentativas" — foi o que derrubou `risk-radar` (13ª de 15 na parte 1).
+ *
+ * Por que afrouxar ISTO é seguro, e afrouxar o resto não seria: o limite que
+ * barra brute force é `id` (5 falhas na MESMA conta em 5 min), e ele NÃO é
+ * configurável — continua valendo inclusive para quem distribui as tentativas
+ * por muitos IPs. O teto por IP é anti-flood genérico, já folgado de propósito
+ * por causa de NAT corporativo; no CI o "NAT" é o runner inteiro.
+ *
+ * Valor inválido ou ausente cai no default de produção: a falha é fechada.
+ */
+function loginIpLimit(): number {
+  const bruto = process.env.AUTH_RATE_LIMIT_LOGIN_IP;
+  if (bruto === undefined) return LOGIN_IP_DEFAULT;
+  const n = Number.parseInt(bruto, 10);
+  return Number.isFinite(n) && n > 0 ? n : LOGIN_IP_DEFAULT;
+}
+
 export const AUTH_LIMITS = {
-  login: { ip: 60, id: 5, windowSec: 300 },
+  login: { ip: loginIpLimit(), id: 5, windowSec: 300 },
   signup: { ip: 20, windowSec: 3600 },
   reset: { ip: 30, id: 3, windowSec: 3600 },
   invite_accept: { ip: 60, windowSec: 3600 },
-} as const satisfies Record<string, AuthRateLimits>;
+} satisfies Record<string, AuthRateLimits>;
+
+export const __LOGIN_IP_DEFAULT_PARA_TESTE = LOGIN_IP_DEFAULT;
 
 /**
  * Bloqueio por FALHA, para o login.

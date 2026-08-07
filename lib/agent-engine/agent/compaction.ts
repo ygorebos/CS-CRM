@@ -27,6 +27,7 @@ import type pg from 'pg';
 
 import type { Logger } from '../obs/logger';
 import type { ProviderRegistry } from '../edge/llm/providers';
+import type { LlmResolveOverride } from '../edge/llm/credentials';
 import { runModelCall, type LlmEdgeConfig } from '../edge/llm/run-model-call';
 import { countPayloadTokens, type LeadContext, type LeadContextMessage } from '../edge/crm/get-lead-context';
 import { applySaveLeadNote } from './lead-notes';
@@ -190,7 +191,12 @@ export async function maybeCompact(
   db: pg.Pool,
   cfg: LlmEdgeConfig,
   ids: { tenantId: string; leadId: string; jobId?: string },
-  args: { context: LeadContext; previousSummary: string; knobs: CompactionKnobs; notesIndexMaxTokens: number },
+  args: {
+    context: LeadContext;
+    previousSummary: string;
+    knobs: CompactionKnobs & { llmOverride?: LlmResolveOverride };
+    notesIndexMaxTokens: number;
+  },
   deps: { registry?: ProviderRegistry; log: Logger },
 ): Promise<CompactionOutput | null> {
   if (args.context.messages.length < args.knobs.triggerMessages) {
@@ -221,6 +227,9 @@ export async function maybeCompact(
       ...(ids.jobId !== undefined ? { jobId: ids.jobId } : {}),
       purpose: 'compaction',
       ...(args.knobs.model !== undefined ? { model: args.knobs.model } : {}),
+      // Provider/credencial vêm JUNTO do modelo quando ele foi herdado do agente
+      // publicado — ver `aux-model-args.ts`.
+      ...(args.knobs.llmOverride !== undefined ? { llmOverride: args.knobs.llmOverride } : {}),
       messages: [
         { role: 'user', content: buildTranscriptMessage(args.context, args.previousSummary, COMPACTION_INSTRUCTION) },
       ],

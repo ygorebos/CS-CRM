@@ -6,6 +6,17 @@
  * descobrir depois é o que faz o operador achar que conectou e só entender que não na
  * primeira mensagem que não sai — com o lead do outro lado esperando.
  *
+ * O `POST` é também o caminho de VOLTA: conectar por cima de um canal oficial que
+ * foi excluído RESSUSCITA a linha (`lib/channels/reactivate.ts`). Sem isso o
+ * update devolvia status/credencial/número e deixava `archived_at` no lugar — e o
+ * canal "conectado" ficava invisível para o webhook, para o ingest, para os
+ * seletores e para o envio, todos filtrados por essa coluna.
+ *
+ * Ressuscitar NÃO devolve a URL de webhook antiga: a exclusão rotacionou o
+ * `webhook_path_token` de propósito (é o que corta a entrega da plataforma), e a
+ * volta mantém a nova. É por isso que a tela mostra o que colar na Meta depois de
+ * conectar — inclusive na reconexão, onde o endereço mudou.
+ *
  * O token é cifrado pelas MESMAS RPCs do resto do repo (`lib/webhooks/secrets.ts`) e
  * **nunca volta** num GET: uma vez gravado, a tela mostra que existe, não qual é.
  */
@@ -16,8 +27,10 @@ import { z } from "zod";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_META } from "@/lib/channels/capabilities";
 import { validateMetaCredentials } from "@/lib/channels/meta/validate-credentials";
+import { reactivateChannelSession } from "@/lib/channels/reactivate";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { encryptWebhookSecret } from "@/lib/webhooks/secrets";
 
@@ -30,7 +43,7 @@ const conectarSchema = z.object({
   token: z.string().min(20),
 });
 
-type Gate = { ok: true; orgId: string } | { ok: false; resposta: NextResponse };
+type Gate = { ok: true; orgId: string; userId: string } | { ok: false; resposta: NextResponse };
 
 async function adminGate(requestId: string): Promise<Gate> {
   const user = await requireAuth();
@@ -38,7 +51,7 @@ async function adminGate(requestId: string): Promise<Gate> {
   if (!org || ROLE_RANK[org.role] < ROLE_RANK.admin) {
     return { ok: false, resposta: fail("forbidden", "admin_required", 403, { requestId }) };
   }
-  return { ok: true, orgId: org.orgId };
+  return { ok: true, orgId: org.orgId, userId: user.id };
 }
 
 /** Base pública desta instalação — é o que o operador cola no dashboard da Meta. */
@@ -56,12 +69,22 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
   if (!g.ok) return g.resposta;
 
   const admin = createAdminClient();
-  const { data } = await admin
-    .from("channel_sessions")
-    .select("id, meta_phone_number_id, meta_waba_id, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
-    .eq("organization_id", g.orgId)
-    .eq("provider", CHANNEL_PROVIDER_META)
-    .maybeSingle();
+  // Canal ARQUIVADO não conta como conectado. A linha sobrevive à exclusão como
+  // âncora das FKs, e sem este filtro a tela dizia "conectado" (com a URL de
+  // webhook já rotacionada, portanto morta) para um canal que o operador acabou
+  // de excluir — e oferecia "Trocar credencial" onde deveria oferecer "Conectar".
+  // O POST, ao contrário, PRECISA enxergar a linha arquivada: é ela que ele
+  // ressuscita.
+  const consultar = () =>
+    admin
+      .from("channel_sessions")
+      .select("id, meta_phone_number_id, meta_waba_id, meta_token_encrypted, phone_number, display_name, webhook_path_token, status")
+      .eq("organization_id", g.orgId)
+      .eq("provider", CHANNEL_PROVIDER_META);
+  const { data } = await queryTolerantToMissingArchived(
+    () => consultar().is(ARCHIVED_AT, null).maybeSingle(),
+    () => consultar().maybeSingle(),
+  );
 
   const base = publicBase(req);
   return ok({
@@ -118,12 +141,22 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     );
   }
 
-  const { data: existente } = await admin
-    .from("channel_sessions")
-    .select("id")
-    .eq("organization_id", g.orgId)
-    .eq("provider", CHANNEL_PROVIDER_META)
-    .maybeSingle();
+  // A busca NÃO filtra `archived_at`: um canal oficial excluído é exatamente o
+  // que este POST precisa achar para trazer de volta. Ignorá-lo criaria uma
+  // SEGUNDA linha oficial na org — e a linha velha continuaria segurando o par
+  // (org, número) na trava da 0106.
+  const buscarExistente = (colunas: string) =>
+    admin
+      .from("channel_sessions")
+      .select(colunas)
+      .eq("organization_id", g.orgId)
+      .eq("provider", CHANNEL_PROVIDER_META)
+      .maybeSingle();
+  const { data: existenteRaw } = await queryTolerantToMissingArchived(
+    () => buscarExistente(`id, ${ARCHIVED_AT}`),
+    () => buscarExistente("id"),
+  );
+  const existente = existenteRaw as { id: string; archived_at?: string | null } | null;
 
   const linha = {
     organization_id: g.orgId,
@@ -136,14 +169,41 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     status: "WORKING",
   };
 
-  // `update` quando já existe em vez de upsert: a trava única de (org, phone_number)
-  // é DEFERRABLE e o Postgres recusa constraint deferível como árbitro de
-  // `ON CONFLICT` — medido ao criar a sessão de teste da Fase 3b.
+  // `update` quando já existe em vez de upsert: a trava única de (org,
+  // phone_number) não serve de árbitro de `ON CONFLICT` aqui. Era DEFERRABLE
+  // (medido ao criar a sessão de teste da Fase 3b, e o Postgres recusa
+  // constraint deferível na inferência); a migration 0107 a trocou por um índice
+  // único PARCIAL (`where archived_at is null`), que só seria inferível se a
+  // cláusula repetisse o predicado — e o cliente do PostgREST não expõe isso.
+  // Mudou a razão, não a escolha.
+  //
+  // O update passa por `reactivateChannelSession` porque reconectar é
+  // ressuscitar: o mesmo patch que devolve status, credencial e número tem que
+  // devolver a linha à vida, ou o canal fica "conectado" na tela e excluído para
+  // todo o resto do sistema. Para o canal que já estava ativo é um no-op — e a
+  // auditoria de volta sai de lá, junto da ressurreição, não daqui.
   const { error } = existente
-    ? await admin.from("channel_sessions").update(linha).eq("id", existente.id)
+    ? await reactivateChannelSession(
+        admin,
+        {
+          organizationId: g.orgId,
+          channelSessionId: existente.id,
+          archivedAt: existente.archived_at ?? null,
+        },
+        linha,
+        {
+          userId: g.userId,
+          requestId,
+          metadata: { provider: CHANNEL_PROVIDER_META, phone_number: linha.phone_number },
+        },
+      )
     : await admin.from("channel_sessions").insert({ ...linha, webhook_secret_encrypted: cifrado });
 
-  if (error) return fail("internal_error", error.message, 500, { requestId });
+  if (error) {
+    return fail("internal_error", error.message ?? "channel_session_write_failed", 500, {
+      requestId,
+    });
+  }
 
   return ok({
     connected: true,

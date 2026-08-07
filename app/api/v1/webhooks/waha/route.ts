@@ -15,6 +15,7 @@ import type { NextRequest, NextResponse } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { audit } from "@/lib/audit";
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { dispatchWahaEvent, type WahaEnvelope } from "@/lib/waha/ingest";
 import { authenticateWahaWebhook } from "@/lib/waha/webhook-auth";
@@ -40,13 +41,21 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
 
   const admin = createAdminClient();
 
-  const { data: session, error: sessErr } = await admin
-    .from("channel_sessions")
-    .select(
-      "id, organization_id, waha_session_name, webhook_secret_encrypted, status, is_warmup_complete, warmup_started_at",
-    )
-    .eq("waha_session_name", sessionName)
-    .maybeSingle();
+  // Canal ARQUIVADO não ingere — mesmo motivo da rota per-tenant: a sessão já foi
+  // removida do transporte, e o que ainda chega é evento em voo. Cai no ramo
+  // `session_not_registered` abaixo, que responde 200 (a plataforma pararia de
+  // retentar de qualquer forma, porque a sessão não existe mais lá).
+  const base = () =>
+    admin
+      .from("channel_sessions")
+      .select(
+        "id, organization_id, waha_session_name, webhook_secret_encrypted, status, is_warmup_complete, warmup_started_at",
+      )
+      .eq("waha_session_name", sessionName);
+  const { data: session, error: sessErr } = await queryTolerantToMissingArchived(
+    () => base().is(ARCHIVED_AT, null).maybeSingle(),
+    () => base().maybeSingle(),
+  );
 
   if (sessErr) {
     return fail("internal_error", sessErr.message, 500, { requestId });

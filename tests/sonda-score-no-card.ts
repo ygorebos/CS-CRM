@@ -20,6 +20,7 @@ import { chromium } from "@playwright/test";
 import { Pool } from "pg";
 
 import { BASE, CARD_ATTR, carimbar, login } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
 const sufixo = carimbar([
   "tests/sonda-score-no-card.ts",
@@ -29,14 +30,7 @@ const sufixo = carimbar([
   "app/api/v1/pipelines/[id]/board/route.ts",
 ]);
 
-const DB = fs
-  .readFileSync(".env.local", "utf8")
-  .split("\n")
-  .find((l) => l.startsWith("SUPABASE_DB_URL="))!
-  .split("=")
-  .slice(1)
-  .join("=")
-  .replace(/"/g, "");
+const DB = carregarEnvLocal().SUPABASE_DB_URL!;
 
 /**
  * Onde a sonda anota o que tirou, ANTES de tirar.

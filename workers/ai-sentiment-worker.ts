@@ -193,7 +193,11 @@ export async function processSentiment(event: EventRow): Promise<SentimentResult
     // ── Log invocation (fire-and-forget) ──────────────────────────────────
     logInvocation({
       organization_id: event.organization_id,
-      agent_id: agent?.id ?? "",
+      // `null`, não `""` (issue #160): o worker roda mesmo sem agente ativo — lê
+      // o agente só para o threshold e cai no default —, e string vazia numa
+      // coluna uuid fazia o insert de auditoria falhar em silêncio. O custo
+      // existe; a linha precisa entrar.
+      agent_id: agent?.id ?? null,
       conversation_id: conversationId ?? message.conversation_id ?? null,
       message_id: messageId,
       invocation_kind: "sentiment_classify",

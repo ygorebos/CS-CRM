@@ -24,6 +24,7 @@ import { env } from "@/lib/env";
 import { requireRole } from "@/lib/auth/require-role";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { testRunSchema } from "@/lib/ai/agents/validation";
+import { avaliarRespostaDeTeste } from "@/lib/ai/agents/avaliar-resposta-de-teste";
 
 export const dynamic = "force-dynamic";
 
@@ -196,6 +197,10 @@ async function runStubbedTest(args: StubArgs): Promise<Record<string, unknown>> 
     run_id: args.runId,
     status: "completed",
     final_text: finalText,
+    // O stub também passa pela avaliação: um caminho que não a tivesse voltaria
+    // a ser o "verde que não olhou para nada" — só que mais difícil de notar,
+    // porque conviveria com um caminho que olha.
+    guardrails: avaliarRespostaDeTeste(finalText),
     tool_calls: toolCalls,
     tokens_in: 0,
     tokens_out: 0,
@@ -228,5 +233,14 @@ async function callInternalRuntime(args: {
       sampleContact: args.sampleContact,
     },
   });
-  return { ...result, stub: false };
+  // O runtime desta rota é o `@deprecated`, e ele NÃO importa `runBeforeSend` —
+  // a cadeia de guardrails vive no processo do worker e está ausente do build do
+  // app. Sem a linha abaixo, o botão "Testar" mostra uma resposta que nenhum
+  // gate examinou, e o self-hoster publica achando que viu o comportamento real.
+  //
+  // A avaliação cobre o que é decidível só com o texto e DECLARA o resto (ver
+  // lib/ai/agents/avaliar-resposta-de-teste.ts): fabricar o estado do turno para
+  // rodar a cadeia toda daria um veredito inventado, que é pior do que um
+  // "não avaliado" visível.
+  return { ...result, stub: false, guardrails: avaliarRespostaDeTeste(result.final_text) };
 }

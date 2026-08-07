@@ -23,6 +23,18 @@ export interface LoadedRouter {
   id: string;
   name: string;
   classifierModel: string;
+  /**
+   * Provedor do classificador, quando o roteador escolhe um diferente do da org.
+   *
+   * O modelo sozinho não basta: `resolveOrgLlmConfig` decide o provedor por
+   * `organizations.settings.llm.provider`, então gravar só `classifier_model`
+   * com um id de outro provedor manda o modelo para a casa errada. Uma
+   * organização com provedor Anthropic e crédito só na OpenAI ficava sem saída
+   * — o classificador falhava e TODO turno caía no fallback.
+   *
+   * `null` = usa o provedor da organização (o comportamento de antes).
+   */
+  classifierProvider: string | null;
   sticky: boolean;
   minConfidence: number;
   fallbackAgentId: string | null;
@@ -70,6 +82,7 @@ export async function loadActiveRouter(
 
   const cfg = (router.config ?? {}) as {
     classifier_model?: unknown;
+    classifier_provider?: unknown;
     sticky?: unknown;
     min_confidence?: unknown;
   };
@@ -77,6 +90,10 @@ export async function loadActiveRouter(
     typeof cfg.classifier_model === 'string' && cfg.classifier_model.trim() !== ''
       ? cfg.classifier_model
       : 'claude-haiku-4-5';
+  const classifierProvider =
+    typeof cfg.classifier_provider === 'string' && cfg.classifier_provider.trim() !== ''
+      ? cfg.classifier_provider
+      : null;
   const sticky = typeof cfg.sticky === 'boolean' ? cfg.sticky : true;
   const minConfidence =
     typeof cfg.min_confidence === 'number' && cfg.min_confidence >= 0 && cfg.min_confidence <= 1
@@ -87,6 +104,7 @@ export async function loadActiveRouter(
     id: router.id,
     name: router.name,
     classifierModel,
+    classifierProvider,
     sticky,
     minConfidence,
     fallbackAgentId: router.fallback_agent_id,

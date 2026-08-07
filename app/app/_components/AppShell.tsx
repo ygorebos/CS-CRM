@@ -13,7 +13,19 @@ export function AppShell({ sidebarCollapsed, children }: AppShellProps) {
   return (
     <div className="flex min-h-screen w-full bg-background">
       <Sidebar collapsed={sidebarCollapsed} />
-      <div className={cn("flex min-h-screen flex-1 flex-col transition-[margin] duration-200", sidebarCollapsed ? "ml-16" : "ml-60")}>
+      {/*
+        `min-w-0` é o que permite a coluna de conteúdo ENCOLHER. Um flex item
+        nasce com `min-width: auto`, ou seja, nunca fica menor que o conteúdo —
+        então qualquer bloco largo (uma fila de abas, uma tabela) empurrava a
+        PÁGINA INTEIRA para o lado em vez de rolar dentro da própria caixa, e o
+        conteúdo sumia sem nada indicando que existia.
+
+        Medido em 390x844 no detalhe do agente, que tem seis abas: a página
+        estourava 476px na horizontal; com esta classe, 212px — o que sobra é o
+        cabeçalho, presente também em telas que não têm abas (a lista de agentes
+        estoura 236px). Isolado ancestral por ancestral: é este o que decide.
+      */}
+      <div className={cn("flex min-h-screen min-w-0 flex-1 flex-col transition-[margin] duration-200", sidebarCollapsed ? "ml-16" : "ml-60")}>
         <TopBar />
         <main className="flex-1 overflow-auto p-6">{children}</main>
       </div>

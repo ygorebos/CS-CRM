@@ -3,7 +3,7 @@
  * `ai_provider_credentials` do CRM (AES-256-GCM via lib/crypto/aes_gcm — colunas
  * api_key_encrypted/api_key_iv/api_key_tag) e os knobs de modelo/params/teto vivem
  * em `organizations.settings->'llm'`. Sem BYOK, o fallback é a chave de plataforma
- * do env (ANTHROPIC_API_KEY) — só para provider anthropic. O plaintext da chave
+ * do env (ANTHROPIC_API_KEY ou OPENAI_API_KEY, conforme o provider). O plaintext da chave
  * existe apenas em memória do processo no instante da chamada; nunca em log.
  *
  * A config é lida do DB A CADA chamada (resolveOrgLlmConfig) — trocar modelo/
@@ -34,8 +34,19 @@ export interface LlmEdgeConfig {
   cacheTtl?: CacheTtl;
 }
 
+/**
+ * ⚠️ `OPENAI_API_KEY` entra aqui, e não entrava antes — o campo `openaiApiKey`
+ * existia no tipo e era lido em `resolveOrgLlmConfig`, mas NENHUM caminho do
+ * agente o preenchia (só o worker de transcrição de áudio montava a config na
+ * mão). O efeito: numa instalação com a chave da OpenAI no `.env`, um agente com
+ * modelo OpenAI caía em `LlmNotConfiguredError` — a chave estava lá, coletada
+ * pelo instalador, e o turno morria como se não estivesse. Um campo declarado que
+ * ninguém preenche é pior que um campo ausente: faz quem lê o código concluir que
+ * o caminho existe.
+ */
 export function llmEdgeConfigFromEnv(env: {
   ANTHROPIC_API_KEY?: string;
+  OPENAI_API_KEY?: string;
   LLM_CACHE_TTL?: string;
 }): LlmEdgeConfig {
   const ttl = env.LLM_CACHE_TTL ?? '1h';
@@ -44,6 +55,7 @@ export function llmEdgeConfigFromEnv(env: {
   }
   return {
     ...(env.ANTHROPIC_API_KEY ? { anthropicApiKey: env.ANTHROPIC_API_KEY } : {}),
+    ...(env.OPENAI_API_KEY ? { openaiApiKey: env.OPENAI_API_KEY } : {}),
     cacheTtl: ttl,
   };
 }
@@ -53,7 +65,7 @@ export class LlmNotConfiguredError extends Error {
   override readonly name = 'llm_not_configured';
   constructor() {
     super(
-      'org sem credencial LLM utilizável — cadastre uma chave BYOK ativa/validada em ai_provider_credentials ou defina ANTHROPIC_API_KEY (fallback de plataforma, só provider anthropic)',
+      'org sem credencial LLM utilizável — cadastre uma chave BYOK ativa/validada em ai_provider_credentials ou defina ANTHROPIC_API_KEY / OPENAI_API_KEY (fallback de plataforma, conforme o provider do modelo)',
     );
   }
 }

@@ -31,7 +31,10 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-const FORBIDDEN = /\b(waha|WAHA|meta_cloud|graph\.facebook\.com)\b/;
+// O padrão vive em módulo próprio para poder ser testado sem executar o lint —
+// ver a justificativa das duas fronteiras (issue #118) lá.
+import { nomeiaProvider } from "./lint-channels.pattern";
+
 const ROOTS = ["app", "lib", "components", "workers"];
 const ALLOWED = [
   /^lib\/channels\//,
@@ -42,7 +45,16 @@ const ALLOWED = [
 ];
 
 /**
- * Dívida conhecida, medida em 2026-07-27 (Task 7 do plano de seam de canais).
+ * Dívida conhecida, medida em 2026-07-27 (Task 7 do plano de seam de canais) e
+ * RE-medida em 2026-08-05 ao consertar a fronteira do padrão (issue #118).
+ *
+ * As 7 entradas marcadas `(#118)` não são dívida nova: elas já violavam o
+ * invariante desde sempre e a catraca é que não as enxergava, porque `\b` não
+ * fecha antes de `_`. Entram DECLARADAS em vez de consertadas no mesmo passo —
+ * congelar o que já existia e reprovar só o novo é o que deixa o gate nascer
+ * verde; limpá-las exige renomear coluna de banco e campo de API pública, que é
+ * mudança de comportamento e trabalho da Fase 3 do seam.
+ *
  * Ordem alfabética dentro de cada grupo, para o diff ficar legível.
  */
 const KNOWN_DEBT: { reason: string; files: string[] }[] = [
@@ -51,10 +63,14 @@ const KNOWN_DEBT: { reason: string; files: string[] }[] = [
       "Superfície de TRANSPORTE do provider legado (control plane de sessão, " +
       "webhook receiver, download de mídia). Mesma natureza de `lib/waha/`, que " +
       "já é exceção: não são features perguntando identidade, são o próprio " +
-      "canal. Saem junto com `lib/waha/` na Fase 3.",
+      "canal. Saem junto com `lib/waha/` na Fase 3. O teste de rota entra pela " +
+      "mesma porta: para exercitar a revogação por canal ele precisa montar as " +
+      "duas linhas da união e dublar o cliente do transporte — sai quando a " +
+      "rota que ele cobre sair.",
     files: [
       "app/api/v1/channel-sessions/[id]/qr/route.ts",
       "app/api/v1/channel-sessions/[id]/reconnect/route.ts",
+      "app/api/v1/channel-sessions/[id]/route.test.ts",
       "app/api/v1/channel-sessions/[id]/route.ts",
       "app/api/v1/channel-sessions/route.ts",
       "app/api/v1/health/route.ts",
@@ -63,6 +79,10 @@ const KNOWN_DEBT: { reason: string; files: string[] }[] = [
       "app/api/v1/onboarding/whatsapp/session/route.ts",
       "app/api/v1/webhooks/waha/[token]/route.ts",
       "app/api/v1/webhooks/waha/route.ts",
+      // (#118) Lê `process.env.WAHA_API_BASE_URL`/`WAHA_API_KEY` só para
+      // decidir se o transporte está configurado — o nome está no ENV, não
+      // numa pergunta de identidade. Sai quando o env virar config de canal.
+      "app/app/connections/page.tsx",
       "app/onboarding/connect-whatsapp/page.tsx",
       "lib/agent-engine/edge/crm/session-reconciler.ts",
       "workers/media-persist-worker.ts",
@@ -71,20 +91,44 @@ const KNOWN_DEBT: { reason: string; files: string[] }[] = [
   {
     reason:
       "Texto VISÍVEL ao usuário (cópia de tela) ou nome de campo de resposta de " +
-      "API pública (`checks.waha`, `waha_ban`, `waha_sessions_count`). Trocar é " +
-      "mudança de comportamento observável — proibida nas Fases 0–2. A cópia " +
-      "neutra de canal entra junto com o seletor de canal da Fase 3a, que é " +
-      "quando o usuário passa a ter mais de um canal para distinguir.",
+      "API pública (`checks.waha`, `waha_ban`, `waha_sessions_count`, o código " +
+      "de erro `waha_error`). Trocar é mudança de comportamento observável — " +
+      "proibida nas Fases 0–2, e no caso do código de erro quebraria cliente de " +
+      "API de terceiro. A cópia neutra de canal entra junto com o seletor de " +
+      "canal da Fase 3a, que é quando o usuário passa a ter mais de um canal " +
+      "para distinguir.",
     files: [
       "app/api/v1/admin/dashboard/kpis/route.ts",
       "app/api/v1/admin/tenants/[id]/health/route.ts",
+      // (#118) Emite `waha_sessions_count` na resposta do admin.
+      "app/api/v1/admin/tenants/[id]/route.ts",
       "app/design/sections/SectionPatterns.tsx",
       "app/onboarding/connect-whatsapp/_client.tsx",
       "components/admin/dashboard/AlertItem.tsx",
       "components/admin/dashboard/KPICards.tsx",
       "components/admin/tenants/HealthGrid.tsx",
+      // (#118) Fixture do teste do componente logo abaixo, que já é dívida:
+      // sai junto com ele, pelo mesmo motivo.
+      "components/admin/tenants/TenantOverview.test.tsx",
       "components/admin/tenants/TenantOverview.tsx",
       "components/connections/ConnectionsClient.tsx",
+      // (#118) `waha_error` no catálogo de códigos de erro da API pública.
+      "lib/api/errors.ts",
+    ],
+  },
+  {
+    reason:
+      "(#118) Leem a COLUNA `channel_sessions.waha_session_name`. Aqui o nome do " +
+      "provider está no SCHEMA, não na feature: nenhum destes pergunta 'é WAHA?' " +
+      "— só leem o identificador da sessão pelo nome que a coluna tem hoje. " +
+      "Limpar é renomear a coluna (migration + apêndice no baseline + toda a " +
+      "leitura), que é a mesma mudança de schema que a Fase 3 do seam já prevê " +
+      "ao absorver `lib/waha/`. Consertar aqui, antes disso, espalharia um " +
+      "alias por 3 arquivos sem tirar o nome de lugar nenhum.",
+    files: [
+      "app/api/v1/ai/pacing/route.ts",
+      "app/api/v1/cron/contact-avatars/route.ts",
+      "components/connections/AntiBanSheet.tsx",
     ],
   },
   {
@@ -148,7 +192,7 @@ function walk(dir: string): string[] {
 
 const offenders = ROOTS.flatMap(walk)
   .filter((f) => !ALLOWED.some((re) => re.test(f)))
-  .filter((f) => FORBIDDEN.test(readFileSync(f, "utf8")));
+  .filter((f) => nomeiaProvider(readFileSync(f, "utf8")));
 
 const novos = offenders.filter((f) => !DEBT.has(f));
 const stale = [...DEBT].filter((f) => !offenders.includes(f)).sort();

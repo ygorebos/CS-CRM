@@ -2,19 +2,15 @@
  * Cenários 25 e 26 no banco real: o agente avança o funil DELE e o card anda no
  * funil do TENANT — em dois nichos com nomes completamente diferentes.
  */
-import * as fs from "node:fs";
 import { randomUUID } from "node:crypto";
 
 import { createClient } from "@supabase/supabase-js";
 
 import { mirrorLeadStageToCrm } from "@/lib/agent-engine/edge/crm/move-lead-stage";
 import { sincronizaEstagioDoAgente } from "@/lib/leads/agent-stage-sync";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const env = Object.fromEntries(
-  fs.readFileSync(".env.local", "utf8").split("\n")
-    .filter((l) => l.includes("=") && !l.trimStart().startsWith("#"))
-    .map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).replace(/^"|"$/g, "")]),
-);
+const env = carregarEnvLocal();
 const admin = createClient(env.NEXT_PUBLIC_SUPABASE_URL!, env.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { persistSession: false },
 });

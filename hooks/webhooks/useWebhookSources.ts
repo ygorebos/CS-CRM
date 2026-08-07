@@ -19,6 +19,9 @@ export interface WebhookSourceRow {
   has_secret: boolean;
   created_at: string;
   updated_at: string;
+  /** Quem mexeu por último (migration 0101). `null` nas fontes anteriores a ela. */
+  last_change_actor_kind: string | null;
+  last_change_at: string | null;
 }
 
 export interface WebhookSourceEvent {

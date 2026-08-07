@@ -12,19 +12,12 @@
  * são registro real de que a edição aconteceu, e apagá-las seria falsificar.
  */
 import { chromium, type Page } from "@playwright/test";
-import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 import { BASE, CARD_ATTR, login } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const DB = fs
-  .readFileSync(".env.local", "utf8")
-  .split("\n")
-  .find((l) => l.startsWith("SUPABASE_DB_URL="))!
-  .split("=")
-  .slice(1)
-  .join("=")
-  .replace(/"/g, "");
+const DB = carregarEnvLocal().SUPABASE_DB_URL!;
 
 const sql = (q: string): string =>
   execFileSync("psql", [DB, "-tA", "-c", q], { encoding: "utf8" }).trim();

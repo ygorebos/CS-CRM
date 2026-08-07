@@ -3906,6 +3906,8 @@
         <path data-edge-from="mappingscreen" data-edge-to="stagesscreen" data-edge-label="sem etapa de fechamento, conserta aqui" data-edge-key="21" data-edge-id="mappingscreen-stagesscreen" data-composition-points="300,1261;300,1276;88,1276;88,1261" d="M 300 1261 L 300 1276 L 88 1276 L 88 1261" class="a-emphasis" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
         <path data-edge-from="mappingscreen" data-edge-to="stagehint" data-edge-label="grava os 7 passos de uma vez" data-edge-key="22" data-edge-id="mappingscreen-stagehint" data-composition-points="346,1235;454,1235" d="M 346 1235 L 454 1235" class="a-default" stroke-width="1.4" marker-end="url(#arrowhead)"/>
         <path data-edge-from="stagehint" data-edge-to="turn" data-edge-label="o card anda para a etapa escolhida (mirrorLeadStageToCrm)" data-edge-key="23" data-edge-id="stagehint-turn" data-composition-points="546,1235;692,1235;692,367;476,367" d="M 546 1235 L 692 1235 L 692 367 L 476 367" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="capacidades" data-edge-to="turn" data-edge-label="tool_ids da versão" data-edge-key="24" data-edge-id="capacidades-turn" data-composition-points="505,739;692,739;692,367;476,367" d="M 505 739 L 692 739 L 692 367 L 476 367" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="turn" data-edge-to="capacidades" data-edge-label="uso e falha auditados" data-edge-key="25" data-edge-id="turn-capacidades" data-composition-points="476,367;692,367;692,739;505,739" d="M 476 367 L 692 367 L 692 739 L 505 739" class="a-dashed" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
 
         <!-- Nodes -->
         <g id="node-inbound" data-node-id="inbound" data-node-label="Msg inbound" tabindex="0" role="button" aria-label="Focus Msg inbound, cliente escreve, Canal (WAHA)" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="cliente escreve" data-node-context="Canal (WAHA)">
@@ -4046,6 +4048,20 @@
           </g>
           <text data-detail-anchor x="220" y="734" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">org_memory</text>
           <text data-detail="context" x="220" y="751" class="t-muted" font-size="8" text-anchor="middle">versão + ponteiro + aprendizados</text>
+        </g>
+
+        <g id="node-capacidades" data-node-id="capacidades" data-node-label="Capacidades" tabindex="0" role="button" aria-label="Focus Capacidades, pacotes + uso real (app/app/ai/agents), Config (Memória da Org)" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="pacotes + uso real (app/app/ai/agents)" data-node-context="Config (Memória da Org)">
+          <title>Capacidades · pacotes + uso real (app/app/ai/agents) · Config (Memória da Org)</title>
+          <rect x="355" y="713" width="150" height="52" rx="6" class="c-mask"/>
+          <rect x="355" y="713" width="150" height="52" rx="6" class="c-frontend" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="frontend" class="semantic-sigil s-frontend" transform="translate(361 719) scale(0.6875)">
+            <rect x="2" y="3" width="12" height="10" rx="2"/>
+            <path d="M2 6.5h12"/>
+            <circle cx="4.1" cy="4.8" r=".7" class="sigil-fill"/>
+            <circle cx="6.3" cy="4.8" r=".7" class="sigil-fill"/>
+          </g>
+          <text data-detail-anchor x="430" y="734" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">Capacidades</text>
+          <text data-detail="context" x="430" y="751" class="t-muted" font-size="8" text-anchor="middle">pacotes + uso real (app/app/ai/agents)</text>
         </g>
 
         <g id="node-skillsscreen" data-node-id="skillsscreen" data-node-label="Skills" tabindex="0" role="button" aria-label="Focus Skills, tela + import .zip (app/app/ai/skills), Skills instaláveis (Fase 2)" aria-pressed="false" data-node-kind="frontend" data-node-sublabel="tela + import .zip (app/app/ai/skills)" data-node-context="Skills instaláveis (Fase 2)">
@@ -4253,6 +4269,14 @@
         <g data-detail="context" data-edge-from="stagehint" data-edge-to="turn" data-edge-label="o card anda para a etapa escolhida (mirrorLeadStageToCrm)" data-edge-key="23" data-edge-id="stagehint-turn">
           <rect x="550.2" y="881" width="283.59999999999997" height="14" rx="3" class="c-mask"/>
           <text x="692" y="891" class="t-database" font-size="8" text-anchor="middle">o card anda para a etapa escolhida (mirrorLeadStageToCrm)</text>
+        </g>
+        <g data-detail="context" data-edge-from="capacidades" data-edge-to="turn" data-edge-label="tool_ids da versão" data-edge-key="24" data-edge-id="capacidades-turn">
+          <rect x="643.8" y="653" width="96.39999999999999" height="14" rx="3" class="c-mask"/>
+          <text x="692" y="663" class="t-database" font-size="8" text-anchor="middle">tool_ids da versão</text>
+        </g>
+        <g data-detail="context" data-edge-from="turn" data-edge-to="capacidades" data-edge-label="uso e falha auditados" data-edge-key="25" data-edge-id="turn-capacidades">
+          <rect x="636.6" y="673" width="110.8" height="14" rx="3" class="c-mask"/>
+          <text x="692" y="683" class="t-database" font-size="8" text-anchor="middle">uso e falha auditados</text>
         </g>
 
         <!-- Legend -->
@@ -4466,6 +4490,19 @@
           <li>&bull; 4 spinning · 5 promise · 6 semantic_promise</li>
           <li>&bull; 7 disclosure (1ª msg se apresenta como IA)</li>
           <li>&bull; Veto volta ao modelo como erro instrutivo</li>
+        </ul>
+      </div>
+
+      <div class="card">
+        <div class="card-header">
+          <div class="card-dot emerald"></div>
+          <h3>Capacidades: configurar e observar são a mesma peça</h3>
+        </div>
+        <ul>
+          <li>&bull; Entrada: o humano liga pacotes por jornada; capacidade de risco crítico exige marcação individual</li>
+          <li>&bull; Saída: tool_ids da versão publicada é o que pickToolsFromMcp entrega ao modelo</li>
+          <li>&bull; Volta: api_audit_log (mcp.tool_called) → fn_agent_tool_usage → usos, falhas e última vez na aba Capacidades</li>
+          <li>&bull; Sem a volta, ligar uma capacidade era um ato de fé: o log existia desde a Spec 11 e nenhuma tela lia</li>
         </ul>
       </div>
     </div>

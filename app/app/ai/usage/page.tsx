@@ -57,7 +57,9 @@ export default async function AiUsagePage({ searchParams }: PageProps) {
       <header>
         <h1 className="text-2xl font-semibold tracking-tight">Uso de IA</h1>
         <p className="text-sm text-muted-foreground">
-          Custo, tokens, latência e taxa de handoff dos últimos 30 dias.
+          Quanto a inteligência artificial custou, quantos atendimentos ela fez, quanto
+          demorou para responder e quantas vezes precisou chamar uma pessoa — nos
+          últimos 30 dias.
         </p>
       </header>
       <BudgetCard initialData={budget} isAdmin={isAdmin} />

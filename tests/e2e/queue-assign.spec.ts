@@ -15,6 +15,7 @@ import * as path from "node:path";
 
 import { createClient } from "@supabase/supabase-js";
 import { test, expect, type Page } from "@playwright/test";
+import { carregarEnvLocal } from "../../scripts/lib/env-de-teste";
 
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
 const EVIDENCE = path.join(process.cwd(), "loop/checkpoints/evidence/G5");
@@ -32,12 +33,7 @@ interface Creds {
 }
 
 function loadEnv(): Record<string, string> {
-  const envFile = fs.readFileSync(path.join(process.cwd(), ".env.local"), "utf8");
-  const env: Record<string, string> = {};
-  for (const line of envFile.split("\n")) {
-    const m = line.match(/^([A-Z_]+)=(.*)$/);
-    if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-  }
+  const env = carregarEnvLocal();
   return env;
 }
 

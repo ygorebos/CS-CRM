@@ -22,13 +22,14 @@ import { env } from "@/lib/env";
 export const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
 
 export type ModelId =
-  | "anthropic/claude-sonnet-4-6"
+  | "anthropic/claude-sonnet-5"
+  | "anthropic/claude-opus-5"
   | "anthropic/claude-haiku-4-5"
   | "openai/text-embedding-3-small"
   // Allow arbitrary tenant-configured strings without losing autocomplete on the canonical ones.
   | (string & {});
 
-export const DEFAULT_BOT_MODEL: ModelId = "anthropic/claude-sonnet-4-6";
+export const DEFAULT_BOT_MODEL: ModelId = "anthropic/claude-sonnet-5";
 export const DEFAULT_CLASSIFIER_MODEL: ModelId = "anthropic/claude-haiku-4-5";
 export const DEFAULT_EMBEDDING_MODEL: ModelId = "openai/text-embedding-3-small";
 

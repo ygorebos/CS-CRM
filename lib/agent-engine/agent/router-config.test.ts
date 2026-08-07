@@ -43,3 +43,35 @@ describe('loadActiveRouter', () => {
     expect(router?.minConfidence).toBe(0.6);
   });
 });
+
+describe('loadActiveRouter — provedor do classificador', () => {
+  it('lê classifier_provider da config', async () => {
+    const pool = poolSeq([
+      { rows: [{ id: 'r1', name: 'X', config: { classifier_model: 'gpt-5-mini', classifier_provider: 'openai' }, fallback_agent_id: null }] },
+      { rows: [] },
+    ]);
+    const router = await loadActiveRouter(pool, 'org1', 'cs1');
+    expect(router?.classifierModel).toBe('gpt-5-mini');
+    expect(router?.classifierProvider).toBe('openai');
+  });
+
+  it('sem classifier_provider → null (usa o provedor da organização, como antes)', async () => {
+    const pool = poolSeq([
+      { rows: [{ id: 'r1', name: 'X', config: { classifier_model: 'claude-haiku-4-5' }, fallback_agent_id: null }] },
+      { rows: [] },
+    ]);
+    const router = await loadActiveRouter(pool, 'org1', 'cs1');
+    expect(router?.classifierProvider).toBeNull();
+  });
+
+  it('classifier_provider vazio ou não-string é ignorado — não vira provedor ""', async () => {
+    for (const valor of ['', '   ', 42, null, {}]) {
+      const pool = poolSeq([
+        { rows: [{ id: 'r1', name: 'X', config: { classifier_provider: valor }, fallback_agent_id: null }] },
+        { rows: [] },
+      ]);
+      const router = await loadActiveRouter(pool, 'org1', 'cs1');
+      expect(router?.classifierProvider).toBeNull();
+    }
+  });
+});

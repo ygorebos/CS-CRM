@@ -24,15 +24,11 @@
  */
 import { createClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
-import * as fs from "node:fs";
 
 import { CREDS, carimbar } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const env: Record<string, string> = {};
-for (const line of fs.readFileSync(".env.local", "utf8").split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) env[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const env = carregarEnvLocal();
 const RUN = randomUUID().slice(0, 6);
 
 async function entrar() {

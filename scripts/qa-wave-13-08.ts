@@ -8,22 +8,10 @@
  */
 import * as fs from "fs";
 import * as path from "path";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-{
-  const envPath = path.resolve(process.cwd(), ".env.local");
-  if (fs.existsSync(envPath)) {
-    for (const line of fs.readFileSync(envPath, "utf8").split("\n")) {
-      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
-      if (m && m[1] && !process.env[m[1]]) {
-        let v = m[2] ?? "";
-        if ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'"))) {
-          v = v.slice(1, -1);
-        }
-        process.env[m[1]] = v;
-      }
-    }
-  }
-}
+// `process.env` vence o `.env.local` (scripts/lib/env-de-teste.ts).
+carregarEnvLocal();
 
 const BASE_URL = process.env.QA_BASE_URL ?? "http://localhost:3001";
 const RUN_PATH = "/api/internal/agents/run";

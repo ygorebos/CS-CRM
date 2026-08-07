@@ -18,6 +18,7 @@ import {
   resolveSessionRef,
   type ChannelSessionRef,
 } from "@/lib/channels";
+import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { isMediaPathOwnedBy } from "@/lib/messaging/media/upload-validation";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
@@ -41,8 +42,16 @@ type SB = SupabaseClient;
  * conversa", o que vale para o eco e também para uma mensagem legítima que o
  * atendente digitou no celular enquanto o envio estava em voo: medido, esperado
  * 2 mensagens e obtido 1, com a do celular descartada. Seria o defeito do #108
- * de volta — e permanente, porque nada tira uma linha de `queued` (o cron
- * `recover-stuck-messages` do CLAUDE.md:93 não existe no código).
+ * de volta — e permanente, porque nada tira uma linha de `queued`.
+ *
+ * ATUALIZAÇÃO (issue #129): o cron `recover-stuck-messages` passou a existir
+ * (`app/api/v1/cron/recover-stuck-messages/route.ts`), mas ele cobre `sending`,
+ * não `queued` — e a diferença é deliberada. `queued` é estado de espera com
+ * DONO: o agent-engine reagenda o job (`SEND_QUEUED_RETRY_MS`, 5 min por
+ * padrão) enquanto a sessão do canal não está WORKING, e o watchdog redirige.
+ * Um cron marcando `queued` como falha depois de 5 min brigaria com essa
+ * retentativa e perderia mensagem que ia sair. `sending` não tem dono nenhum —
+ * é ali que a linha morre em silêncio.
  *
  * Aqui não há ambiguidade: o canal acabou de devolver o id EXATO da mensagem que
  * mandamos. Casa por id, nunca por proximidade.
@@ -225,13 +234,17 @@ export async function sendMessageHandler(
   ctx: HandlerCtx,
   input: SendMessageInput,
 ): Promise<Message> {
-  const { data: conv, error: convErr } = await supabase
-    .from("conversations")
-    .select(
-      `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, contacts:contact_id(phone_number, wa_identity, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status)`,
-    )
-    .eq("id", input.conversation_id)
-    .maybeSingle();
+  // `archived_at` entra pelo helper tolerante porque este é O caminho de saída do
+  // sistema inteiro (UI, automação, MCP e o agente passam por aqui): num clone que
+  // subiu o código sem a migration 0106, pedir a coluna direto derrubaria TODO
+  // envio com 42703. Sem a coluna, nada está arquivado — e a consulta sem ela é a
+  // consulta certa (ver lib/channels/archived).
+  const convSelect = (comArchived: boolean) =>
+    `id, organization_id, contact_id, channel_session_id, is_group, group_chat_id, contacts:contact_id(phone_number, wa_identity, is_blocked), channel_sessions:channel_session_id(${CHANNEL_SESSION_REF_COLUMNS}, status${comArchived ? `, ${ARCHIVED_AT}` : ""})`;
+  const { data: conv, error: convErr } = await queryTolerantToMissingArchived(
+    () => supabase.from("conversations").select(convSelect(true)).eq("id", input.conversation_id).maybeSingle(),
+    () => supabase.from("conversations").select(convSelect(false)).eq("id", input.conversation_id).maybeSingle(),
+  );
 
   if (convErr) {
     throw new ApiError(500, "internal_error", undefined, ctx.requestId, convErr.message);
@@ -248,7 +261,7 @@ export async function sendMessageHandler(
     is_group: boolean;
     group_chat_id: string | null;
     contacts: { phone_number: string | null; wa_identity: string | null; is_blocked: boolean } | null;
-    channel_sessions: (ChannelSessionRef & { status: string }) | null;
+    channel_sessions: (ChannelSessionRef & { status: string; archived_at?: string | null }) | null;
   };
   const c = conv as unknown as Joined;
 
@@ -324,7 +337,29 @@ export async function sendMessageHandler(
     waIdentity: c.contacts?.wa_identity,
   });
 
-  if (!adapter.isConfigured()) {
+  if (c.channel_sessions?.archived_at) {
+    // Canal ARQUIVADO = canal excluído pelo usuário: a sessão já foi deslogada e
+    // removida do transporte, e a credencial do canal oficial já foi revogada. É a
+    // promessa da migration 0106 ("não é mais elegível para envio") virando
+    // comportamento.
+    //
+    // `failed` e não `queued` de propósito: fila implica "vai sair quando der", e
+    // por este canal não vai sair nunca. Falha com código é o que aparece na tela
+    // e é o que o ledger do agente lê como desfecho TERMINAL — em `queued` o
+    // follow-up ficaria retentando contra um número que não existe mais.
+    // Vem ANTES de `isConfigured`: um canal excluído não espera configuração.
+    const { data: updated } = await supabase
+      .from("messages")
+      .update({
+        status: "failed",
+        error_code: "channel_archived",
+        error_message: "Este número foi excluído da Central de Conexões.",
+      })
+      .eq("id", message.id)
+      .select(MSG_COLS)
+      .maybeSingle();
+    if (updated) message = updated as unknown as Message;
+  } else if (!adapter.isConfigured()) {
     const { data: updated } = await supabase
       .from("messages")
       .update({

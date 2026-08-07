@@ -41,13 +41,9 @@ import * as fs from "node:fs";
 import pg from "pg";
 
 import { CREDS, EVIDENCE, cardLocator, carimbar, casoConstruido, gotoBoard, login, shotCard, shotPage } from "./qa-helpers";
+import { carregarEnvLocal } from "../scripts/lib/env-de-teste";
 
-const envFile = fs.readFileSync(".env.local", "utf8");
-const envVars: Record<string, string> = {};
-for (const line of envFile.split("\n")) {
-  const m = line.match(/^([A-Z_]+)=(.*)$/);
-  if (m) envVars[m[1]!] = m[2]!.replace(/^"(.*)"$/, "$1");
-}
+const envVars = carregarEnvLocal();
 const admin = createClient(envVars.NEXT_PUBLIC_SUPABASE_URL!, envVars.SUPABASE_SERVICE_ROLE_KEY!, {
   auth: { autoRefreshToken: false, persistSession: false },
 });

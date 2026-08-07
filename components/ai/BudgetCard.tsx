@@ -101,14 +101,26 @@ export function BudgetCard({ initialData, isAdmin }: Props) {
         </div>
         <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
           <span>
-            <strong>{fmtCents(consumed)}</strong> de{" "}
-            {limit > 0 ? fmtCents(limit) : "—"}
+            <strong>{fmtCents(consumed)}</strong>
+            {limit > 0 ? <> gastos de {fmtCents(limit)}</> : <> gastos este mês</>}
           </span>
+          {/*
+            Sem limite definido, a linha antiga dizia "R$ 0,00 de —" e ainda
+            prometia "pausa ao 100%" — 100% de um teto que não existe. Quem lê
+            fica achando que há uma proteção ligada.
+          */}
           <span className="text-muted-foreground">
-            {status.pct.toFixed(2)}% • alarme em {status.alarm_threshold_pct}% •{" "}
-            {status.action_at_100pct === "disable"
-              ? "desabilita ao 100%"
-              : "pausa ao 100%"}
+            {limit > 0 ? (
+              <>
+                {status.pct.toFixed(0)}% do limite · avisamos em{" "}
+                {status.alarm_threshold_pct}% ·{" "}
+                {status.action_at_100pct === "disable"
+                  ? "a IA é desligada ao chegar no limite"
+                  : "a IA pausa ao chegar no limite"}
+              </>
+            ) : (
+              "Sem limite definido — a IA não vai parar sozinha por gasto."
+            )}
           </span>
         </div>
       </div>

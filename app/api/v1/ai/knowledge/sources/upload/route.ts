@@ -218,5 +218,5 @@ export async function POST(req: NextRequest): Promise<Response> {
     console.warn("[ai-policy-upload] emit_event failed (non-blocking):", emitErr.message);
   }
 
-  return ok({ data: { id: ksId, blob_path: blobPath } }, { status: 201, requestId });
+  return ok({ id: ksId, blob_path: blobPath }, { status: 201, requestId });
 }

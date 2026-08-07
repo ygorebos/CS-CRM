@@ -72,5 +72,9 @@ export async function GET(
     metadata: { incident_id: id },
   });
 
-  return ok({ data: shaped }, { requestId });
+  // `ok()` já embrulha em `{ data }`. Passar `{ data: shaped }` gerava
+  // `{ data: { data: shaped } }`, e a tela de detalhe lia `body.data` esperando
+  // o incidente: `created_at` vinha undefined e `formatDistanceToNow(new
+  // Date(undefined))` derrubava a página no error boundary, sempre.
+  return ok(shaped, { requestId });
 }
