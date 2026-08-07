@@ -109,3 +109,15 @@ evidence/.sonda-score-residuo.json
 # Screenshots soltos do fluxo de QA visual. A evidência versionada vive em
 # .superpowers/evidence/ — "image copy N.png" na raiz é sobra de colagem.
 /image copy*.png
+
+# Rascunhos de spec do Spec Kit (`specify`), por decisão do mantenedor: ficam na
+# máquina de quem escreve até virarem doc versionada em docs/specs/. A barra
+# inicial é obrigatória — sem ela o padrão casaria também com docs/specs/ e
+# docs/superpowers/specs/, que SÃO versionados, e todo arquivo novo lá dentro
+# ficaria invisível ao git.
+/specs/
+
+# Runbook do Supabase self-hosted de desenvolvimento: descreve a VPS pessoal do
+# mantenedor (hostnames, layout de rede), não a instalação que o self-hoster faz.
+# Os runbooks que valem para quem clona continuam versionados em docs/runbooks/.
+/docs/runbooks/supabase-dev-local.md
