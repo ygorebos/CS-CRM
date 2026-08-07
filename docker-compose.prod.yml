@@ -72,6 +72,14 @@ services:
       # fazia cair no default WEBJS, engine com browser que trava/corrompe a sessão
       # quando o WhatsApp Web atualiza; NOWEB é websocket direto, estável e leve).
       WHATSAPP_DEFAULT_ENGINE: ${WHATSAPP_DEFAULT_ENGINE:-NOWEB}
+      # Sem estes dois o WAHA grava em /tmp/whatsapp-files (default) e o volume
+      # waha-media montado abaixo nunca recebe nada — mídia some a cada restart.
+      # Pior: WHATSAPP_FILES_LIFETIME default é 180 SEGUNDOS, então o worker de
+      # media.persist_requested tem 3 minutos para baixar antes do WAHA apagar.
+      # Hoje funciona por sorte de cronometragem; qualquer atraso (fila, worker
+      # parado, retry) devolve `waha_media_404` e perde o arquivo para sempre.
+      WHATSAPP_FILES_FOLDER: ${WHATSAPP_FILES_FOLDER:-/app/.media}
+      WHATSAPP_FILES_LIFETIME: ${WHATSAPP_FILES_LIFETIME:-3600}
       WAHA_DASHBOARD_ENABLED: "false"    # nunca expor o dashboard num template público
     volumes:
       - waha-data:/app/.sessions          # sessões pareadas (QR) — perder = re-parear
