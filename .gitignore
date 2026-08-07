@@ -99,3 +99,7 @@ evidence/.sonda-score-residuo.json
 
 # sessão reusada pelas jornadas (contém tokens)
 .auth/
+
+# Screenshots soltos do fluxo de QA visual. A evidência versionada vive em
+# .superpowers/evidence/ — "image copy N.png" na raiz é sobra de colagem.
+/image copy*.png
