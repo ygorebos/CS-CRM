@@ -61,6 +61,12 @@ supabase/.branches/
 !.claude/agents/
 !.claude/commands/
 
+# spec-kit: skills geradas pelo `specify` para agentes portáveis (Codex e afins).
+# São reinstaláveis com `specify integration install codex` — não versionar.
+# A skill própria do projeto (DeskcommCRM) continua rastreada.
+.agents/skills/*
+!.agents/skills/DeskcommCRM/
+
 # Local docker volumes (WAHA)
 .waha-data/
 .epic-executor/
