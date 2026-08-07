@@ -225,5 +225,13 @@ passo posterior, condicionado a evidência em produção (FR-030).
    `webhook_secret_encrypted: Buffer.from([0])` em dois dos três caminhos
    (`app/api/v1/channel-sessions/route.ts:105` e `app/api/v1/onboarding/whatsapp/session/route.ts:102`).
    Como a rota nova é fail-closed sem válvula, ela recusaria **100%** das entregas de conexões
-   criadas pelo onboarding. Virou bloqueador explícito da Fase 2 (T017a–T017d) — é dívida de
+   criadas pelo onboarding. Virou bloqueador explícito da Fase 2 (T017a–T017e) — é dívida de
    segurança preexistente que esta feature obriga a pagar, não custo criado por ela.
+
+7. **A cura desse segredo não cabe no SQL, e por pouco não quebrou a instalação.** Medido na
+   segunda rodada de análise: `public.fn_encrypt_oauth` (`baseline.sql:5276`) lança exceção
+   quando a chave de cifra é nula, e `hostgator-setup-kit/_common.sh:460` registra que
+   `ensure_encryption_key` só semeia essa chave **depois** de o baseline ser aplicado. Curar
+   dentro do apêndice abortaria o `install.sh` (que usa `ON_ERROR_STOP=1`) numa VPS nova e
+   falharia em silêncio no `update.sh`. A cura passou para um passo do instalador, posterior à
+   chave (T017c), com recusa explícita e visível enquanto uma conexão não estiver curada (T017e).

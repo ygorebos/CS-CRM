@@ -90,8 +90,23 @@ desta fase fechar.**
 
 - [ ] T017a [TEST] `tests/invariants/channel-session-segredo.test.ts` — toda `channel_session` nasce com segredo decifrável de comprimento ≥16; nenhuma nasce com placeholder
 - [ ] T017b Gerar segredo forte na criação da sessão e cifrá-lo em `app/api/v1/channel-sessions/route.ts` e `app/api/v1/onboarding/whatsapp/session/route.ts`, no padrão que `app/api/v1/channels/official/route.ts:200` já usa
-- [ ] T017c Curar as linhas existentes: passo idempotente e auto-curativo na migration `0116` e no apêndice do `baseline.sql` que gera segredo para toda `channel_session` cujo `webhook_secret_encrypted` seja placeholder — a doutrina manda corrigir os dados **antes** de a regra nova depender deles
+- [ ] T017c Curar as linhas existentes **fora do SQL**: passo idempotente em `scripts/curar-segredos-de-canal.ts`, chamado pelo `install.sh` e pelo `update.sh` **depois** de `ensure_encryption_key`, que gera segredo forte para toda `channel_session` com `webhook_secret_encrypted` placeholder e o cifra por `encryptWebhookSecret` (`lib/webhooks/secrets.ts`) — o mesmo caminho que `app/api/v1/channels/official/route.ts:132` já usa
+
+  > ⛔ **Não fazer isso na migration nem no apêndice do `baseline.sql`.** Medido:
+  > `public.fn_encrypt_oauth` (`baseline.sql:5276`) faz
+  > `raise exception 'NUVEMSHOP_OAUTH_ENCRYPTION_KEY ausente'` quando a chave é nula ou
+  > tem menos de 32 caracteres, e a chave só existe no banco depois que
+  > `ensure_encryption_key` a semeia em `private.app_secrets` — que
+  > `hostgator-setup-kit/_common.sh:460` documenta rodar **"APÓS aplicar o baseline"**.
+  > Consequência de cifrar dentro do baseline: no `install.sh` ele roda com
+  > `ON_ERROR_STOP=1` (`install.sh:1215`) e **a instalação de uma VPS nova aborta**; no
+  > `update.sh`, que roda **sem** a flag, falha em silêncio, o placeholder permanece e a
+  > rota fail-closed recusa 100% das entregas daquela conexão sem ninguém saber.
+  > A doutrina de corrigir dados antes da constraint continua valendo — o que muda é
+  > **onde**, porque este dado depende de uma chave que o SQL ainda não tem.
+
 - [ ] T017d **Sabotagem**: devolver o `Buffer.from([0])` em um dos dois caminhos e confirmar que T017a fica vermelho; restaurar
+- [ ] T017e Recusar com motivo próprio quando o segredo ainda for placeholder: a rota nova responde `gateway_secret_nao_provisionado` (não um `401` genérico) e abre aviso na Central — sem isso, uma conexão não curada vira silêncio, que é o que o Princípio II proíbe
 
 ### Gateway — poder subir sem banco
 
@@ -217,6 +232,7 @@ inbox identificada pelo canal.
 - [ ] T058 [US4] Acrescentar o gateway como serviço em `docker-compose.prod.yml` e fazê-lo subir pelo `hostgator-setup-kit/install.sh` e `update.sh`, **sem** nenhuma pergunta nova ao usuário
 - [ ] T059 [US4] Tornar a ausência do gateway visível como problema de configuração na tela (Central de avisos / banner), nunca como silêncio (FR-027)
 - [ ] T060 [US4] Medir SC-008: contar as linhas de código de ingestão específicas do canal novo — o alvo é **zero**
+- [ ] T060a [US4] **Sabotagem**: fazer o ingest tratar `platform` desconhecido com descarte em vez de preservação e confirmar que T056 fica **vermelho**; restaurar. Era a única história sem sabotagem, e o Princípio XI a exige de todas
 
 ---
 
@@ -286,10 +302,16 @@ T032..T039 (durabilidade)  ‖  T040..T045 (autenticidade e isolamento)
 
 ## Implementation Strategy
 
-> **Correções aplicadas após `/speckit-analyze`** (achados de planejamento, não de código):
+> **Correções da 1ª rodada de `/speckit-analyze`** (achados de planejamento, não de código):
 > T017a–T017d (segredo por conexão — **bloqueador crítico**: sem isso a rota nova recusaria 100%
 > das entregas do onboarding), T027a–T027b (FR-020, identidade canônica, que não tinha tarefa) e
-> T038a (SC-010, rajada, que tinha roteiro de prova mas nenhuma tarefa). Total: **74 tarefas**.
+> T038a (SC-010, rajada, que tinha roteiro de prova mas nenhuma tarefa).
+>
+> **Correções da 2ª rodada**, esta com verificação das afirmações contra o código real:
+> T017c reescrita — cifrar dentro do `baseline.sql` **abortaria a instalação de uma VPS nova**,
+> porque a chave de cifra só é semeada depois de o baseline rodar; T017e (recusa com motivo
+> próprio em vez de silêncio quando o segredo não foi curado); T060a (a US4 era a única história
+> sem tarefa de sabotagem, que o Princípio XI exige de todas). Total: **77 tarefas**.
 
 **MVP = Fase 1 + Fase 2 + Fase 3.** Entrega o resultado observável inteiro do plano: mensagem real
 atravessando a costura nova. É a **fatia 1**, e é um spike deliberado — se ela não fechar, o
