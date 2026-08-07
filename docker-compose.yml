@@ -50,6 +50,18 @@ services:
       # silenciosamente no default WEBJS (browser, trava a sessão).
       WHATSAPP_DEFAULT_ENGINE: NOWEB
       # Storage de mídia: Supabase Storage via Backend (NÃO inline base64).
+      #
+      # Os dois envs abaixo NÃO são enfeite. Sem eles o WAHA grava em
+      # /tmp/whatsapp-files (default) e o volume waha-media:/app/.media montado
+      # logo abaixo fica de enfeite — mídia some a cada restart do contêiner.
+      # E o WHATSAPP_FILES_LIFETIME default é 180 SEGUNDOS: o worker de
+      # media.persist_requested tem 3 minutos para baixar antes do WAHA apagar.
+      # Qualquer atraso — fila acumulada, worker parado, retry — vira
+      # `waha_media_404` e a mídia se perde para sempre. Uma hora dá folga de
+      # sobra e mantém o disco limitado; o dono final do arquivo é o Supabase
+      # Storage, não o WAHA.
+      WHATSAPP_FILES_FOLDER: /app/.media
+      WHATSAPP_FILES_LIFETIME: "3600"
       WAHA_DASHBOARD_ENABLED: "true"
     extra_hosts:
       - "host.docker.internal:host-gateway"
