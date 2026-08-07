@@ -26,11 +26,21 @@ services:
       - "3030:3000"
     environment:
       # Hash SHA512 hex da api key (NÃO plaintext). Cliente envia plaintext em X-Api-Key.
-      WAHA_API_KEY: ${WAHA_API_KEY_SHA512}
+      #
+      # O prefixo `sha512:` é obrigatório e é ele que manda o WAHA HASHEAR o
+      # X-Api-Key recebido antes de comparar. Sem o prefixo, o WAHA compara
+      # LITERAL: o app manda o plaintext e toma 401 em toda chamada, enquanto
+      # quem mandar o hash entra. O docker-compose.prod.yml já traz o prefixo —
+      # aqui faltava, então o WAHA de desenvolvimento nunca autenticou o app.
+      WAHA_API_KEY: "sha512:${WAHA_API_KEY_SHA512}"
       # Webhook base URL — precisa ser pública (use ngrok/cloudflared em dev).
       # host.docker.internal: o app Next roda no HOST em dev — localhost dentro do
       # container seria o próprio WAHA e o webhook nunca chegaria. Porta 3002:
       # a stack da fusão é isolada do checkout principal (3001 é do gov-loop).
+      # O default aponta para a 3003, que é a stack isolada da fusão. Quem roda o
+      # app pelo caminho do README (`npm run dev`, porta 3000) precisa apontar
+      # WAHA_HOOK_BASE_URL para lá, senão o webhook sai para uma porta onde não
+      # há ninguém e o silêncio parece "o WhatsApp não mandou nada".
       WHATSAPP_HOOK_URL: ${WAHA_HOOK_BASE_URL:-http://host.docker.internal:3003}/api/v1/webhooks/waha
       WHATSAPP_HOOK_EVENTS: "message,message.any,message.ack,session.status,state.change"
       # HMAC SHA512 do payload, validado server-side via crypto.timingSafeEqual.
