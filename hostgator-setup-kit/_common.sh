@@ -224,6 +224,29 @@ refuse() { c_red "✖ $*"; exit "$REFUSED_RC"; }
 # história ANTES de perguntar, e, se não der, devolvemos 2 — o chamador
 # recusa. Falhar fechado é o certo num script que roda como root na máquina de
 # quem não sabe consertar.
+# Repositório da imagem do app, derivado do `origin` DESTE clone.
+#
+# O publish-image.yml publica em `ghcr.io/${{ github.repository }}` — ou seja, um
+# fork publica sozinho no lugar dele. Fixar o nome do upstream no update.sh faz o
+# clone de um fork puxar a imagem de OUTRO projeto: no melhor caso a versão nem
+# existe lá e o pull falha; no pior, existe uma tag de mesmo nome e o servidor
+# roda código que não é o que está no disco.
+#
+# Cai no padrão histórico quando o origin não é do GitHub, não é legível, ou nem
+# é um repositório git — que é o caso do install.sh rodando de um tarball.
+imagem_do_projeto() {
+  local slug
+  slug="$(git remote get-url origin 2>/dev/null \
+          | sed -E 's#/$##; s#\.git$##' \
+          | sed -nE 's#^(https?://|git@)github\.com[:/]+([^/]+/[^/]+)$#\2#p' \
+          | tr 'A-Z' 'a-z')"
+  if [ -n "$slug" ]; then
+    printf 'ghcr.io/%s' "$slug"
+  else
+    printf 'ghcr.io/melgarafael/deskcommcrm'
+  fi
+}
+
 is_already_in_head() {
   local ref="$1"
   if [ "$(git rev-parse --is-shallow-repository 2>/dev/null || echo unknown)" = "true" ]; then

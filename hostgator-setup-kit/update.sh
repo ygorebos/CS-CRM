@@ -47,7 +47,7 @@ CURRENT_TAG="$(git describe --tags --exact-match HEAD 2>/dev/null || true)"
 # (Veio da `main`; a versão por tag cai exatamente na mesma armadilha, porque a
 # comparação de tags também fica satisfeita com a imagem velha no lugar.)
 image_desatualizada() {
-  local img="${APP_IMAGE:-ghcr.io/melgarafael/deskcommcrm:latest}" local_d remote_d
+  local img="${APP_IMAGE:-$(imagem_do_projeto):latest}" local_d remote_d
   local_d="$(docker image inspect "$img" --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{end}}' 2>/dev/null | sed 's/.*@//')"
   [ -z "$local_d" ] && return 0                 # nem baixada ainda → atualizar
   remote_d="$(docker buildx imagetools inspect "$img" 2>/dev/null | awk '/^Digest:/{print $2; exit}')"
@@ -155,7 +155,11 @@ step "Baixando a versão nova do app e reiniciando"
 # acima) e a imagem do container sejam sempre da mesma versão. Gravada no .env,
 # não só exportada: o compose lê a imagem de lá, e um `up -d` rodado à mão
 # depois voltaria pro ":latest" do install — desfazendo a atualização.
-export APP_IMAGE="ghcr.io/melgarafael/deskcommcrm:${TARGET_TAG#v}"
+# O repositório vem do `origin` deste clone, não fixo: num fork, a imagem
+# publicada é a do fork (ver imagem_do_projeto em _common.sh). Fixar o nome do
+# upstream aqui é pior que um erro de pull — esta linha GRAVA no .env, então o
+# servidor passaria a puxar a imagem de outro projeto em todo `up -d` seguinte.
+export APP_IMAGE="$(imagem_do_projeto):${TARGET_TAG#v}"
 set_env_var .env APP_IMAGE "$APP_IMAGE"
 # Devolve a política padrão: um rollback anterior deixou "missing" no .env
 # (porque a imagem de volta é um ID local, que não se puxa do registro), e
