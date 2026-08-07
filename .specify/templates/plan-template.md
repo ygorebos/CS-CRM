@@ -40,7 +40,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Fonte: `.specify/memory/constitution.md` v1.0.0. Marque PASS/FAIL/N/A por gate; todo FAIL
+Fonte: `.specify/memory/constitution.md` v1.2.0. Marque PASS/FAIL/N/A por gate; todo FAIL
 precisa de linha na Complexity Tracking com a alternativa mais simples que foi rejeitada.
 
 | # | Gate | Pergunta que o plano responde | Status |
@@ -51,7 +51,12 @@ precisa de linha na Complexity Tracking com a alternativa mais simples que foi r
 | IV | Prova pela tela | Fluxo visível será provado por Playwright em ambiente fresco (baseline + bootstrap-owner, envs opcionais ausentes), não por `curl`? Efeito externo tem receiver real? | |
 | V | Evento na fila | Nenhum trigger faz HTTP? Evento externo tem `unique (organization_id, external_id)` + captura de `23505`? POST de criação aceita `Idempotency-Key`? A fila tem dono declarado? | |
 | VI | Contrato de API | Rota sob `/api/v1/` com `ok()`/`fail()`, Zod em todo input externo, audit log na mutação, rate limit se pública, credencial em header, token como hash SHA256? | |
-| VII | Interoperável por contrato | Integração externa consome API v1 / MCP / webhooks — sem acesso direto ao banco do outro sistema nem FK cruzando fronteira de produto? Entidade trocada carrega `organization_id` e é rastreável até o lead? | |
+| VII | Interoperável por contrato | Integração externa consome API v1 / MCP / webhooks — sem acesso direto ao banco do outro sistema nem FK cruzando fronteira de produto? Entidade trocada carrega `organization_id` e é rastreável até o lead? O gateway entrega envelope por HTTP e **não** escreve no banco do CRM? | |
+| VIII | Corretor em 10 minutos | A feature nasce com estrutura pré-pronta que já funciona, sem exigir configuração longa nem edição de arquivo? O que ela acrescenta ao caminho login → primeira conversa atendida cabe no teto de 10 min, e como isso será cronometrado? | |
+| IX | Vender ou assistir | Cada capacidade nova declara qual das duas missões serve? Fluxo de assistência recusa e escala ao humano quando não há respaldo no conhecimento do tenant? | |
+| X | Operadora é dado curado | Nada específico de operadora entra em `if`, prompt hardcoded ou tabela de código? Operadora nova é resolvida carregando conteúdo, sem release? Resposta de assistência é rastreável ao trecho de origem? | |
+| XI | Teste que prova e vigia | Cada item entregável tem teste que falharia sem a feature, e o gate certo pro tipo de mudança (`test:db` p/ schema-RLS, Playwright p/ UI, receptor real p/ contrato externo)? Os testes foram confirmados por sabotagem? Configuração exposta na tela tem teste de **efeito**, não só de gravação? | |
+| XII | Contexto antes de ação | A sessão que produziu este plano declarou ter lido a constituição (com o `Version`), o `CLAUDE.md` e o `README.md` antes de planejar — e releu se o contexto foi compactado ou retomado? Leu o aprofundamento que a task exige (`docs/current-state.md` p/ estimativa, `docs/index.md` p/ schema, `user-journey-map.md` p/ UI, `runbooks/deploy.md` p/ deploy)? Divergência entre documentos foi reportada em vez de resolvida em silêncio? | |
 
 ## Project Structure
 

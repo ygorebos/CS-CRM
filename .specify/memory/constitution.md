@@ -36,6 +36,73 @@ TODOs diferidos:
     scripts base; @types/node ^20 sob engines node>=22). Ver "Restrições de Stack e
     Configuração". Correção pendente de decisão do mantenedor — não foi aplicada junto
     com a ratificação para não alterar semântica de portão sem revisão.
+
+==================================================================================
+EMENDA — 2026-08-07
+
+Version change: 1.0.0 → 1.1.0
+Bump rationale: MINOR — duas seções novas e quatro princípios novos. Nenhum princípio
+existente foi removido ou redefinido; I–VII seguem íntegros, palavra por palavra.
+
+Princípios adicionados:
+  - VIII. O Usuário é o Corretor, e Ele Tem 10 Minutos (NÃO NEGOCIÁVEL)
+  - IX.   Todo Agente Serve Vender ou Assistir
+  - X.    Conhecimento de Operadora é Dado Curado, Nunca Código
+  - XI.   Toda Entrega Nasce com Teste que Prova e que Vigia (NÃO NEGOCIÁVEL)
+
+Seções adicionadas:
+  - Missão e Escopo             — para quem é, por onde as mensagens entram, onde isso vai dar
+  - Papéis, Ritmo e Método      — quem decide o quê, unidade de estimativa, forma do plano
+
+Mudança de escopo declarada nesta emenda (o que acontece com o trabalho que dependia da
+regra antiga):
+  - O `gateway_go` deixa de ser "um projeto irmão com quem integramos" e passa a ser o
+    **receptor geral de todo tráfego de entrada do CRM**. Consequências que já são dívida
+    a partir de agora:
+      (a) o gateway vira dependência de runtime do self-host — `docker-compose.prod.yml` e
+          `install.sh` passam a ter de subi-lo, e esse custo entra no teto do Princípio VIII;
+      (b) `app/api/v1/webhooks/waha/[token]/route.ts` vira caminho **legado**. Não é removido
+          enquanto o caminho novo não estiver provado em produção — os dois coexistem, e a
+          idempotência por `unique (organization_id, external_id)` é o que impede dupla
+          ingestão durante a transição (Princípio V);
+      (c) o Princípio VII continua valendo integralmente: o gateway **não** escreve no banco
+          do CRM. Ele entrega envelope normalizado por contrato HTTP; quem persiste é o CRM.
+
+Interpretações aplicadas ao ditado do dono do produto (registradas para conferência):
+  • "HAG" → RAG.  • "SAP" → MCP (zero ocorrências de "SAP" no repo; `lib/mcp/server.ts` existe).
+  • "cotaudo Simplificado" → Cotador Simplificado (`/root/PROJETOS/supabase_cotador`).
+  • "multi-ente" → multi-tenant.  • "estruturas pré-pretas" → estruturas pré-prontas.
+
+Divergência documental declarada:
+  VISION.md e docs/prd/00-prd-master.md posicionam o produto como multi-nicho com persona
+  primária "Operador BPO" de e-commerce. Esta emenda define o **nicho de validação** como
+  corretor de plano de saúde. Multi-nicho segue como capacidade (via `vocabulary` por
+  pipeline) — muda a prioridade de validação, não a arquitetura.
+  TODO(VISION_PRD_ALIGNMENT): alinhar VISION.md e docs/prd/00-prd-master.md.
+
+==================================================================================
+EMENDA — 2026-08-07 (segunda do dia)
+
+Version change: 1.1.0 → 1.2.0
+Bump rationale: MINOR — um princípio novo, de processo de sessão. I–XI seguem íntegros.
+
+Princípio adicionado:
+  - XII. Contexto Antes de Ação (NÃO NEGOCIÁVEL)
+
+Origem: pedido explícito do dono do produto — sessão que ainda não absorveu o planejamento
+geral do sistema, e que ainda não leu `CLAUDE.md` nem `README.md`, faz essa leitura ANTES de
+seguir com a ação pedida.
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/plan-template.md — Constitution Check estendido de 7 para 12 gates e
+                                           fonte atualizada para v1.2.0
+
+Nota de procedência: as duas emendas acima foram escritas por sessões distintas trabalhando na
+mesma árvore, e o arquivo foi restaurado ao estado 1.0.0 duas vezes por `git restore` no meio
+do trabalho. Esta versão reúne as duas e foi commitada justamente para não se perder de novo.
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES).
 -->
 
 # DeskcommCRM Constitution
@@ -44,6 +111,41 @@ Sistema operacional de vendas open source, multi-tenant, self-hosted, com agente
 nativos e WhatsApp como canal primário. Esta constituição é a lei de arquitetura do repositório.
 `CLAUDE.md`, `docs/doctrine/sistema-vivo.md` e `README.md` a detalham; onde divergirem, esta
 constituição prevalece.
+
+## Missão e Escopo
+
+**O que estamos construindo.** Um CRM conversacional com agentes de IA que já tem WhatsApp, RAG
+por tenant, runtime de agentes e o CRM exposto via MCP — e que precisa ficar **mais robusto**
+antes de carregar operação real. O eixo desta fase é: RAG mais detalhado por cliente, autonomia
+confiável de atendimento e resposta, e recebimento de mensagens pelo gateway multicanal que já
+existe e já funciona (`/root/PROJETOS/gateway_go`).
+
+**Para quem.** O nicho de validação é o **corretor de plano de saúde**. Ele não é desenvolvedor,
+não é administrador de TI e não vai ler documentação. Multi-nicho continua sendo **capacidade
+arquitetural** (`vocabulary` configurável por pipeline), não prioridade de validação: o que prova
+que o produto está pronto é um corretor operando sozinho.
+
+**Multi-tenant desde já.** N instâncias e números conectados, pertencentes a empresas vindas do
+Cotador Simplificado ou a clientes diretos, isolados por `organization_id` com RLS (Princípio I).
+
+**Por onde as mensagens entram.** O `gateway_go` é o **receptor geral de todo o tráfego de entrada
+do CRM**: mensagens de todos os canais (WhatsApp oficial e não-oficial, Instagram Direct e o que
+vier depois) e **demais webhooks**. Ele recebe, autentica a origem, **normaliza para um envelope
+único** e entrega ao CRM; o CRM **persiste no banco dele**. Código novo do CRM MUST NOT ler
+payload cru de provedor — nem de WAHA, nem de uazapi, nem da Meta.
+
+A fronteira que não se cruza: **o gateway MUST NOT escrever no banco do CRM**. Receber uma
+mensagem aqui não é um `INSERT` — dispara agente, follow-up, guardrails, auditoria, `event_log` e
+Realtime. Quem persiste é o CRM, pelo caminho dele, com o `organization_id` resolvido de fonte
+confiável e nunca do corpo da requisição (Princípios I e VII).
+
+**Onde isso vai dar.** O CRM evolui **independente** por enquanto. Quando estiver robusto, o
+Cotador Simplificado migra para ele e aposenta o CRM interno que tem hoje. Toda decisão de
+modelagem **considera** que um dia haverá importação de dados vindos de lá, mas nenhuma decisão é
+**adiada** por causa disso.
+
+**O que fica fora por enquanto.** Acoplamento ao Cotador em nível de schema, banco ou FK cruzada.
+A ponte é o gateway e contratos HTTP explícitos, nada além disso.
 
 ## Core Principles
 
@@ -155,6 +257,111 @@ sem que isso signifique um monólito acoplado no nível do banco. Contrato expl�
 os dois lados evoluírem e ainda assim entregarem a experiência integrada; acoplamento no banco
 faz cada deploy de um quebrar o outro.
 
+### VIII. O Usuário é o Corretor, e Ele Tem 10 Minutos (NÃO NEGOCIÁVEL)
+
+A persona de validação é o corretor de plano de saúde: não é desenvolvedor, não é admin de TI,
+não lê documentação, e o tempo dele é o recurso mais escasso do produto. **Teto duro**: do login
+à **primeira conversa atendida por agente** em **≤10 minutos**, sem suporte humano e sem editar
+arquivo nenhum. Feature nova MUST nascer com **estrutura pré-pronta que já funciona** — agente,
+prompt, capacidades e funil vêm montados por padrão; configurar do zero é o caminho avançado,
+nunca o padrão. Feature que só entrega valor depois de configuração longa está **incompleta**,
+não "avançada": o template padrão faz parte da entrega, não de uma fase seguinte. A verificação é
+a prova pela tela do Princípio IV, **cronometrada** — a contagem começa no login e termina na
+primeira resposta do agente a uma mensagem real.
+
+**Rationale**: num produto self-host distribuído para quem não é técnico, o tempo até o primeiro
+valor **é** a taxa de adoção. Configuração longa não é barreira de entrada, é o abandono.
+
+### IX. Todo Agente Serve Vender ou Assistir
+
+O agente tem duas missões no escopo atual, e apenas duas: **converter** (informar o interessado,
+qualificar e conduzir até a venda do plano) e **assistir** (orientar quem já é cliente do corretor
+— segunda via de boleto, acesso à carteirinha, rede credenciada, dúvida de cobertura e uso).
+Capacidade nova MUST declarar qual das duas serve; capacidade que não serve nenhuma MUST NOT
+entrar. As duas MUST NOT ser fundidas, porque têm físicas opostas: **converter** tolera
+proatividade e aproximação; **assistir** exige precisão e MUST NOT inventar. Resposta de
+assistência sem respaldo no conhecimento do tenant MUST recusar e escalar ao humano.
+
+**Rationale**: informação errada sobre boleto, carteirinha ou cobertura não é "resposta ruim", é
+dano ao cliente final do corretor — e quem responde por isso é ele, não o fabricante do software.
+
+### X. Conhecimento de Operadora é Dado Curado, Nunca Código
+
+A informação específica de cada operadora de plano de saúde — como emitir boleto, onde acessar
+carteirinha, rede, regras de uso — MUST viver como conteúdo versionado e curado no RAG do tenant.
+MUST NOT viver em `if`, prompt hardcoded, tabela de código ou deploy. **Operadora nova = carregar
+conteúdo, não fazer release**: se o corretor precisa de deploy para atender uma operadora nova, o
+desenho está errado. Toda resposta de assistência MUST ser rastreável ao trecho que a originou —
+sem trecho, sem resposta (Princípio IX). Conteúdo de operadora é dado de tenant e entra no
+isolamento por `organization_id` como qualquer outro (Princípio I).
+
+**Rationale**: são dezenas de operadoras, cada uma mudando processo no próprio ritmo. Qualquer
+desenho que exija release por operadora transforma manutenção de conteúdo em fila de engenharia,
+e a informação fica velha exatamente onde errar custa mais caro.
+
+### XI. Toda Entrega Nasce com Teste que Prova e que Vigia (NÃO NEGOCIÁVEL)
+
+Nada é construído sem teste automatizado, e o teste MUST responder **duas perguntas distintas**:
+**funciona?** (um teste exercita o comportamento novo pelo caminho que o usuário ou o sistema real
+usa, e falharia se a feature não existisse) e **quebrou alguma coisa?** (a suíte inteira roda
+antes de declarar pronto). Regras verificáveis:
+
+- **Teste que passa com a implementação sabotada não é teste.** Antes de aceitar um teste como
+  prova, quebra-se de propósito o código que ele deveria vigiar e confirma-se que ele fica
+  vermelho. Sem esse passo, o teste é hipótese.
+- **O gate certo por tipo de mudança**, porque o errado dá falso-verde: schema, RLS, tenancy,
+  atribuição ou roteamento → `pnpm test:db`; UI ou fluxo de usuário → Playwright pela tela
+  (Princípio IV); contrato externo → teste contra receptor real, não mock.
+- **Bug entra com o teste que o reproduz primeiro** (vermelho), depois a correção (verde). Bug
+  corrigido sem teste de regressão MUST NOT ser considerado pronto.
+- **Invariante que só existe em prosa não existe.** Regra declarada nesta constituição ou no
+  `CLAUDE.md` MUST virar teste em `tests/invariants/` ou deixa de ser chamada de invariante.
+- **Configuração que a tela oferece MUST ter teste de efeito**: prova de que ligar a opção muda o
+  comportamento, não apenas de que o valor foi gravado.
+- Verde parcial MUST NOT ser reportado como verde. Declara-se qual suíte rodou e qual não rodou.
+
+**Rationale**: três defeitos deste repositório atravessaram **todos os gates verdes**.
+`rag_must_hit` é gravado pela tela e nenhum runtime o avalia. PDF de conhecimento sobe, responde
+`201` e nunca vira conhecimento indexado. E a varredura de hardening só inspeciona função
+`SECURITY DEFINER` **volátil** — o que deixou `retrieve_top_k_chunks`, que é estável, executável
+por `authenticated` filtrando o tenant por parâmetro do chamador, contra o Princípio I. Nenhum dos
+três é bug de código difícil: os três são bug de **teste que não existia**.
+
+### XII. Contexto Antes de Ação (NÃO NEGOCIÁVEL)
+
+Nenhuma sessão — humana ou agente — executa a ação pedida antes de ter absorvido o planejamento
+geral do sistema. Antes da **primeira ação de consequência** de uma sessão (planejar, editar
+arquivo, rodar comando que muda estado, decidir arquitetura, responder pergunta de convenção),
+a sessão MUST ter lido, nesta ordem: **(1)** esta constituição, **(2)** `CLAUDE.md`,
+**(3)** `README.md`. Ler ordenado importa: a constituição declara a lei, o `CLAUDE.md` a
+detalha em convenção, e o `README.md` mostra o produto que o usuário final instala.
+
+- **Declaração explícita.** A sessão MUST declarar em uma linha, antes de agir, que leu os três,
+  citando o `Version` desta constituição. Sem essa linha, a ação é prematura: interrompe-se,
+  faz-se a leitura, e refaz-se a decisão à luz do que foi lido — inclusive desfazendo o que já
+  tiver sido escrito com premissa errada.
+- **"É rapidinho" MUST NOT dispensar.** O tamanho do pedido não mede o risco. É justamente o
+  ajuste pequeno que atropela invariante de RLS, de migration ou de navegação sem ninguém notar.
+- **Contexto compactado, resumido ou retomado conta como sessão nova.** Se a sessão não tem
+  certeza de que ainda carrega o conteúdo dos três documentos — resumo automático, retomada
+  depois de dias, handoff de outro agente —, ela MUST reler antes de seguir. Na dúvida, relê.
+- **Aprofundamento sob demanda**, além do trio obrigatório, conforme o que a task toca: schema,
+  RLS ou tenancy → `docs/index.md` e `docs/current-state.md`; UI ou fluxo de usuário →
+  `docs/testing/user-journey-map.md`; deploy → `docs/runbooks/deploy.md`; agente que não é o
+  Claude Code → `AGENTS.md`. `docs/harness-audit.md` antes de tratar CI verde como prova.
+- **Divergência entre documentos MUST ser reportada ao usuário antes de agir sobre ela**, nunca
+  resolvida em silêncio. Precedência: esta constituição > `CLAUDE.md` > demais docs. Documento
+  derivado que ficou para trás vira issue de alinhamento, não interpretação livre da sessão.
+- A leitura MUST preceder também **estimativa e promessa**: prazo dado sem `docs/current-state.md`
+  é chute sobre o que está pronto, incompleto ou quebrado.
+
+**Rationale**: este repositório tem doutrina densa e não-óbvia — a tripla de artefatos de
+migration, o `baseline.sql` como único caminho até o self-hoster, `curl` que não prova UX,
+`test:unit` que não roda os invariantes. Nada disso é dedutível olhando o código: quem começa a
+mexer sem ler produz trabalho que parece certo, passa nos gates errados e quebra o clone de
+alguém. A leitura de entrada custa minutos; a sessão que a pula custa retrabalho e regressão em
+produção — e o usuário não deve ter de lembrar a cada pedido que ela é obrigatória.
+
 ## Restrições de Stack e Configuração
 
 **Stack canônica** (desvio exige justificativa registrada na Complexity Tracking do plano):
@@ -189,6 +396,41 @@ sem source of truth; evento sem consumer; campo sincronizado por cron quando dev
 sem filtro de org; `getSession()` no backend; API key em query string; bearer plaintext no banco;
 `console.log` mergeado.
 
+## Papéis, Ritmo e Método
+
+**Quem decide o quê.** O dono do produto decide **o quê**: escopo, prioridade, prazo, custo,
+posicionamento. O desenvolvedor decide **o como**: arquitetura, ferramenta, ordem de execução,
+desenho de dados. Escolha técnica MUST NOT voltar ao dono como pergunta — volta como
+**recomendação única e justificada**, com as alternativas descartadas em uma linha cada. Pergunta
+bloqueante (parar sem entregar nada até ter resposta) é reservada ao caso em que qualquer
+suposição tornaria o trabalho inútil se errada, ou inseguro; fora disso assume-se o padrão
+razoável, declara-se a suposição por escrito, e entrega-se. Decisão de negócio genuína é
+apresentada com a recomendação do desenvolvedor **já formada**, nunca como impasse.
+
+**Ritmo: duas jornadas é o teto.** O incremento padrão cabe em até **duas jornadas de trabalho** e
+é **utilizável sozinho** ao fim delas. Trabalho maior MUST ser fatiado, nunca adiado nem
+transformado em projeto de semanas. Estimativa MUST ser dada em **jornadas de trabalho deste time**
+(dono + agente), nunca em "dias-dev" de uma equipe humana hipotética — a unidade errada infla o
+número em ordem de grandeza e trava decisão de negócio por medo de um custo que não é o real.
+Quando o risco domina o custo (contrato externo desconhecido, integração nunca exercitada), a
+primeira fatia MUST ser um **spike de prova ponta a ponta**, curto, cujo único produto é eliminar
+a incerteza. Não se estima o desconhecido: mede-se.
+
+**Forma do plano e da tarefa.** Todo plano abre pelo **resultado observável**, nunca por lista de
+arquivos ou de camadas. Toda tarefa carrega três coisas: **arquivo alvo**, **mudança concreta** e
+**como se prova que funcionou** — tarefa sem critério de prova MUST NOT entrar na lista. A ordem é
+por **risco decrescente**: o que pode invalidar o plano inteiro vem primeiro. Se a execução
+precisa reabrir uma decisão, o plano estava incompleto.
+
+**Reusar antes de escrever.** Antes de criar peça nova, verifica-se nesta ordem: já existe
+seam/adapter no repo? → existe pronto num projeto irmão em `/root/PROJETOS/`? → dá para derivar do
+que existe? Só então se escreve. Dependência, camada, tabela ou serviço novo MUST ser justificado
+**no plano** (Complexity Tracking), não descoberto no diff.
+
+**Rationale**: a análise do `gateway_go` encontrou 1.323 linhas de normalização de canal já
+escritas e testadas, que rebaixaram uma migração de "ALTA" para "MÉDIA-ALTA". Isso foi resultado
+de procurar antes, não de sorte — por isso virou passo obrigatório.
+
 ## Fluxo de Desenvolvimento e Portões
 
 **Higiene de branch**: `main` é produção e fonte da verdade. Antes de qualquer trabalho, a branch
@@ -214,7 +456,10 @@ follow-up, webhooks ou automações, `pnpm test:db` MUST rodar localmente antes 
 estes são consequência direta desta constituição: migration versionada + baseline + MANIFEST
 (Princípio III); RLS testada se toca tabela tenant-aware (I); audit log emitido em mutação (VI);
 Zod em todo input externo (VI); prova pela tela em ambiente fresco se tocou UI (IV); Living
-System Checklist respondido (II); tela nova com porta declarada (II).
+System Checklist respondido (II); tela nova com porta declarada (II). A partir da v1.1.0 soma-se
+um item ao fecho: **teste que prova a feature nova e suíte inteira verde**, com o gate escolhido
+pelo tipo da mudança e o teste confirmado por sabotagem (Princípio XI). Entrega sem esse item
+MUST NOT ser declarada pronta, ainda que os 14 itens anteriores estejam respondidos.
 
 ## Governance
 
@@ -236,10 +481,14 @@ da Fase 0 e de novo após a Fase 1. Violação MUST ser registrada na tabela Com
 plano, com a alternativa mais simples que foi rejeitada e o porquê — violação não documentada
 reprova a revisão. Complexidade MUST ser justificada, nunca presumida.
 
+**Leitura de entrada**: antes da primeira ação de consequência, a sessão lê esta constituição, o
+`CLAUDE.md` e o `README.md`, nesta ordem, e declara que leu citando o `Version` — regra completa,
+com gatilhos de releitura e aprofundamento por tipo de task, no **Princípio XII**.
+
 **Orientação de runtime**: `CLAUDE.md` (convenções detalhadas e Definition of Done),
 `AGENTS.md` (mesmo contrato em forma portável para outros agentes),
 `docs/doctrine/sistema-vivo.md` (invariantes do Princípio II),
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 1.0.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-07
+**Version**: 1.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-07
