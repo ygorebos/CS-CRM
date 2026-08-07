@@ -124,6 +124,30 @@ EOF
 ) || fail=1
 rm -rf "$TMP"
 
+echo "URL de manutenção separada da do app (db_admin_url)"
+# O kit faz manutenção (schema, backup, auth) com privilégio que a role do app
+# não tem. Duas garantias aqui, e a SEGUNDA é a que importa mais:
+#
+#  1. com SUPABASE_DB_ADMIN_URL definida, a manutenção usa ELA — é o que evita
+#     trocar a role no .env antes e depois de cada update.sh;
+#  2. SEM ela, o resultado é IDÊNTICO ao SUPABASE_DB_URL. Quem clonou na nuvem e
+#     nunca ouviu falar dessa variável não pode notar diferença nenhuma.
+(
+  eq() { if [ "$2" = "$3" ]; then printf '  ✓ %s\n' "$1"; else printf '  ✗ %s  esperava [%s] obteve [%s]\n' "$1" "$3" "$2"; exit 1; fi; }
+  SUPABASE_DB_URL='postgresql://agent_worker:s@h:5432/postgres'
+
+  unset SUPABASE_DB_ADMIN_URL
+  eq "sem a variável nova: cai na do app"  "$(db_admin_url)"  "$SUPABASE_DB_URL"
+
+  SUPABASE_DB_ADMIN_URL='postgresql://postgres:outra@h:5432/postgres'
+  eq "com a variável nova: usa a de admin" "$(db_admin_url)"  "$SUPABASE_DB_ADMIN_URL"
+
+  # Vazia conta como ausente: um .env que traz `SUPABASE_DB_ADMIN_URL=` (é assim
+  # que ela sai do .env.example) não pode fazer o psql tentar conectar em nada.
+  SUPABASE_DB_ADMIN_URL=''
+  eq "vazia conta como ausente"            "$(db_admin_url)"  "$SUPABASE_DB_URL"
+) || fail=1
+
 echo "credenciais do provisionamento (sb_carrega_credenciais)"
 # Este bloco existe porque a leitura já foi feita com `eval`, e com `eval` ela
 # EXECUTAVA o conteúdo: o provisionamento imprime `CHAVE='valor'` sem escapar a

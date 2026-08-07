@@ -12,7 +12,7 @@ mkdir -p "$BACKUP_DIR"
 ts="$(date +%Y%m%d-%H%M%S)"
 
 step "Dump do banco → $BACKUP_DIR/db-$ts.sql.gz"
-docker run --rm postgres:17-alpine pg_dump "$SUPABASE_DB_URL" --no-owner --no-privileges \
+docker run --rm postgres:17-alpine pg_dump "$(db_admin_url)" --no-owner --no-privileges \
   | gzip > "$BACKUP_DIR/db-$ts.sql.gz"
 c_grn "✓ banco: $(du -h "$BACKUP_DIR/db-$ts.sql.gz" | awk '{print $1}')"
 

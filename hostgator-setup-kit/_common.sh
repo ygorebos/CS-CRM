@@ -309,7 +309,27 @@ enter_project() {
 }
 
 # psql efêmero via container (não exige psql no host).
-psql_run() { docker run --rm -i postgres:17-alpine psql "$SUPABASE_DB_URL" -v ON_ERROR_STOP=1 "$@"; }
+# A connection string das operações de MANUTENÇÃO — schema, backup, mexer em
+# auth. É deliberadamente diferente da que o app usa em runtime.
+#
+# O kit nasceu supondo Supabase da nuvem, onde a connection string do pooler já
+# vem privilegiada e a mesma URL serve para tudo. Num Supabase próprio isso
+# deixa de valer: os docs de self-host (docs/deploy-selfhost/README.md) mandam
+# dar ao app uma role dedicada, sem ser dona de nada — e essa role NÃO consegue
+# `create extension` (é privilégio de dono, não se concede), nem aplicar o
+# baseline (`permission denied for schema public`), nem escrever em
+# private.app_secrets, nem apagar fator de MFA no schema auth.
+#
+# O resultado, hoje, é que o dono do servidor troca a role no .env antes de cada
+# update.sh e devolve depois — na mão, com senha diferente entre as duas. Um
+# passo esquecido e ou o schema não sobe, ou o superusuário do projeto fica
+# dentro do app rodando em produção.
+#
+# Com SUPABASE_DB_ADMIN_URL definida, cada uma faz o seu papel e ninguém troca
+# nada. Sem ela, o comportamento é exatamente o de antes.
+db_admin_url() { printf '%s' "${SUPABASE_DB_ADMIN_URL:-$SUPABASE_DB_URL}"; }
+
+psql_run() { docker run --rm -i postgres:17-alpine psql "$(db_admin_url)" -v ON_ERROR_STOP=1 "$@"; }
 
 # Grava (ou reescreve) uma chave no .env — sem duplicar linha se ela já existe.
 #   set_env_var .env APP_IMAGE ghcr.io/…:1.1.0
