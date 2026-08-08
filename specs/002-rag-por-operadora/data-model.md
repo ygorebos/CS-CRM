@@ -157,31 +157,98 @@ partir do mesmo arquivo.
 `catalog_chunks`. `organization_id` continua `not null`: **nada aqui muda de lado**. Também na
 **0118**, pelo mesmo motivo da tabela acima.
 
-### `content_divergences` (nova, tenant-aware) — **F4, migration 0125**
+### `knowledge_divergences` (nova, tenant-aware) — **F4, migration 0125** ✅ construída
 
 A segunda metade de FR-035, que não tinha nem tabela nem tarefa até a revisão cruzada. O desempate
 existia; o registro dele, não — e um requisito que manda "registrar para o corretor" sem lugar onde
 registrar é requisito que ninguém cumpre.
 
+> **Construída em 2026-08-08, e com TRÊS diferenças em relação ao desenho abaixo.** Estão explicadas
+> logo depois da tabela, porque cada uma nasceu de uma coisa que só apareceu ao implementar. O nome
+> também mudou — `content_divergences` virou `knowledge_divergences`, para ficar na mesma família de
+> `knowledge_scopes` e `knowledge_searches`.
+
 | Coluna | Tipo | Regra |
 |---|---|---|
 | `id` | `uuid pk` | |
 | `organization_id` | `uuid not null references organizations(id) on delete cascade` | Princípio I |
-| `scope_id` | `uuid references knowledge_scopes(id)` | qual operadora |
-| `winner_ref` / `loser_ref` | `jsonb not null` | camada, material e trecho de cada lado — cópia histórica, como em `message_groundings`, para sobreviver à reindexação |
-| `reason` | `text not null check in ('camada','recencia')` | qual das duas regras decidiu |
-| `first_seen_at` / `last_seen_at` | `timestamptz not null` | agrupa repetição em vez de gerar linha por resposta |
-| `resolved_at` | `timestamptz` | o corretor corrigiu um dos dois lados |
+| `winner_source_id` | `uuid not null references ai_knowledge_sources(id) on delete cascade` | o material do corretor que venceu |
+| `loser_material_id` | `uuid not null references catalog_materials(id) on delete cascade` | o material curado que foi silenciado |
+| `scope_id` | `uuid references knowledge_scopes(id) on delete set null` | o balde; nulo = "vale para todos" |
+| `subject` | `text not null default ''` | categoria do léxico fechado de assistência, **sem** texto de conversa |
+| `occurrences` | `integer not null default 1` | agrupa repetição em vez de gerar linha por resposta |
+| `first_seen_at` / `last_seen_at` | `timestamptz not null` | |
+| `resolved_at` | `timestamptz` | o corretor declarou tratada; a linha **não** é apagada |
 
-**Índice**: `unique (organization_id, scope_id, md5(winner_ref::text || loser_ref::text))` — o mesmo
-par contraditório aparece uma vez, com contagem, não uma vez por conversa.
+**Índice**: `unique (organization_id, winner_source_id, loser_material_id, subject)` — o mesmo par
+contraditório sobre o mesmo assunto aparece uma vez, com contagem, não uma vez por conversa.
 
-**RLS**: `tenant_isolation_content_divergences_all` via `fn_user_org_ids()`.
+**RLS**: `tenant_isolation_knowledge_divergences_all` via `fn_user_org_ids()`.
 
 **Onde aparece**: a mesma lista de lacunas de FR-028 (`components/ai/EvolutionGaps.tsx`) — o corretor
 já vai lá para saber o que carregar; contradição é o mesmo tipo de dívida, não merece tela própria.
 
-### ⚠️ BURACO ABERTO — onde mora o texto de um documento? (bloqueia T083/T084)
+#### As três diferenças, e o que as causou
+
+**1. FK dos dois lados, não `winner_ref`/`loser_ref` em `jsonb`.** O desenho copiava a cópia
+histórica de `message_groundings`, e o paralelo é falso. `message_groundings` prova o PASSADO — o que
+valia quando a resposta saiu —, e por isso congela. A divergência é uma TAREFA DO PRESENTE: o
+corretor vai abrir os dois materiais e comparar. Congelar o título faria a lista mostrar o nome
+antigo depois de ele renomear o material, e mandá-lo procurar um arquivo que não se chama mais
+assim. Com FK, título e escopo vêm por junção e acompanham sozinhos (DIRC: Referenciar). O `cascade`
+é coerente: material apagado não tem divergência a resolver.
+
+**2. Sem `reason`.** O desenho previa `check in ('camada','recencia')`. Só a primeira produz
+divergência entre camadas — a de recência decide qual VERSÃO do mesmo material curado vale (0124,
+FR-037), e ali não há dois textos discordando, há um material substituindo a si mesmo. Gravar
+`reason` seria gravar a constante `'camada'` em toda linha (DIRC: Calcular). A coluna entra quando
+existir um segundo sentido de desempate, com dado real para preenchê-la.
+
+**3. `subject` no lugar do `md5` do par.** A chave do desenho não distinguia assuntos: os mesmos dois
+materiais podem discordar sobre carência **e** sobre rede credenciada, e são dois problemas
+separados — colapsá-los faria o segundo sumir quando o corretor resolvesse o primeiro. O assunto sai
+do léxico fechado de `lib/agent-engine/guardrails/lexico-assistencia.ts`, a mesma régua que
+classifica a afirmação no gate de lastro, e **nunca** do texto da pergunta: o contrato de PII da
+migration 0086 vale aqui igual.
+
+#### A busca precisou mudar de assinatura
+
+Não estava previsto e é a parte mais invasiva da migration. `fn_buscar_lastro` **descartava** o
+perdedor dentro do `where`, então do lado de fora não existia informação de que houve desempate.
+Registrar sem tocar nela exigiria uma segunda busca vetorial por turno — cara no caminho quente e
+capaz de discordar da que ancorou a resposta. Ela passou a aceitar `p_incluir_preteridos` (default
+`false`, conjunto idêntico ao de antes para todo chamador existente) e a devolver `preterido` e
+`preterido_por_material`. As linhas preteridas **não consomem o `limit`** das vencedoras: caso
+contrário, ligar o registro reduziria em silêncio o lastro da resposta.
+
+### ✅ DECIDIDO — onde mora o texto de um documento (era T140; migration 0127)
+
+**Decisão de 2026-08-08: a tabela nova `ai_source_passages`.** Foi a recomendação registrada abaixo,
+e a implementação confirmou o motivo — trocando, porém, qual dos dois argumentos pesa.
+
+O argumento que a análise original deu como principal (*a outra saída é destrutiva*) **não se
+sustenta**: afrouxar `ai_faq_items.question` para nullable não perde dado; relaxar `not null` é
+aditivo. O que decide é o outro argumento, o de **significado**: `ai_faq_items` quer dizer "par
+pergunta/resposta", e é isso que todo consumidor dela assume. Guardar passagem de documento ali faz a
+tabela deixar de significar o que o nome diz e transfere a cada leitor a obrigação de lembrar que
+`question` pode ser nulo. O caminho de volta ficaria bloqueado no dia da primeira linha nula.
+
+A tabela nova ainda paga o que o par nunca teve: `position` (`numeric`, mesma doutrina de
+`position_in_stage` — reprocessar e inserir entre duas não pode exigir renumerar todas),
+`section_title` e `page_number`, que fazem a citação virar *"seu manual, página 12, Carências"* em
+vez de *"trecho 47"*. E `scope_id`/`applies_to_all` espelham a fonte porque o indexador copia daqui
+para o trecho: derivar por junção poria mais um `join` no caminho quente da busca.
+
+**Índice**: `unique (knowledge_source_id, position)` — reprocessar substitui, não empilha. Sem ele,
+subir o mesmo manual duas vezes dobra as passagens e infla a contagem de trechos que a tela mostra
+como prova de que o material entrou.
+
+⚠️ **A migration não fecha FR-004 sozinha.** Ela abre o destino; **T083** (gravar o texto extraído) e
+**T084** (fazer o indexador ler daqui) é que fecham. Enquanto elas não entrarem, a tabela existe
+vazia e material que não é par continua sem virar trecho.
+
+<details>
+<summary>A análise original que levou à decisão (mantida para registro)</summary>
 
 **Achado em 2026-08-08, ao começar a F4.** Este modelo não diz onde o texto extraído de um PDF ou
 Markdown é persistido, e as duas tarefas que dependem disso pressupõem que alguém já decidiu:
@@ -214,6 +281,8 @@ anti-pattern nº 1 da doutrina em outra forma.
 que o desenho preceda a migration. Enquanto não houver decisão, T083 e T084 ficam bloqueadas — e a
 F4 inteira depende delas para cumprir FR-004. Ver T140.
 
+</details>
+
 ---
 
 ## Rastreabilidade e lacunas
@@ -224,7 +293,7 @@ Sem tabela nova. As citações passam a ser gravadas em `messages.metadata` **no
 `update` posterior (research D5). É o que fecha FR-024 com a menor mudança possível, e é por isso
 que F1 não tem schema além de uma linha de vocabulário.
 
-### `message_groundings` (nova, tenant-aware) — **F5**
+### `message_groundings` (nova, tenant-aware) — **F5, migration 0126** ✅ construída
 
 O registro permanente que liga a mensagem enviada aos trechos que a fundamentaram, com a camada de
 origem e a cópia histórica do conteúdo. Entra em F5, não em F1: é onde a rastreabilidade precisa
@@ -237,9 +306,10 @@ origem e a cópia histórica do conteúdo. Entra em F5, não em F1: é onde a ra
 | `organization_id` | `uuid not null` | |
 | `message_id` | `uuid not null references messages(id) on delete cascade` | |
 | `layer` | `text not null check in ('tenant','catalog')` | é o que FR-039 mostra na tela |
-| `chunk_id` | `uuid not null` | sem FK: o trecho pode ser reconstruído por uma versão nova do acervo, e a rastreabilidade tem de sobreviver a isso (FR-023) |
+| `chunk_id` | `uuid` (**nullable** ao construir) | sem FK, pelo motivo ao lado; e nullable porque citação antiga pode não tê-lo, e recusá-la faria a resposta perder a âncora inteira em vez de perder um id |
 | `source_ref` | `jsonb not null` | cópia do que importava na época — texto do trecho, título do material, escopo, data de atualização |
-| `similarity` | `real not null` | |
+| `material_id` | `uuid` (**acrescentada**) | sem FK, mesmo motivo. É o que responde "que material ancorou respostas este mês" com índice, que era a razão de a tabela existir |
+| `similarity` | `real` (**nullable** ao construir) | ausente vira `null`, nunca `0`: zero afirma "similaridade nenhuma", que é diferente de "não medida" e envenena média de painel |
 | `created_at` | `timestamptz not null default now()` | |
 
 **Por que `source_ref` duplica o conteúdo**: FR-023 exige que uma resposta antiga continue apontando
@@ -248,6 +318,20 @@ reconstruído — o indexador reconstrói o acervo inteiro a cada mudança
 (`workers/rag-indexer.ts:277-294`). A duplicação é deliberada e tem source of truth declarado: a
 cópia é a verdade histórica, o material é a verdade atual.
 
+**Duas coisas que só apareceram ao construir:**
+
+**1. Índice único `(message_id, chunk_id)`.** Não estava no desenho. Reprocessar um turno depois de
+um crash duplicaria a âncora, e com ela a contagem de "quantas vezes este material respondeu" — que
+é número que vira decisão de curadoria.
+
+**2. Sobre FR-024 ("ou a resposta é rastreável, ou não é enviada"), tomado ao pé da letra, esta
+tabela não o cumpre — e não é ela quem deve.** A linha referencia `messages.id`, que só existe
+depois que o envio criou a mensagem: gravar antes é impossível. O que cumpre o requisito é o que a
+F1 já fez — a âncora nasce ATÔMICA com a mensagem, dentro do mesmo `insert`, porque viaja em
+`metadata`. Mensagem sem âncora não chega a existir. Esta tabela é a projeção consultável daquilo,
+e por isso a falha dela não pode derrubar o turno nem virar não-envio: a resposta já saiu, e o
+cliente já leu. Mas também não some calada.
+
 ### Lacunas — derivadas, não tabela nova — **F5**
 
 As lacunas de FR-028/FR-029 saem de `knowledge_searches`, que já grava `hits`, `top_score` e
@@ -255,6 +339,19 @@ As lacunas de FR-028/FR-029 saem de `knowledge_searches`, que já grava `hits`, 
 "quase acertou" (`lib/ai/evolution/aggregate.ts:88-90`). O que falta é o **eixo de escopo** e o
 **motivo da recusa**: duas colunas em `knowledge_searches` (`scope_id`, `refusal_reason`), não uma
 tabela nova. Doutrina DIRC: **Calcular**, não Duplicar.
+
+✅ **As duas colunas entraram na migration 0126.** `refusal_reason` ficou **sem CHECK**, pela exceção
+de vocabulário aberto do CLAUDE.md: a constraint quebraria a re-aplicação do `baseline.sql` em modo
+update no dia em que uma razão nova aparecesse numa linha já gravada — que é justamente o que o job
+`invariants` roda. O vocabulário vive no TypeScript, em constante compartilhada. E `scope_id` tem
+`on delete set null`, não cascade: o corretor que apaga um escopo não deve apagar a prova de que
+faltava material nele — a lacuna perde o nome, não a existência.
+
+⚠️ **A "pergunta real de exemplo" de FR-028 NÃO pode sair daqui.** A migration 0086 declara que
+`knowledge_searches` não grava o texto da pergunta, de propósito: telemetria de retenção longa não
+carrega conteúdo de conversa. O exemplo vem do aviso da Central (`agent_inbox_items`, kind
+`assistance_without_grounding`), que é do próprio tenant, tem dono, tem tratativa e morre com o
+contato na anonimização.
 
 ### `agent_inbox_items` — vocabulário novo — **F1**
 
