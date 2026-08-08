@@ -157,7 +157,7 @@ partir do mesmo arquivo.
 `catalog_chunks`. `organization_id` continua `not null`: **nada aqui muda de lado**. Também na
 **0118**, pelo mesmo motivo da tabela acima.
 
-### `content_divergences` (nova, tenant-aware) — **F4, migration 0121**
+### `content_divergences` (nova, tenant-aware) — **F4, migration 0125**
 
 A segunda metade de FR-035, que não tinha nem tabela nem tarefa até a revisão cruzada. O desempate
 existia; o registro dele, não — e um requisito que manda "registrar para o corretor" sem lugar onde

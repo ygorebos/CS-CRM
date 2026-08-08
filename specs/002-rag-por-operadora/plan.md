@@ -137,6 +137,11 @@ superfície de teste exercendo a mesma regra de lastro da conversa real.
 Cobre: FR-021 a FR-023, FR-025 a FR-029, FR-034, FR-039, FR-040 · SC-006, SC-008, SC-009, SC-012,
 SC-013, SC-015.
 
+**Onde quatro deles são de fato executados** (divergência achada na análise cruzada de 2026-08-08 e
+registrada em vez de escondida): FR-034, FR-040, SC-006 e SC-015 estão nas tarefas T122, T123 e
+T124, que vivem na fase **Polish**, não numa fase da F5. A F5 é entregável sem elas; o que não é
+verdade é a linha acima sugerir que fecham junto com a fatia.
+
 ---
 
 ## Technical Context
@@ -262,8 +267,8 @@ supabase/
 │   ├── <ts>_0118_escopos_por_tenant_e_vinculo.sql    # F2 — inclui o eixo no acervo existente
 │   ├── <ts>_0123_busca_de_lastro.sql                 # F2
 │   ├── <ts>_0124_adocao_local_do_catalogo.sql        # F3
-│   ├── <ts>_0121_divergencia_de_conteudo.sql         # F4
-│   └── <ts>_0122_rastreabilidade_validade_lacunas.sql # F5
+│   ├── <ts>_0125_divergencia_de_conteudo.sql         # F4
+│   └── <ts>_0126_rastreabilidade_validade_lacunas.sql # F5
 ├── baseline.sql                                      # apêndice idempotente por fatia
 └── migrations/MANIFEST.md                            # uma linha por migration
 
@@ -326,7 +331,7 @@ registradas porque cada uma é uma classe de erro que volta.
 ### Cobertura incompleta
 
 1. **Quatro requisitos sem fatia.** FR-015, FR-018, FR-031 e FR-033 não apareciam em nenhuma linha
-   "Cobre:" — a conferência foi mecânica, comparando o conjunto das cinco fatias com os 41 FR da
+   "Cobre:" — a conferência foi mecânica, comparando o conjunto das cinco fatias com os 42 FR da
    spec. FR-015 foi para F1 (é o `rag_must_hit` que existe na tela e nenhum runtime avalia);
    FR-018, FR-031 e FR-033 para F2.
 2. **`docs/architecture/` e `user-journey-map.md` não eram tarefa de ninguém**, apesar de serem os
@@ -344,6 +349,9 @@ registradas porque cada uma é uma classe de erro que volta.
    `messages.metadata`, que já existe.
 6. **A numeração das migrations não incluía F1.** Renumerado 0116–0121, a partir da última que
    existe hoje (0115, conferida em `ls supabase/migrations/`, não no doc desatualizado).
+   *(Registro histórico. Esta numeração foi refeita em 2026-08-08 na reconciliação com a
+   `main`: a spec 001 publicou 0119–0122 com os MESMOS timestamps, e as desta spec passaram
+   a 0123–0124, com as planejadas de F4/F5 em 0125–0126. A tabela viva está em `tasks.md`.)*
 
 ### Defeitos de desenho
 

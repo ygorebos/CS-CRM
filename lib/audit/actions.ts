@@ -193,6 +193,9 @@ export type AuditAction =
   | "auth.password_reset_completed"
   | "auth.password_reset_failed"
   | "tenant.created_by_signup"
+  /** Espelhos do catálogo não sincronizaram no provisionamento (T056). Não bloqueia o
+   *  cadastro; existe para a tela de Operadoras vazia ter causa rastreável. */
+  | "tenant.catalog_sync_failed"
   | "conversation.snoozed"
   | "conversation.snooze_cancelled"
   | "conversation.snooze_watcher_run"
