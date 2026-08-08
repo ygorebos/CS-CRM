@@ -170,6 +170,22 @@ consumidores de fila, `tests/{unit,invariants,e2e}` para os três gates). O gate
 novo isolado (`internal/delivery`) para não misturar durabilidade de entrega com normalização.
 Nenhuma camada nova, nenhum projeto novo, nenhuma dependência nova no CRM.
 
+## Andamento (atualizado a cada fase concluída)
+
+| Fase | Estado | Evidência |
+|---|---|---|
+| 1 · Setup | ✅ **concluída** | `6ea0a4b6` — envs com tetos medidos, serviço no compose de dev, runbook |
+| 2 · Foundational | 🟡 **quase** | `6366d5ce` (schema, tripla + vocabulário TS), `d0f9d5b6` (envelope + autenticidade), `41806231` (rota, teto por conexão, segredo por conexão). **Falta**: T017e (aviso na Central quando o segredo não foi provisionado) e T018/T019 (modo relay no `gateway_go`, repositório em Go) |
+| 3 · US1 — a costura | 🟡 **em curso** | ingest único, dreno periódico e agendamento no `scheduler` prontos. **Falta**: os três testes que a vigiam (T020, T021, T022) e a prova ponta a ponta com mensagem real (T030) |
+| 4 · US2 — durabilidade | ⬜ não iniciada | depende da fila em disco do gateway (Go) |
+| 5 · US3 — autenticidade provada | ⬜ não iniciada | os invariantes de banco (T040, T041) |
+| 6–8 · mídia, estado, canal novo | ⬜ não iniciadas | |
+
+**Placar de tarefas**: 30 de 82 concluídas.
+
+**Portões no último commit**: `typecheck` 0 · `lint` 0 erros · `lint:channels` ok ·
+`test:unit` 291 arquivos / 2991 testes verde · `test:db` 71 arquivos / 477 testes verde.
+
 ## Estratégia de entrega — 5 fatias, cada uma utilizável sozinha
 
 Ordem por **risco decrescente**: o que pode invalidar o plano inteiro vem primeiro.

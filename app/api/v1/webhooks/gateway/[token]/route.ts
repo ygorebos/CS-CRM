@@ -39,6 +39,7 @@ import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/arch
 import { env } from "@/lib/env";
 import { autenticarEntregaDoGateway } from "@/lib/gateway/auth";
 import { parseEnvelope } from "@/lib/gateway/envelope";
+import { ingerirEnvelope } from "@/lib/gateway/ingest";
 import { checarTetoDaConexao } from "@/lib/gateway/rate-limit";
 import { logger } from "@/lib/logger";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -224,10 +225,45 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     ? await jaIngerida(admin, organizationId, envelope.message.externalId)
     : false;
 
+  // Disparo em segundo plano: é o que sustenta o alvo de ≤5s. O dreno periódico
+  // é a rede de baixo, para o caso de o processo cair entre o ACK e o fim disto.
+  // Um só dos dois não fecha os dois critérios da spec.
+  const idDaLinha = linha?.id as string | undefined;
+  void ingerirEnvelope(admin, { id: sessao.id as string, organization_id: organizationId }, envelope, requestId)
+    .then(async (r) => {
+      if (!idDaLinha) return;
+      await admin
+        .from("webhook_events_log")
+        .update(
+          r.ok
+            ? { status: "processed", processed_at: new Date().toISOString() }
+            : { status: "error", error_message: r.motivo, attempts: 1 },
+        )
+        .eq("id", idDaLinha);
+    })
+    .catch(async (err: unknown) => {
+      // Exceção aqui NÃO pode sumir: a entrega já foi confirmada ao gateway, que
+      // não vai reentregar. Quem recolhe é o dreno, e ele precisa da linha em
+      // `error` para saber que há algo a recolher.
+      logger.error("[gateway.webhook] ingestão em segundo plano falhou", {
+        requestId,
+        erro: err instanceof Error ? err.message : String(err),
+      });
+      if (!idDaLinha) return;
+      await admin
+        .from("webhook_events_log")
+        .update({
+          status: "error",
+          error_message: err instanceof Error ? err.message : String(err),
+          attempts: 1,
+        })
+        .eq("id", idDaLinha);
+    });
+
   // Reentrega responde SUCESSO. Responder erro faria o gateway retentar para
   // sempre algo já processado.
   return ok(
-    { accepted: true, duplicate: duplicada, delivery_log_id: linha?.id ?? null },
+    { accepted: true, duplicate: duplicada, delivery_log_id: idDaLinha ?? null },
     { status: 202, requestId, headers: teto.cabecalhos },
   );
 }

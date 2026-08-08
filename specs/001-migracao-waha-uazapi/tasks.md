@@ -34,10 +34,10 @@ um incremento utilizável sozinho.
 **Purpose**: deixar os dois lados capazes de se falar em desenvolvimento, sem tocar em
 comportamento de produção.
 
-- [ ] T001 Declarar `GATEWAY_BASE_URL`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e `GATEWAY_MAX_MEDIA_BYTES` em `lib/env.ts`, com Zod que lança no startup quando a rota estiver ligada e a base faltar. **Os dois tetos nascem com número, não com `TODO`**: medir o maior corpo e a maior mídia que os canais suportados pelo gateway realmente entregam (`internal/normalizer/*.go` e os limites publicados de cada provedor) e adotar esse valor com folga — inventar um número aqui é o que transforma o edge case "corpo gigante" em incidente de produção
-- [ ] T002 [P] Espelhar as mesmas variáveis em `.env.example`, com comentário do que cada uma faz (item 9 do DoD; `docs/current-state.md` §4.5 registra que este arquivo desgarra de `lib/env.ts`)
-- [ ] T003 [P] Acrescentar o serviço `gateway` em `docker-compose.yml` (desenvolvimento) em modo relay, com portas presas a `127.0.0.1` e volume nomeado para a fila em disco
-- [ ] T004 [P] Documentar o modo relay e as variáveis novas em `docs/runbooks/` (arquivo novo `gateway-relay.md`), incluindo como conferir que ele subiu
+- [x] T001 Declarar `GATEWAY_BASE_URL`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e `GATEWAY_MAX_MEDIA_BYTES` em `lib/env.ts`, com Zod que lança no startup quando a rota estiver ligada e a base faltar. **Os dois tetos nascem com número, não com `TODO`**: medir o maior corpo e a maior mídia que os canais suportados pelo gateway realmente entregam (`internal/normalizer/*.go` e os limites publicados de cada provedor) e adotar esse valor com folga — inventar um número aqui é o que transforma o edge case "corpo gigante" em incidente de produção
+- [x] T002 [P] Espelhar as mesmas variáveis em `.env.example`, com comentário do que cada uma faz (item 9 do DoD; `docs/current-state.md` §4.5 registra que este arquivo desgarra de `lib/env.ts`)
+- [x] T003 [P] Acrescentar o serviço `gateway` em `docker-compose.yml` (desenvolvimento) em modo relay, com portas presas a `127.0.0.1` e volume nomeado para a fila em disco
+- [x] T004 [P] Documentar o modo relay e as variáveis novas em `docs/runbooks/` (arquivo novo `gateway-relay.md`), incluindo como conferir que ele subiu
 
 **Checkpoint**: `docker compose up -d` sobe gateway e app lado a lado; nada de produção mudou.
 
@@ -53,34 +53,34 @@ desta fase fechar.**
 
 ### Schema — a tripla obrigatória (Princípio III)
 
-- [ ] T005 Criar `supabase/migrations/20260807210000_0116_gateway_inbound.sql` com: `channel_sessions.ingest_path text not null default 'legacy' check (ingest_path in ('legacy','gateway'))`, `channel_sessions.gateway_connection_id text`, extensão do `channel_sessions_provider_check` para incluir `whatsapp_uazapi`/`whatsapp_cloud`/`instagram`/`messenger`, extensão do `webhook_events_log_provider_check` para incluir `gateway`, e índice parcial em `webhook_events_log (status, received_at) where status = 'received'` — tudo idempotente (`add column if not exists`, `drop constraint if exists` + `add constraint`), sem `BEGIN`/`COMMIT` explícito
-- [ ] T006 Acrescentar o mesmo conteúdo como apêndice idempotente e auto-curativo no fim de `supabase/baseline.sql`, no bloco rotulado `-- ---- gateway inbound (migration 0116) ----`
-- [ ] T007 [P] Registrar a linha da 0116 em `supabase/migrations/MANIFEST.md` (tabela "Applied"), dizendo o QUÊ e o PORQUÊ
-- [ ] T008 Provar o baseline num Postgres descartável `pgvector/pgvector:pg17`: aplicar em modo install (`ON_ERROR_STOP=1`) e em modo update (re-aplicar, sem a flag) — os dois têm de passar
-- [ ] T009 Regenerar `lib/database.types.ts` a partir do schema novo
+- [x] T005 Criar `supabase/migrations/20260807210000_0116_gateway_inbound.sql` com: `channel_sessions.ingest_path text not null default 'legacy' check (ingest_path in ('legacy','gateway'))`, `channel_sessions.gateway_connection_id text`, extensão do `channel_sessions_provider_check` para incluir `whatsapp_uazapi`/`whatsapp_cloud`/`instagram`/`messenger`, extensão do `webhook_events_log_provider_check` para incluir `gateway`, e índice parcial em `webhook_events_log (status, received_at) where status = 'received'` — tudo idempotente (`add column if not exists`, `drop constraint if exists` + `add constraint`), sem `BEGIN`/`COMMIT` explícito
+- [x] T006 Acrescentar o mesmo conteúdo como apêndice idempotente e auto-curativo no fim de `supabase/baseline.sql`, no bloco rotulado `-- ---- gateway inbound (migration 0116) ----`
+- [x] T007 [P] Registrar a linha da 0116 em `supabase/migrations/MANIFEST.md` (tabela "Applied"), dizendo o QUÊ e o PORQUÊ
+- [x] T008 Provar o baseline num Postgres descartável `pgvector/pgvector:pg17`: aplicar em modo install (`ON_ERROR_STOP=1`) e em modo update (re-aplicar, sem a flag) — os dois têm de passar
+- [x] T009 Regenerar `lib/database.types.ts` a partir do schema novo
 
 ### Contrato do envelope
 
-- [ ] T010 [TEST] [P] Escrever `tests/unit/gateway-envelope.test.ts` cobrindo: envelope válido aceito; campo desconhecido preservado em `metadata`; `envelope_version` futura aceita; `type` desconhecido vira `system` com `metadata.original_type`; `event_kind` desconhecido ignorado com motivo; corpo malformado recusado
-- [ ] T011 Implementar `lib/gateway/envelope.ts` — schema Zod do envelope v1 conforme `contracts/gateway-inbound-v1.md` §3, tolerante a campo desconhecido, exportando os tipos consumidos pelo ingest
+- [x] T010 [TEST] [P] Escrever `tests/unit/gateway-envelope.test.ts` cobrindo: envelope válido aceito; campo desconhecido preservado em `metadata`; `envelope_version` futura aceita; `type` desconhecido vira `system` com `metadata.original_type`; `event_kind` desconhecido ignorado com motivo; corpo malformado recusado
+- [x] T011 Implementar `lib/gateway/envelope.ts` — schema Zod do envelope v1 conforme `contracts/gateway-inbound-v1.md` §3, tolerante a campo desconhecido, exportando os tipos consumidos pelo ingest
 - [ ] T011a [TEST] `tests/invariants/gateway-sem-payload-cru.test.ts` — nenhum arquivo fora de `lib/waha/**` e `lib/channels/meta/**` importa parser de provedor ou lê campo cru de payload de canal; o caminho novo só conhece o envelope. **FR-005 está escrito como invariante e hoje não tem vigia** — o Princípio XI diz que invariante só em prosa deixa de ser invariante. Vale como regra de lint equivalente, desde que reprove no CI
 
 ### Autenticidade
 
-- [ ] T012 [TEST] [P] Escrever `tests/unit/gateway-auth.test.ts` cobrindo: assinatura válida aceita; inválida recusada; ausente recusada; timestamp fora de ±300s recusado; segredo curto ou ausente recusa tudo (fail-closed, **sem** válvula de escape)
-- [ ] T013 Implementar `lib/gateway/auth.ts` — HMAC-SHA512 sobre `"{timestamp}.{corpo_cru}"` com `crypto.timingSafeEqual` e janela de ±300s, reusando a técnica de `lib/waha/webhook-auth.ts` mas **sem** herdar `WAHA_WEBHOOK_REQUIRE_SIGNATURE`
+- [x] T012 [TEST] [P] Escrever `tests/unit/gateway-auth.test.ts` cobrindo: assinatura válida aceita; inválida recusada; ausente recusada; timestamp fora de ±300s recusado; segredo curto ou ausente recusa tudo (fail-closed, **sem** válvula de escape)
+- [x] T013 Implementar `lib/gateway/auth.ts` — HMAC-SHA512 sobre `"{timestamp}.{corpo_cru}"` com `crypto.timingSafeEqual` e janela de ±300s, reusando a técnica de `lib/waha/webhook-auth.ts` mas **sem** herdar `WAHA_WEBHOOK_REQUIRE_SIGNATURE`
 
 ### Porta de entrada
 
-- [ ] T014 Implementar `app/api/v1/webhooks/gateway/[token]/route.ts`: resolve `channel_sessions` por `webhook_path_token` (tolerante a canal arquivado, como a rota WAHA), decifra o segredo via `fn_decrypt_oauth`, verifica assinatura, grava em `webhook_events_log` com `provider='gateway'` e `status='received'`, e **responde `202` antes de qualquer ingestão** (ACK-primeiro)
-- [ ] T015 Aplicar rate limit na rota nova, com `X-RateLimit-*` e `Retry-After` em 429 — a rota é pública e o Princípio VI exige; `docs/current-state.md` §4.3 mostra que webhooks hoje não têm, e esta rota **não** herda o buraco. **O teto é por conexão e nasce acima do alvo de rajada do SC-010** (200 mensagens em 60s): limite apertado demais derruba o tráfego legítimo do corretor numa campanha respondida, e é indistinguível de estar fora do ar. Fixar o número como múltiplo declarado do alvo, nunca como palpite
-- [ ] T015a [TEST] `tests/unit/gateway-rate-limit.test.ts` — 200 entregas em 60s pela mesma conexão **passam**; tráfego acima do teto recebe `429` com `Retry-After`; o limite de uma conexão não consome a cota de outra. Sem este teste, T015 e SC-010 são requisitos que se contradizem no escuro
+- [x] T014 Implementar `app/api/v1/webhooks/gateway/[token]/route.ts`: resolve `channel_sessions` por `webhook_path_token` (tolerante a canal arquivado, como a rota WAHA), decifra o segredo via `fn_decrypt_oauth`, verifica assinatura, grava em `webhook_events_log` com `provider='gateway'` e `status='received'`, e **responde `202` antes de qualquer ingestão** (ACK-primeiro)
+- [x] T015 Aplicar rate limit na rota nova, com `X-RateLimit-*` e `Retry-After` em 429 — a rota é pública e o Princípio VI exige; `docs/current-state.md` §4.3 mostra que webhooks hoje não têm, e esta rota **não** herda o buraco. **O teto é por conexão e nasce acima do alvo de rajada do SC-010** (200 mensagens em 60s): limite apertado demais derruba o tráfego legítimo do corretor numa campanha respondida, e é indistinguível de estar fora do ar. Fixar o número como múltiplo declarado do alvo, nunca como palpite
+- [x] T015a [TEST] `tests/unit/gateway-rate-limit.test.ts` — 200 entregas em 60s pela mesma conexão **passam**; tráfego acima do teto recebe `429` com `Retry-After`; o limite de uma conexão não consome a cota de outra. Sem este teste, T015 e SC-010 são requisitos que se contradizem no escuro
 - [ ] T014a [TEST] [P] Estender `tests/unit/gateway-envelope.test.ts` (ou arquivo irmão) com os tetos de tamanho: corpo acima de `GATEWAY_MAX_BODY_BYTES` é recusado com erro claro e **sem** carregar tudo em memória; envelope cuja mídia declara tamanho acima de `GATEWAY_MAX_MEDIA_BYTES` entra como mensagem com anexo indisponível, nunca derruba a ingestão — é o edge case "corpo gigante ou mídia enorme" da spec, que só existia como variável de ambiente
-- [ ] T016 [P] Auditar as recusas (`webhook.gateway_rejected`) com motivo, seguindo o padrão de `app/api/v1/webhooks/waha/[token]/route.ts`
+- [x] T016 [P] Auditar as recusas (`webhook.gateway_rejected`) com motivo, seguindo o padrão de `app/api/v1/webhooks/waha/[token]/route.ts`
 
 ### Vocabulário de canal no TypeScript
 
-- [ ] T017 [P] Acrescentar os providers novos em `lib/channels/session-ref.ts`, `lib/channels/capabilities.ts` e `lib/channels/selectable.ts`, mantendo o invariante `tests/invariants/vocabulario-banco-x-typescript.test.ts` verde
+- [x] T017 [P] Acrescentar os providers novos em `lib/channels/session-ref.ts`, `lib/channels/capabilities.ts` e `lib/channels/selectable.ts`, mantendo o invariante `tests/invariants/vocabulario-banco-x-typescript.test.ts` verde
 
 ### Segredo por conexão — bloqueador descoberto na análise
 
@@ -91,9 +91,9 @@ desta fase fechar.**
 > qualquer conexão criada pelo onboarding — que é justamente o caminho do corretor. Só
 > `app/api/v1/channels/official/route.ts:200` grava segredo de verdade.
 
-- [ ] T017a [TEST] `tests/invariants/channel-session-segredo.test.ts` — toda `channel_session` nasce com segredo decifrável de comprimento ≥16; nenhuma nasce com placeholder
-- [ ] T017b Gerar segredo forte na criação da sessão e cifrá-lo em `app/api/v1/channel-sessions/route.ts` e `app/api/v1/onboarding/whatsapp/session/route.ts`, no padrão que `app/api/v1/channels/official/route.ts:200` já usa
-- [ ] T017c Curar as linhas existentes **fora do SQL**: passo idempotente em `scripts/curar-segredos-de-canal.ts`, chamado pelo `install.sh` e pelo `update.sh` **depois** de `ensure_encryption_key`, que gera segredo forte para toda `channel_session` com `webhook_secret_encrypted` placeholder e o cifra por `encryptWebhookSecret` (`lib/webhooks/secrets.ts`) — o mesmo caminho que `app/api/v1/channels/official/route.ts:132` já usa
+- [x] T017a [TEST] `tests/invariants/channel-session-segredo.test.ts` — toda `channel_session` nasce com segredo decifrável de comprimento ≥16; nenhuma nasce com placeholder
+- [x] T017b Gerar segredo forte na criação da sessão e cifrá-lo em `app/api/v1/channel-sessions/route.ts` e `app/api/v1/onboarding/whatsapp/session/route.ts`, no padrão que `app/api/v1/channels/official/route.ts:200` já usa
+- [x] T017c Curar as linhas existentes **fora do SQL**: passo idempotente em `scripts/curar-segredos-de-canal.ts`, chamado pelo `install.sh` e pelo `update.sh` **depois** de `ensure_encryption_key`, que gera segredo forte para toda `channel_session` com `webhook_secret_encrypted` placeholder e o cifra por `encryptWebhookSecret` (`lib/webhooks/secrets.ts`) — o mesmo caminho que `app/api/v1/channels/official/route.ts:132` já usa
 
   > ⛔ **Não fazer isso na migration nem no apêndice do `baseline.sql`.** Medido:
   > `public.fn_encrypt_oauth` (`baseline.sql:5276`) faz
@@ -108,7 +108,7 @@ desta fase fechar.**
   > A doutrina de corrigir dados antes da constraint continua valendo — o que muda é
   > **onde**, porque este dado depende de uma chave que o SQL ainda não tem.
 
-- [ ] T017d **Sabotagem**: devolver o `Buffer.from([0])` em um dos dois caminhos e confirmar que T017a fica vermelho; restaurar
+- [x] T017d **Sabotagem**: devolver o `Buffer.from([0])` em um dos dois caminhos e confirmar que T017a fica vermelho; restaurar
 - [ ] T017e Recusar com motivo próprio quando o segredo ainda for placeholder: a rota nova responde `gateway_secret_nao_provisionado` (não um `401` genérico) e abre aviso na Central — sem isso, uma conexão não curada vira silêncio, que é o que o Princípio II proíbe
 
 ### Gateway — poder subir sem banco
@@ -137,11 +137,11 @@ e a contagem não muda.
 
 ### Implementação
 
-- [ ] T023 [US1] Implementar `lib/gateway/ingest.ts` para `event_kind: "new_message"`: resolve identidade, chama `fn_upsert_wa_contact` e `fn_upsert_wa_conversation` (reuso — **não** escrever `insert` próprio em `contacts`/`conversations`), insere em `messages` capturando `code === '23505'` como caminho normal
-- [ ] T024 [US1] Disparar a cadeia viva a partir do ingest novo — emissão em `event_log` do `ai_agent.dispatch_requested` e auditoria, espelhando `lib/waha/ingest.ts:462`
-- [ ] T025 [US1] Implementar `workers/gateway-inbound-worker.ts` consumindo `webhook_events_log` com `provider='gateway'` e `status='received'`, marcando `processed`/`error` e incrementando `attempts`
-- [ ] T026 [US1] Ligar o disparo imediato em segundo plano na rota (`app/api/v1/webhooks/gateway/[token]/route.ts`), **depois** da resposta — é o que sustenta o alvo de ≤5s
-- [ ] T027 [US1] Respeitar `channel_sessions.ingest_path` no ingest: conexão `legacy` recusa entrega pelo caminho novo com motivo explícito
+- [x] T023 [US1] Implementar `lib/gateway/ingest.ts` para `event_kind: "new_message"`: resolve identidade, chama `fn_upsert_wa_contact` e `fn_upsert_wa_conversation` (reuso — **não** escrever `insert` próprio em `contacts`/`conversations`), insere em `messages` capturando `code === '23505'` como caminho normal
+- [x] T024 [US1] Disparar a cadeia viva a partir do ingest novo — emissão em `event_log` do `ai_agent.dispatch_requested` e auditoria, espelhando `lib/waha/ingest.ts:462`
+- [x] T025 [US1] Implementar `workers/gateway-inbound-worker.ts` consumindo `webhook_events_log` com `provider='gateway'` e `status='received'`, marcando `processed`/`error` e incrementando `attempts`
+- [x] T026 [US1] Ligar o disparo imediato em segundo plano na rota (`app/api/v1/webhooks/gateway/[token]/route.ts`), **depois** da resposta — é o que sustenta o alvo de ≤5s
+- [x] T027 [US1] Respeitar `channel_sessions.ingest_path` no ingest: conexão `legacy` recusa entrega pelo caminho novo com motivo explícito
 - [ ] T027a [TEST] [P] [US1] `tests/invariants/gateway-inbound-identidade-canonica.test.ts` — o mesmo contato chegando com as duas grafias de identificador (número canônico e identificador interno do canal) cai numa **única** conversa, sem partir o histórico
 - [ ] T027b [US1] Usar em `lib/gateway/ingest.ts` o identificador **resultante** da canonicalização (o que `fn_upsert_wa_contact` devolve, com `lib/channels/phone-variants.ts`), nunca o que veio no envelope — FR-020
 - [ ] T028 [US1] Substituir `internal/handlers/webhook_forward.go` no gateway por entrega do **envelope normalizado** assinado (HMAC + timestamp + `X-Gateway-Delivery-Id`), conforme `contracts/gateway-inbound-v1.md` §2–§3
@@ -167,7 +167,7 @@ reavaliado antes de qualquer investimento adicional.
 - [ ] T033 [TEST] [P] [US2] `tests/invariants/gateway-inbound-dreno.test.ts` — linha `received` parada além do limite é recolhida pelo dreno; linha `processed` não é reprocessada; linha que falha N vezes vira `dead`
 - [ ] T034 [US2] Implementar `internal/delivery/` no gateway: fila durável em disco, espera crescente com teto, e estado terminal inspecionável
 - [ ] T035 [US2] Aplicar a política de retentativa do contrato (§5): retenta em rede/timeout/`5xx`/`429` respeitando `Retry-After`; **não** retenta `400`/`401`/`404` — vão direto ao descarte com aviso
-- [ ] T036 [US2] Implementar `app/api/v1/cron/gateway-inbound-drain/route.ts` e agendá-la no `scheduler` do `docker-compose.prod.yml`, no padrão do `event-log-drain`
+- [x] T036 [US2] Implementar `app/api/v1/cron/gateway-inbound-drain/route.ts` e agendá-la no `scheduler` do `docker-compose.prod.yml`, no padrão do `event-log-drain`
 - [ ] T037 [US2] Tornar o descarte visível: item na Central de avisos quando houver entrega `dead` (Princípio II — falta de funcionamento aparece na tela, não em `log.Warn`)
 - [ ] T038 [US2] Executar o roteiro do `quickstart.md` §2, incluindo o reinício do **gateway** no meio do intervalo
 - [ ] T038a [US2] Executar o roteiro de rajada do `quickstart.md` §7 (200 mensagens em 60s): 100% no inbox, zero duplicatas, e o ritmo de resposta do agente ainda obedecendo os limites anti-banimento existentes — é o SC-010, que não tinha tarefa. **Rodar com o rate limit de T015 ligado**, e não desligado para o teste passar: rajada provada sem o limite ativo não prova nada sobre produção
@@ -217,8 +217,8 @@ reavaliado antes de qualquer investimento adicional.
 conversa.
 
 - [ ] T052 [TEST] [P] [US6] `tests/invariants/gateway-inbound-status.test.ts` — `status_update` não regride o estado; confirmação para mensagem desconhecida não cria mensagem fantasma; `read_watermark` é ignorado com motivo registrado
-- [ ] T053 [US6] Tratar `event_kind: "status_update"` em `lib/gateway/ingest.ts`, atualizando `messages.status`, `delivered_at`, `read_at`, `error_code` e `error_message` sem regressão de estado
-- [ ] T054 [US6] Tratar o eco de mensagem enviada por fora do CRM: `sent_by_api=false` em `direction: "outbound"` grava `sent_via='external_device'`, sem duplicar
+- [x] T053 [US6] Tratar `event_kind: "status_update"` em `lib/gateway/ingest.ts`, atualizando `messages.status`, `delivered_at`, `read_at`, `error_code` e `error_message` sem regressão de estado
+- [x] T054 [US6] Tratar o eco de mensagem enviada por fora do CRM: `sent_by_api=false` em `direction: "outbound"` grava `sent_via='external_device'`, sem duplicar
 - [ ] T055 [US6] **Sabotagem**: remover a guarda de não-regressão e confirmar T052 vermelho; restaurar
 
 ---
