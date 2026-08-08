@@ -79,6 +79,42 @@ const schema = z.object({
   // assine — aí a verificação passa a ser obrigatória.
   WAHA_WEBHOOK_REQUIRE_SIGNATURE: z.string().optional().default("false"),
 
+  // ── Gateway multicanal (spec 001) ────────────────────────────────────────
+  // O gateway_go é o receptor geral do tráfego de entrada: recebe de todos os
+  // canais, normaliza para um envelope único e ENTREGA ao CRM. Ele nunca
+  // escreve no banco daqui — quem persiste é o CRM, porque receber uma
+  // mensagem dispara agente, follow-up, guardrails, auditoria e event_log.
+  //
+  // Desligado por padrão: instalação existente continua ingerindo pelo caminho
+  // WAHA legado até virar a chave por conexão (channel_sessions.ingest_path).
+  GATEWAY_INBOUND_ENABLED: z
+    .enum(["true", "false"])
+    .optional()
+    .default("false")
+    .transform((v) => v === "true"),
+  // Base do gateway na rede interna. É a ÚNICA origem de download de mídia
+  // aceita: o host que vier no envelope é descartado e a URL reconstruída
+  // sobre esta base — anti-SSRF por construção, mesma técnica de
+  // lib/messaging/media/waha-source.ts. Sem isto, um envelope forjado faria o
+  // CRM buscar arquivo em host arbitrário.
+  GATEWAY_BASE_URL: z.string().optional().default(""),
+  /**
+   * Teto do corpo da entrega, em bytes. Default 10 MiB — não é palpite: é o
+   * limite que o próprio gateway impõe ao ler os provedores
+   * (`internal/handlers/uazapi.go:45` e `instagram.go:29` usam `10<<20`), então
+   * é o maior corpo que ele pode precisar representar. O envelope carrega
+   * REFERÊNCIA de mídia, nunca bytes, então na prática sobra folga enorme.
+   */
+  GATEWAY_MAX_BODY_BYTES: z.coerce.number().int().positive().default(10 * 1024 * 1024),
+  /**
+   * Teto do anexo baixado do gateway, em bytes. Default 100 MiB — o maior
+   * anexo que um canal suportado entrega (documento do WhatsApp Cloud API;
+   * Messenger para em 25 MB e imagem em 5 MB). Acima disso a mensagem entra
+   * marcada como anexo indisponível: perder o arquivo é ruim, perder a
+   * conversa é pior.
+   */
+  GATEWAY_MAX_MEDIA_BYTES: z.coerce.number().int().positive().default(100 * 1024 * 1024),
+
   // Upstash Redis
   UPSTASH_REDIS_REST_URL: required("UPSTASH_REDIS_REST_URL"),
   UPSTASH_REDIS_REST_TOKEN: required("UPSTASH_REDIS_REST_TOKEN"),
@@ -186,6 +222,18 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+// Gateway ligado sem base configurada é falha DURA, não aviso: a base é a
+// âncora anti-SSRF do download de mídia. Sem ela, ou o CRM não busca anexo
+// nenhum, ou — pior — alguém "resolve" usando o host que veio no envelope, que
+// é exatamente o buraco que a construção evita. Melhor não subir.
+if (env.GATEWAY_INBOUND_ENABLED && !env.GATEWAY_BASE_URL.trim() && !isBuildPhase) {
+  throw new Error(
+    "GATEWAY_INBOUND_ENABLED=true exige GATEWAY_BASE_URL. Ela é a única origem de " +
+      "download de mídia aceita pelo CRM (anti-SSRF por construção). Defina-a no .env " +
+      "ou desligue GATEWAY_INBOUND_ENABLED.",
+  );
+}
 
 // Soft warning for env-gated AI keys (worker degrades gracefully but operators
 // should know when the bot is silent for config reasons).

@@ -102,6 +102,55 @@ services:
       retries: 3
       start_period: 20s
 
+  # Gateway multicanal em modo RELAY (spec 001): recebe dos provedores,
+  # normaliza para um envelope único e ENTREGA ao CRM por HTTP assinado. Em
+  # relay ele não persiste em banco nenhum — em particular, não escreve no banco
+  # do CRM: receber uma mensagem aqui não é um INSERT, dispara agente,
+  # follow-up, guardrails, auditoria e event_log.
+  #
+  # Atrás de um profile de propósito: `docker compose up -d` continua subindo só
+  # WAHA + worker, como antes. Para exercitar o caminho novo:
+  #   docker compose --profile gateway up -d
+  #
+  # A imagem ainda não é publicada. Até que seja, construa uma vez a partir do
+  # checkout do gateway:
+  #   docker build -t deskcomm/gateway:dev /caminho/para/gateway_go
+  # O caminho não entra aqui de propósito — é externo ao repositório, e um clone
+  # não o tem.
+  gateway:
+    image: ${GATEWAY_IMAGE:-deskcomm/gateway:dev}
+    container_name: deskcomm-gateway
+    profiles: ["gateway"]
+    restart: unless-stopped
+    environment:
+      # Sem este modo o processo entra em pânico no boot: internal/config/config.go
+      # trata SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY como mustGetEnv, e o
+      # gateway não sobe sem um banco para persistir — que aqui ninguém leria.
+      GATEWAY_MODE: relay
+      PORT: "8080"
+      # Para onde o envelope normalizado é entregue. host.docker.internal porque
+      # o app Next roda no HOST em dev; a porta segue a mesma convenção do
+      # WAHA_HOOK_BASE_URL acima.
+      CRM_BASE_URL: ${GATEWAY_CRM_BASE_URL:-http://host.docker.internal:3003}
+      # Fila de entrega durável. Sem estado em disco, "nada se perde" é falso:
+      # basta reiniciar o contêiner para perder o que estava em voo.
+      GATEWAY_QUEUE_DIR: /var/lib/gateway
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    ports:
+      # Preso ao loopback: em dev quem fala com ele é o app na mesma máquina.
+      # Publicar em 0.0.0.0 exporia um receptor de webhook sem proxy na frente.
+      - "127.0.0.1:8090:8080"
+    volumes:
+      - gateway-queue:/var/lib/gateway
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
 volumes:
   waha-data:
   waha-media:
+  gateway-queue:
