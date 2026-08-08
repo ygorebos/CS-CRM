@@ -231,8 +231,32 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
     assíncrona acha a linha depois** — sem id, o estado definitivo nunca chega.
   - Prova: `tests/unit/messages-handler-desfechos.test.ts` caso `T036/FR-021`. Sabotagem
     (`status: 'delivered', ack: 2` na resposta síncrona): 6 casos reprovam, inclusive este.
-- [ ] **T037** Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário
+- [X] **T037** ✅ Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário
       (`agent_inbox_items`). Silêncio é proibido. **(FR-023, Princípio XIV)**
+  - **A tripla de schema:** `20260809140000_0129_aviso_gateway_fora.sql` + apêndice no `baseline.sql`
+    (bloco ÚNICO da constraint, editado no lugar — #159) + linha no MANIFEST. Kind novo
+    `gateway_unreachable`, **separado** de `gateway_inbound_down`: lá o recebimento está desligado
+    por configuração (uma variável, e o envio continua saindo); aqui o processo não responde e nem
+    entra nem sai mensagem. Fundir faria o aviso mentir em metade dos casos.
+  - **Onde mora:** `lib/gateway/aviso-de-gateway-fora.ts`, chamado pelo **dreno** — que já roda a
+    cada minuto e já tem o cliente de serviço na mão. Cron novo seria peça a mais para agendar,
+    monitorar e esquecer.
+  - **As duas pontas do XIV:** `logger.error` (alerta que vira Sentry) **e** item `critical` na
+    Central. A cópia é para o corretor, não para nós — sem jargão, dizendo que **nada se perde** e
+    que dá para responder pelo aparelho enquanto isso. Prometer ação a quem não pode agir é pior que
+    calar, então ela não pede conserto nenhum ao usuário.
+  - **Fecha sozinho.** O tique que acha o gateway de pé resolve os avisos abertos. Aviso crítico que
+    continua aberto depois do conserto ensina exatamente o hábito que a Central não pode criar.
+  - **Só avisa quem DEPENDE** (conexão com `ingest_path='gateway'` ou `gateway_connection_id`), e
+    quando ninguém depende a sondagem nem sai. Alarme falso em instalação que não virou a chave é o
+    jeito mais rápido de a Central perder credibilidade.
+  - **Prova:** `tests/unit/aviso-de-gateway-fora.test.ts` (6). Sabotagens: `res.ok` → `true` (502
+    contando como "no ar") e `status:'resolved'` → `'open'` reprovam um caso cada. **O dublê teve de
+    ser consertado no meio:** a primeira versão ignorava o payload do `update` e a segunda sabotagem
+    passava verde — dublê que não olha o que foi escrito não prova escrita nenhuma.
+  - **O typecheck cobrou a tela:** `Record<InboxKind, string>` em `lib/ai/agent-inbox-copy.ts`
+    reprovou o kind sem cópia. Peça nova sem porta de saída não compila — é o mapa vivo funcionando.
+  - Verde: `pnpm test:unit` 3106/3106, `pnpm test:db` 555/555, typecheck e `lint-channels` zerados.
 - [X] **T038** ✅ Mídia entregue por referência de endereço, com validade **≥ 1 h** — cobre a
       retentativa do gateway mais a busca do provedor, com margem para reinício. **(FR-024)**
   - **Defeito medido:** o handler assinava a URL por **600 s**. Dez minutos cobrem o canal que baixa

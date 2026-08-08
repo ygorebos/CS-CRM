@@ -9097,6 +9097,14 @@ alter table public.agent_inbox_items
     -- nenhuma volta, e a tela fica igual a um dia devagar. Curável com uma
     -- variável — mas só se alguém souber.
     'gateway_inbound_down',
+    -- (migration 0129, spec 004 §T037 / FR-023) O gateway não RESPONDE. O
+    -- Princípio XIV declara o serviço como SPOF (instância única, sem réplica),
+    -- então a queda é o modo de falha esperado — e o que ele proíbe é que ela
+    -- aconteça em silêncio. Kind separado do de cima ainda que a tela pareça a
+    -- mesma: lá o recebimento está desligado por CONFIGURAÇÃO, com conserto de
+    -- uma variável e o envio funcionando; aqui o processo está fora, e nem entra
+    -- nem sai mensagem. Fundir os dois faria o aviso mentir em metade dos casos.
+    'gateway_unreachable',
     'other'
   ));
 

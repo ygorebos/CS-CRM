@@ -61,6 +61,10 @@ export type InboxKind =
   // responde 404, o gateway descarta sem retentar, e NADA entra. Silêncio total
   // com conserto de uma variável.
   | 'gateway_inbound_down'
+  // (0129) O gateway não RESPONDE. Diferente do de cima, aqui não há variável
+  // para ligar: o processo está fora, e nem entra nem sai mensagem. O Princípio
+  // XIV declara o serviço como SPOF e proíbe que a queda seja silenciosa.
+  | 'gateway_unreachable'
   | 'assistance_without_grounding'
   | 'other';
 
