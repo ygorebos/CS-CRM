@@ -78,6 +78,7 @@ Detalham schema SQL e payloads exatos. **Consulte antes de modelar qualquer cois
 | Doc | Conteúdo |
 |---|---|
 | [`doctrine/sistema-vivo.md`](doctrine/sistema-vivo.md) | **Doutrina do Sistema Vivo** — 5 invariantes + Living System Checklist (item 13 do DoD) |
+| [`doctrine/armadilhas-de-execucao.md`](doctrine/armadilhas-de-execucao.md) | **Armadilhas de execução** — sintomas cujo diagnóstico já foi pago uma vez. Leia antes de escrever teste de banco, mexer no `baseline.sql` ou concluir que algo "está verde" |
 | [`architecture/agent-turn.html`](architecture/agent-turn.html) | Diagrama do turno do agente (inbound → guardrails → outbound) |
 | [`research/architecture-diagrams.md`](research/architecture-diagrams.md) | Diagramas de arquitetura |
 | [`research/reference-synthesis.md`](research/reference-synthesis.md) | Arquitetura herdada da referência WAHA |
