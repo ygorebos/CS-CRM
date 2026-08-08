@@ -48,7 +48,15 @@ export function MessageBubble({ message, debugCitations }: Props) {
   })();
 
   return (
-    <div className={cn("flex w-full px-4 py-1", isOutbound ? "justify-end" : "justify-start")}>
+    // O testid marca a BOLHA, e não o texto. Contar por texto casa também a
+    // prévia da conversa na listagem, que repete o corpo da última mensagem —
+    // medido em 2026-08-08: com duas mensagens idênticas no banco, uma contagem
+    // por texto devolvia 1 e o teste de "não duplica" passava verde com a
+    // idempotência sabotada.
+    <div
+      data-testid="bolha-de-mensagem"
+      className={cn("flex w-full px-4 py-1", isOutbound ? "justify-end" : "justify-start")}
+    >
       <div
         className={cn(
           "max-w-[75%] text-sm",

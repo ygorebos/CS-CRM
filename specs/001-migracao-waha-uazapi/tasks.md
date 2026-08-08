@@ -148,7 +148,25 @@ e a contagem não muda.
 
 - [x] T020 [TEST] [P] [US1] `tests/invariants/gateway-inbound-idempotencia.test.ts` — mesma entrega duas vezes produz **uma** mensagem, e a segunda responde `202` com `duplicate: true`
 - [x] T021 [TEST] [P] [US1] `tests/invariants/gateway-inbound-posse-nome.test.ts` — nome definido por humano em `contacts.name`/`display_name` **não** é sobrescrito pelo nome vindo do canal (vigia o `coalesce` de `fn_upsert_wa_contact`, hoje sem teste nenhum)
-- [ ] T022 [TEST] [P] [US1] `tests/e2e/gateway-inbound.spec.ts` — pela tela, em ambiente fresco: envelope assinado entra e a mensagem aparece no inbox com contato e corpo corretos
+- [x] T022 [TEST] [P] [US1] `tests/e2e/gateway-inbound.spec.ts` — pela tela, em ambiente fresco: envelope assinado entra e a mensagem aparece no inbox com contato e corpo corretos
+
+  > **Executada em 2026-08-08, e a execução achou dois defeitos NA PRÓPRIA SPEC.** Stack fresco
+  > isolado (Supabase CLI `deskcomm-e2e001`, baseline.sql, `next build` + `next start`), 4 casos
+  > verdes em 39s. Evidência: `.superpowers/evidence/spec001-t022-inbox-gateway.png`.
+  >
+  > O que a sabotagem revelou (Princípio XI, e por isso ela não é formalidade):
+  > **(1)** com o ingest sabotado para gravar `external_id` diferente a cada entrega, o banco
+  > ficou com DUAS mensagens de corpo idêntico e o caso de "não duplica" passou **verde**. Duas
+  > causas somadas: `toHaveCount(1)` é satisfeito no instante em que existe UMA bolha — e a
+  > duplicata chegava depois, porque a rota dá ACK antes de ingerir; e `getByText(corpo)` casava
+  > a **prévia da conversa na listagem**, que repete o corpo da última mensagem, então a contagem
+  > nunca olhou para a thread. Conserto: espera pelo estado terminal em `webhook_events_log`
+  > (o próprio ACK durável da rota) antes de contar, e contagem por `data-testid` da BOLHA.
+  > **(2)** o caso da entrega forjada afirmava ausência sem esperar nada — passaria igual com a
+  > verificação de assinatura desligada. Agora exige o estado terminal `error` antes de olhar.
+  >
+  > Re-sabotado depois do conserto: idempotência quebrada → "Received: 2"; assinatura aceita
+  > sempre → `Expected 401, Received 202`. Cada caso fica vermelho pelo defeito que vigia.
 
 ### Implementação
 
@@ -305,9 +323,12 @@ reavaliado antes de qualquer investimento adicional.
 
   > 11 testes. Além do pedido: `ref` vazia é recusada **antes da rede** (senão `new URL("", base)` viraria a própria base — o CRM guardaria a página inicial do gateway como se fosse o anexo do cliente), e anexo que **mente no `content-length`** é recusado pelo tamanho real. O caso do endereço de metadados de nuvem (`169.254.169.254`) está lá para deixar explícito que a defesa **não é lista de bloqueio**: nenhum host do payload é usado.
 
-- [ ] T047 [TEST] [P] [US5] Estender `tests/e2e/gateway-inbound.spec.ts` com anexo: mensagem com imagem aparece e o anexo abre
+- [x] T047 [TEST] [P] [US5] Estender `tests/e2e/gateway-inbound.spec.ts` com anexo: mensagem com imagem aparece e o anexo abre
 
-  > **Spec escrita, execução pendente de ambiente.** O arquivo existe (4 casos, incluindo o de anexo que NÃO baixa — FR-025) e roda no job `e2e`. Rodá-la aqui exigiria `next build` + `.env.e2e` + Supabase local; a árvore é compartilhada com outra sessão e o Supabase local em uso é o dela. Mesma classe de T022/T030/T038.
+  > **Executado em 2026-08-08 junto com T022.** O caso provado é o que interessa ao FR-025: anexo
+  > cuja referência **não baixa** (base do gateway inalcançável de propósito) e a mensagem
+  > aparece na thread assim mesmo. O contrário — anexo quebrado derrubar a conversa — é a
+  > inversão de gravidade que a spec existe para impedir.
 
 - [x] T048 [US5] Implementar `lib/messaging/media/gateway-source.ts` na mesma construção anti-SSRF de `lib/messaging/media/waha-source.ts` (descarta o host do payload, reconstrói sobre a base confiável)
 

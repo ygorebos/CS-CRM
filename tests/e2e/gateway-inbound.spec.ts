@@ -31,7 +31,8 @@ import { createHmac } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { test, expect, type Page } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 
 const APP_URL = `http://localhost:${process.env.E2E_PORT ?? "3001"}`;
 const CREDS_PATH = path.join(process.cwd(), ".e2e-creds.json");
@@ -110,6 +111,60 @@ async function entregar(corpo: Record<string, unknown>): Promise<Response> {
   });
 }
 
+/**
+ * Espera a entrega chegar ao FIM do processamento, e não só ao 202.
+ *
+ * ## O defeito que isto conserta (medido em 2026-08-08)
+ *
+ * A rota responde 202 **antes** de ingerir (ACK-primeiro). Uma asserção de
+ * contagem logo depois, como `toHaveCount(1)`, é satisfeita no instante em que
+ * existe uma bolha — e o Playwright para de olhar ali. Se a duplicata chegasse
+ * meio segundo depois, ninguém veria.
+ *
+ * Não é hipótese: com o ingest sabotado para gravar `external_id` diferente a
+ * cada entrega, o banco terminou com TRÊS mensagens de corpo idêntico e o teste
+ * de "não duplica" passou **verde**. Pelo Princípio XI, teste que não fica
+ * vermelho com a implementação sabotada não é prova.
+ *
+ * O sincronismo é lido do `webhook_events_log` — que é o próprio ACK durável da
+ * rota, não um atalho inventado para o teste. A ASSERÇÃO continua na tela: isto
+ * só decide QUANDO olhar.
+ */
+const admin = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL ?? "http://127.0.0.1:54321",
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? "",
+  { auth: { autoRefreshToken: false, persistSession: false } },
+);
+
+async function aguardarEntregasResolvidas(marcador: string, quantas: number): Promise<string[]> {
+  const limite = Date.now() + 30_000;
+  let ultimos: string[] = [];
+  while (Date.now() < limite) {
+    // Filtra pelo CORPO, não pela coluna `external_id`: numa entrega recusada
+    // por assinatura a rota grava a linha antes de sequer ler o envelope, então
+    // a coluna sai `null`. Casar pela coluna deixaria o caso da forjada esperando
+    // para sempre por uma linha que existe.
+    const { data } = await admin
+      .from("webhook_events_log")
+      .select("status")
+      .eq("organization_id", fixture.organization_id)
+      .like("raw_body", `%${marcador}%`);
+    ultimos = ((data ?? []) as { status: string }[]).map((l) => l.status);
+    // 'received' é estado transitório: a linha existe, a ingestão ainda corre.
+    const resolvidas = ultimos.filter((s) => s === "processed" || s === "error");
+    if (resolvidas.length >= quantas) return resolvidas;
+    await new Promise((r) => setTimeout(r, 250));
+  }
+  throw new Error(
+    `entregas de ${marcador} não resolveram em 30s (estados vistos: ${ultimos.join(",") || "nenhum"})`,
+  );
+}
+
+/** Bolhas da THREAD que contêm este corpo — não a prévia da listagem. */
+function bolhasCom(page: Page, corpo: string): Locator {
+  return page.getByTestId("bolha-de-mensagem").filter({ hasText: corpo });
+}
+
 async function login(page: Page, email: string): Promise<void> {
   await page.goto(`${APP_URL}/login`);
   await page.locator("#email").fill(email);
@@ -142,17 +197,31 @@ test.describe("recebimento pelo gateway — pela tela", () => {
     await expect(conversa).toBeVisible({ timeout: 30_000 });
 
     await conversa.click();
-    // O corpo é a prova de que a mensagem — e não só a conversa — atravessou.
-    await expect(page.getByText(CORPO_DA_MENSAGEM).first()).toBeVisible({ timeout: 15_000 });
+    // A BOLHA, não o texto solto: a prévia na listagem repete o corpo da última
+    // mensagem, então `getByText(corpo)` fica verde mesmo se a conversa nunca
+    // abrir. O que se prova aqui é que a mensagem chegou à THREAD.
+    await expect(bolhasCom(page, CORPO_DA_MENSAGEM).first()).toBeVisible({ timeout: 15_000 });
   });
 
   test("reentrega do mesmo evento não duplica a mensagem na tela", async ({ page }) => {
-    const mesmo = envelope();
+    // Evento PRÓPRIO deste caso — não o do caso anterior. Reaproveitar aquele
+    // faria a espera abaixo depender de quantos casos rodaram antes, e um
+    // `-g` isolado passaria a contar entregas que nunca aconteceram.
+    const idProprio = `E2E_DUP_${ts}`;
+    const corpo = `Reentrega ${ts}`;
+    const mesmo = envelope({
+      event_id: `01H${ts}E2EDUP`,
+      message: { external_id: idProprio, direction: "inbound", type: "text", body: corpo },
+    });
     await entregar(mesmo);
     const segunda = await entregar(mesmo);
     // A segunda também é aceita — o gateway reentrega por desenho, e recusar
     // faria ele retentar para sempre uma entrega que já foi processada.
     expect(segunda.status).toBe(202);
+
+    // As DUAS entregas têm de estar resolvidas antes de contar bolhas. Contar
+    // antes disso mede a velocidade da máquina, não a idempotência.
+    await aguardarEntregasResolvidas(idProprio, 2);
 
     await login(page, creds.users.manager!.email);
     await page.goto(`${APP_URL}/app/inbox`);
@@ -161,7 +230,7 @@ test.describe("recebimento pelo gateway — pela tela", () => {
     // Uma bolha, não duas. É o `unique (organization_id, external_id)` visto do
     // lado de quem lê a conversa — e é o que torna seguro os dois caminhos
     // coexistirem durante a virada.
-    const bolhas = page.getByText(CORPO_DA_MENSAGEM);
+    const bolhas = bolhasCom(page, corpo);
     await expect(bolhas.first()).toBeVisible({ timeout: 30_000 });
     await expect(bolhas).toHaveCount(1);
   });
@@ -187,6 +256,15 @@ test.describe("recebimento pelo gateway — pela tela", () => {
       body: cru,
     });
     expect(res.status).toBe(401);
+
+    // Espera a entrega alcançar estado TERMINAL antes de afirmar ausência.
+    // Sem isto, o caso passaria mesmo com a verificação de assinatura desligada:
+    // olharia a tela antes de a mensagem forjada ser ingerida e leria o vazio
+    // como prova. Com a recusa em pé o estado terminal é `error` (SC-012, a
+    // recusa grava linha com motivo); com a verificação sabotada seria
+    // `processed` — e aí a bolha aparece e a contagem abaixo reprova.
+    const estados = await aguardarEntregasResolvidas(`E2E_FORJADO_${ts}`, 1);
+    expect(estados).toContain("error");
 
     await login(page, creds.users.manager!.email);
     await page.goto(`${APP_URL}/app/inbox`);
@@ -218,6 +296,6 @@ test.describe("recebimento pelo gateway — pela tela", () => {
     await page.goto(`${APP_URL}/app/inbox`);
     await page.getByText(`Cliente E2E ${ts}`).first().click();
 
-    await expect(page.getByText(corpo).first()).toBeVisible({ timeout: 30_000 });
+    await expect(bolhasCom(page, corpo).first()).toBeVisible({ timeout: 30_000 });
   });
 });
