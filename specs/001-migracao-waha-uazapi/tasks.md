@@ -153,8 +153,16 @@ e a contagem não muda.
 - [x] T025 [US1] Implementar `workers/gateway-inbound-worker.ts` consumindo `webhook_events_log` com `provider='gateway'` e `status='received'`, marcando `processed`/`error` e incrementando `attempts`
 - [x] T026 [US1] Ligar o disparo imediato em segundo plano na rota (`app/api/v1/webhooks/gateway/[token]/route.ts`), **depois** da resposta — é o que sustenta o alvo de ≤5s
 - [x] T027 [US1] Respeitar `channel_sessions.ingest_path` no ingest: conexão `legacy` recusa entrega pelo caminho novo com motivo explícito
-- [ ] T027a [TEST] [P] [US1] `tests/invariants/gateway-inbound-identidade-canonica.test.ts` — o mesmo contato chegando com as duas grafias de identificador (número canônico e identificador interno do canal) cai numa **única** conversa, sem partir o histórico
-- [ ] T027b [US1] Usar em `lib/gateway/ingest.ts` o identificador **resultante** da canonicalização (o que `fn_upsert_wa_contact` devolve, com `lib/channels/phone-variants.ts`), nunca o que veio no envelope — FR-020
+- [x] T027a [TEST] [P] [US1] `tests/invariants/gateway-inbound-identidade-canonica.test.ts` — o mesmo contato chegando com as duas grafias de identificador (número canônico e identificador interno do canal) cai numa **única** conversa, sem partir o histórico
+- [x] T027b [US1] Usar em `lib/gateway/ingest.ts` o identificador **resultante** da canonicalização (o que `fn_upsert_wa_contact` devolve, com `lib/channels/phone-variants.ts`), nunca o que veio no envelope — FR-020
+
+  > **Onde a regra ficou, e por quê.** Ela já existia — dentro de `lib/channels/meta/ingest.ts`,
+  > aplicada só ali. Deixá-la lá faria o ingest do gateway nascer sem ela e o defeito voltar por um
+  > caminho novo, então saiu para `lib/channels/identidade-canonica.ts`, com o acesso a dados
+  > **injetado**: o ingest busca por supabase-js e o invariante por SQL puro contra o Postgres do
+  > `baseline.sql`, exercitando a MESMA função. Regra reescrita no teste provaria uma cópia — e cópia
+  > não vigia nada. (`lib/channels/meta/ingest.ts` ainda tem a sua própria; unificar é dívida
+  > registrada, fora do escopo desta fatia.)
 - [ ] T028 [US1] Substituir `internal/handlers/webhook_forward.go` no gateway por entrega do **envelope normalizado** assinado (HMAC + timestamp + `X-Gateway-Delivery-Id`), conforme `contracts/gateway-inbound-v1.md` §2–§3
 - [ ] T029 [US1] Mapear `MensagemNormalizada` → envelope v1 em pacote novo do gateway, cobrindo os campos da tabela de vocabulário da análise (`analise-gateway-go-recebimentos.md`)
 

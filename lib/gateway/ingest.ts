@@ -24,6 +24,7 @@
  */
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import { numeroCanonicoParaUpsert } from "@/lib/channels/identidade-canonica";
 import type { EnvelopeNormalizado } from "@/lib/gateway/envelope";
 import { logger } from "@/lib/logger";
 
@@ -301,10 +302,23 @@ async function upsertContato(
   identidade: { kind: "phone"; phone: string; lid: null } | { kind: "lid"; phone: null; lid: string },
   participante: { externalId: string; displayName: string | null },
 ): Promise<string | null> {
+  // FR-020: o número que vai para o upsert é o JÁ CADASTRADO quando existe, não o
+  // que chegou no envelope. A mesma pessoa chega com 13 dígitos no envio e 12 no
+  // recebimento (nono dígito brasileiro), e `wa_identity` é `'phone:' ||
+  // phone_number` literal — sem esta resolução, o índice único não vê conflito e
+  // o cliente vira DOIS cadastros com o mesmo nome, cada um com metade da
+  // conversa. Só amplia a busca: o número gravado nunca é reescrito.
+  const phone =
+    identidade.kind === "phone"
+      ? await numeroCanonicoParaUpsert(identidade.phone, (variantes) =>
+          buscarContatoPorVariantes(admin, orgId, variantes),
+        )
+      : null;
+
   const { data, error } = await admin.rpc("fn_upsert_wa_contact" as never, {
     p_org: orgId,
     p_kind: identidade.kind,
-    p_phone: identidade.phone,
+    p_phone: phone,
     p_lid: identidade.lid,
     p_chat_id: participante.externalId,
     // Nome do CANAL. A RPC faz `coalesce(contacts.display_name, excluded...)`,
@@ -316,6 +330,28 @@ async function upsertContato(
     return null;
   }
   return (data as string) ?? null;
+}
+
+/**
+ * Contato já existente sob QUALQUER variante do número, DENTRO da organização.
+ *
+ * O filtro por `organization_id` não é zelo: sem ele, o número de um tenant
+ * decidiria a grafia gravada no de outro — e a busca que existe para unir um
+ * histórico passaria a atravessar a fronteira que sustenta o produto inteiro.
+ */
+async function buscarContatoPorVariantes(
+  admin: Admin,
+  orgId: string,
+  variantes: string[],
+): Promise<string | null> {
+  const { data } = await admin
+    .from("contacts")
+    .select("phone_number")
+    .eq("organization_id", orgId)
+    .in("phone_number", variantes)
+    .limit(1)
+    .maybeSingle();
+  return (data?.phone_number as string | undefined) ?? null;
 }
 
 async function upsertConversa(
