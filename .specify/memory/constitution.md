@@ -197,6 +197,49 @@ volta a passar sem nenhuma mudança na spec.
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
+
+==================================================================================
+EMENDA — 2026-08-08 (segunda do dia)
+
+Version change: 2.0.0 → 2.1.0
+Bump rationale: MINOR — orientação nova e material numa seção existente ("Fluxo de
+Desenvolvimento e Portões"). Nenhum princípio foi adicionado, removido ou redefinido; I–XII
+seguem íntegros, palavra por palavra, e a contagem de gates do Constitution Check não muda.
+
+Seção alterada:
+  - "Fluxo de Desenvolvimento e Portões" → subseção nova **"Cadência de commit"**, entre
+    "Higiene de branch" e "Portões obrigatórios". Define a fase — não a task — como unidade de
+    commit, com três exceções nomeadas e o que o commit de fase precisa ter rodado para existir.
+
+Seções removidas: nenhuma.
+
+Origem: pedido explícito do dono do produto — "não precisa ficar fazendo um commit a cada task
+executada; quando executar uma fase inteira de uma spec, aí você faz um commit". A regra estava
+implícita e cada sessão escolhia a sua, o que produziu tanto histórico picotado (um commit por
+task, estados que não compilam) quanto trabalho perdido (nada commitado até a fase fechar). A
+emenda fixa o padrão e, no mesmo movimento, protege o caso em que segurar o commit custa
+trabalho.
+
+Plano de migração (exigência (c) da Governança):
+  - **Nenhum commit já publicado é invalidado.** A regra vale do merge em diante; histórico
+    anterior não é reescrito — a "Higiene de branch" acima já proíbe reescrever a `main`.
+  - **Sem efeito em portão de CI.** Nenhum job passa a reprovar por granularidade de commit; a
+    regra é de método, verificada na revisão do PR, não por script.
+  - **Conflito aparente com o Princípio XI, resolvido aqui:** juntar as tasks de uma fase num
+    commit MUST NOT virar desculpa para adiar o teste. O teste da fase entra no commit da fase;
+    fase cujo commit não carrega o teste que prova o que ela entregou não fechou.
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/plan-template.md — fonte atualizada para v2.1.0 (a tabela de gates não
+                                           muda: esta emenda não cria princípio)
+  ✅ rodapé deste arquivo                 — Version 2.1.0, Last Amended 2026-08-08
+
+TODO(CLAUDE_MD_CADENCIA): `CLAUDE.md` não fala de cadência de commit em lugar nenhum — não
+desatualiza com esta emenda, mas ganharia a regra na seção de fluxo. Fica como alinhamento de
+documento derivado, fora deste PR.
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES).
 -->
 
 # DeskcommCRM Constitution
@@ -573,6 +616,36 @@ worktree com working tree sujo que não é seu MUST NOT ser tocada — cheque `g
 `git worktree list`, e avise. Conflito ao atualizar interrompe e é resolvido com cabeça, nunca
 escolhendo um lado no automático.
 
+**Cadência de commit**: a unidade de commit é a **fase**, não a task. Uma fase inteira de um plano
+— as fases de `tasks.md` no fluxo Spec Kit, ou o marco equivalente num plano sem fases — fecha com
+**um** commit, carregando todas as tasks dela. Commit a cada task MUST NOT ser o padrão: enche o
+histórico de estados intermediários que não compilam, não passam nos portões e não são reversíveis
+sozinhos, e transforma revisão de PR em arqueologia.
+
+Três exceções, e são exceções mesmo:
+
+- **Trabalho que atravessa mais de uma jornada sem fechar a fase MUST ser commitado assim mesmo**,
+  rotulado como parcial na mensagem. A árvore de trabalho é compartilhada entre sessões e
+  worktrees, e sessão que compacta, troca de branch ou restaura arquivo perde o que não está
+  commitado. Trabalho perdido é pior que histórico feio.
+- **Mudança de doutrina** — esta constituição, `CLAUDE.md`, `AGENTS.md`, `docs/doctrine/` — MUST
+  ser commitada assim que fica pronta, sem esperar fase. É a regra que governa o resto do
+  trabalho; ela não fica refém dele.
+- **Migration versionada** MUST sair no mesmo commit que o apêndice do `baseline.sql` e a linha do
+  MANIFEST (Princípio III). Se a fase ainda não fechou, o commit de schema sai sozinho — os três
+  artefatos nunca se separam.
+
+O commit de fase MUST ter rodado antes os portões que o tipo da mudança exige (`pnpm typecheck`,
+`pnpm lint`, `pnpm test:unit`; mais `pnpm test:db` se tocou schema, RLS, RBAC, escopo, roteamento,
+follow-up, webhooks ou automações). Commit de fase é entrega verificada, não "salvar arquivo". A
+mensagem MUST nomear o **resultado observável** da fase, nunca a lista de arquivos ou o intervalo
+de IDs de task. E juntar tasks num commit MUST NOT adiar teste: o teste que prova a fase entra no
+commit da fase (Princípio XI).
+
+**Rationale**: quem lê este histórico é o revisor do PR e o self-hoster que precisa achar onde
+algo quebrou. Um commit por fase é a menor unidade que alguém consegue reverter inteira sem
+quebrar o meio; um commit por task é ruído com custo de bisect.
+
 **Portões obrigatórios na branch protection da `main`**:
 
 - `verify` — typecheck + lint + lint:channels + test:unit + test:shell
@@ -625,4 +698,4 @@ aprofundamento por tipo de task, está no Princípio XII.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.1.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
