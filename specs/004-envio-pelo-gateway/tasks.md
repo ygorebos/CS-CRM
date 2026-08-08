@@ -191,16 +191,10 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
       **no envio**, fundo na pilha, com erro técnico — para o corretor o desfecho é um canal que
       conecta, recebe e nunca responde. A guarda existe para o instante em que a Fase 3 acrescentar
       provider do gateway, que é exatamente o instante em que ninguém vai lembrar disto. **(FR-014)**
-- [ ] **T031** Adapter de envio atrás do seam `getAdapter(provider)`, fail-closed. Nenhuma feature do
-      CRM passa a nomear provedor. **(FR-015, FR-016)**
-- [ ] **T032** Resolver a conexão de destino do próprio canal, nunca de corpo de requisição. É o
-      pior caso da feature (Edge Cases: mensagem sai pelo número de outra organização).
-      **(FR-017)**
-- [ ] **T033** Credencial em cabeçalho, nunca em query string; endereço do gateway como
-      configuração. **(FR-018)**
-- [ ] **T034** Gravar como `external_id` o identificador que o gateway devolve, e provar que ele
-      **casa** com o que volta na confirmação de entrega — se não casar, o visto nunca chega.
-      **(FR-019)**
+- [X] **T031** ✅ (commit `47e42228`) Adapter `lib/channels/adapters/gateway.ts` no seam, fail-closed preservado.
+- [X] **T032** ✅ no mesmo commit — `sessionRef` = `gateway_connection_id` do canal; corpo nunca escolhe conexão; teste varre `organization` fora do JSON.
+- [X] **T033** ✅ — credencial só em cabeçalho (teste afirma que a URL não contém o token).
+- [X] **T034** ✅ — `message_id` da resposta vira `external_id`; ausente → null, nunca inventado.
 - [ ] **T035** Passar o envio migrado pelas mesmas travas de vazão e janela do envio atual, e
       **corrigir `app/api/v1/cron/recover-stuck-messages`**, que hoje monta chamada crua ao WAHA e
       ignora o seam — num canal migrado ela envia para o lugar errado, em silêncio. **(FR-020)**
