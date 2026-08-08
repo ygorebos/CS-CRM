@@ -5981,6 +5981,23 @@ export type Database = {
         Args: { p_from: string; p_org: string; p_owner?: string; p_to: string }
         Returns: Json
       }
+      fn_buscar_lastro: {
+        Args: {
+          p_agent_id: string
+          p_embedding: string
+          p_k?: number
+          p_scope_id: string
+          p_threshold?: number
+        }
+        Returns: {
+          chunk_id: string
+          content: string
+          layer: string
+          material_id: string
+          similarity: number
+          source_ref: Json
+        }[]
+      }
       fn_can_view_conversation: {
         Args: { p_assigned_to_user_id: string; p_org: string }
         Returns: boolean

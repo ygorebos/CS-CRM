@@ -9700,3 +9700,143 @@ revoke execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) from 
 grant  execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) to service_role;
 
 notify pgrst, 'reload schema';
+
+
+-- ---- busca de lastro nas duas camadas (migration 0119) ----
+--
+-- Tenant e acervo ativo derivados de `p_agent_id`, NUNCA recebidos do chamador (FR-019):
+-- a organização é CONSULTADA a partir do agente, não AFIRMADA por quem chama.
+--
+-- E não `auth.uid()`: o chamador real é o agent-engine, por Pool `pg` com credencial de
+-- serviço. Não há sessão de usuário; uma função que derivasse o tenant dali devolveria
+-- conjunto vazio em toda chamada de produção — e passaria em qualquer teste escrito com
+-- uma sessão autenticada.
+--
+-- A precedência de camada vale DENTRO DO BALDE (research D7). Global, ela produziria um
+-- desastre silencioso: um texto do corretor sobre o horário de atendimento dele passaria
+-- o limiar e apagaria o procedimento de boleto da operadora.
+--
+-- A regra da versão inerte (FR-037) entra na 0120, por `create or replace` — a coluna
+-- `catalog_materials.inert` ainda não existe neste ponto.
+
+create or replace function public.fn_buscar_lastro(
+  p_agent_id  uuid,
+  p_scope_id  uuid,
+  p_embedding public.vector,
+  p_k         integer default 5,
+  p_threshold real    default 0.40
+)
+returns table (
+  chunk_id    uuid,
+  layer       text,
+  material_id uuid,
+  content     text,
+  similarity  real,
+  source_ref  jsonb
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  with agente as (
+    select a.organization_id, a.active_kb_version_id
+      from public.ai_agents a
+     where a.id = p_agent_id
+  ),
+  escopo_ativo as (
+    -- Resolvido DENTRO da organização do agente: `p_scope_id` de outro tenant não
+    -- resolve e a busca cai no caso "escopo desconhecido". `is_active` é a trava 4.
+    select ks.id as scope_id, ks.catalog_scope_id
+      from public.knowledge_scopes ks
+      join agente g on g.organization_id = ks.organization_id
+     where ks.id = p_scope_id
+       and ks.is_active
+  ),
+  camada_tenant as (
+    select
+      c.id                                            as chunk_id,
+      'tenant'::text                                  as layer,
+      s.id                                            as material_id,
+      c.content                                       as content,
+      (1 - (c.embedding <=> p_embedding))::real       as similarity,
+      case when c.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',       'tenant',
+        'title',       s.name,
+        'scope',       ks.display_name,
+        'updated_at',  s.updated_at,
+        'source_type', s.source_type
+      )                                               as source_ref
+      from public.ai_chunks c
+      join agente g
+        on c.organization_id = g.organization_id
+       and c.kb_version_id   = g.active_kb_version_id
+      join public.ai_knowledge_sources s
+        on s.id = c.knowledge_source_id
+      left join public.knowledge_scopes ks
+        on ks.id = c.scope_id
+     where (s.valid_until is null or s.valid_until >= current_date)
+       and (c.applies_to_all or c.scope_id = (select scope_id from escopo_ativo))
+       and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  ),
+  camada_catalogo as (
+    select
+      cc.id                                           as chunk_id,
+      'catalog'::text                                 as layer,
+      cm.id                                           as material_id,
+      cc.content                                      as content,
+      (1 - (cc.embedding <=> p_embedding))::real      as similarity,
+      case when cc.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',         'catalog',
+        'title',         cm.title,
+        'scope',         cs.display_name,
+        'updated_at',    cm.published_at,
+        'material_slug', cm.slug,
+        'version',       cm.version
+      )                                               as source_ref
+      from public.catalog_chunks cc
+      join public.catalog_materials cm
+        on cm.id = cc.catalog_material_id
+      left join public.catalog_scopes cs
+        on cs.id = cc.catalog_scope_id
+     where (cm.valid_until is null or cm.valid_until >= current_date)
+       and (cc.applies_to_all or cc.catalog_scope_id = (select catalog_scope_id from escopo_ativo))
+       and (1 - (cc.embedding <=> p_embedding)) >= p_threshold
+  ),
+  tudo as (
+    select * from camada_tenant
+    union all
+    select * from camada_catalogo
+  )
+  select t.chunk_id, t.layer, t.material_id, t.content, t.similarity, t.source_ref
+    from tudo t
+   where t.layer = 'tenant'
+      or not exists (
+        select 1 from tudo x
+         where x.layer = 'tenant'
+           and x.balde = t.balde
+      )
+   order by t.similarity desc
+   limit greatest(p_k, 0);
+$$;
+
+comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
+  'Migration 0119 (spec 002, F2): busca de lastro nas duas camadas. Tenant e acervo ativo '
+  'derivados de p_agent_id, NUNCA recebidos do chamador (FR-019). Escopo desconhecido ou '
+  'desligado devolve só material "vale para todos" — nunca busca ampla (FR-017, trava 4). '
+  'Material vencido não ancora (FR-026). Precedência de camada vale dentro do mesmo balde '
+  '(research D7).';
+
+revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) from public, anon, authenticated;
+grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) to service_role;
+
+-- Forward-fix: `retrieve_top_k_chunks` perde `authenticated`. O snapshot acima concede
+-- (`GRANT ALL ... TO authenticated`), e ela recebe `p_organization_id` do CHAMADOR com um
+-- comentário delegando a validação a ele — alcançável por token de tenant. Os caminhos
+-- vivos usam credencial de serviço (MCP e worker via admin client; agent-engine via Pool
+-- `pg`), medido em 2026-08-08. A porta some, os chamadores ficam.
+revoke execute on function public.retrieve_top_k_chunks(uuid, uuid, public.vector, integer, real) from authenticated;
+
+notify pgrst, 'reload schema';
