@@ -1,4 +1,4 @@
--- 0120 — a edição local vence a versão nova semeada
+-- 0124 — a edição local vence a versão nova semeada
 --
 -- Spec 002 (RAG por operadora), fatia F3. Tarefas T133 e T134.
 --
@@ -78,16 +78,16 @@ create trigger trg_catalog_materials_inercia
   for each row execute function public.fn_versao_semeada_sobre_adotado_nasce_inerte();
 
 comment on column public.catalog_materials.inert is
-  'Migration 0120 (spec 002, F3): versão semeada que chegou depois de o slug ser adotado '
+  'Migration 0124 (spec 002, F3): versão semeada que chegou depois de o slug ser adotado '
   'localmente. Não ancora e não desempata (FR-037); fica visível para ser aceita.';
 
 comment on column public.catalog_materials.adopted_at is
-  'Migration 0120: marca o slug como adotado por esta instalação. Gravado na versão local '
+  'Migration 0124: marca o slug como adotado por esta instalação. Gravado na versão local '
   'criada pela edição. Estado por material, nunca chave global (A-21).';
 
 -- ── T134 · forward-fix da busca ─────────────────────────────────────────────
 --
--- `create or replace` da 0119. Duas mudanças, ambas no lado do catálogo:
+-- `create or replace` da 0123. Duas mudanças, ambas no lado do catálogo:
 --   · versão inerte não entra no conjunto;
 --   · por `slug`, só a MAIOR versão não-inerte ancora.
 create or replace function public.fn_buscar_lastro(
@@ -202,7 +202,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
-  'Migrations 0119 + 0120 (spec 002): busca de lastro nas duas camadas. Tenant e acervo '
+  'Migrations 0123 + 0124 (spec 002): busca de lastro nas duas camadas. Tenant e acervo '
   'derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou desligado '
   'devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora (FR-026). '
   'Precedência de camada dentro do balde (research D7). No catálogo, por slug ancora só a '

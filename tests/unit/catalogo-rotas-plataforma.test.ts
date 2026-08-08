@@ -9,7 +9,7 @@
  *  - `slug` é imutável na edição (é a chave da semeadura) e o corpo `strict` diz isso;
  *  - `checkRateLimit` é REALMENTE chamado, e o 429 sai com `Retry-After` + `X-RateLimit-*`.
  *
- * O que eles NÃO provam: RLS, o trigger de inércia da 0120 e o efeito na busca. Isso é
+ * O que eles NÃO provam: RLS, o trigger de inércia da 0124 e o efeito na busca. Isso é
  * banco, e mora nos invariantes.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";

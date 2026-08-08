@@ -21,7 +21,7 @@ import pg from "pg";
  *
  * ═══ DUAS EXCEÇÕES, DECLARADAS EM VEZ DE SILENCIADAS ═══
  *
- * · `catalog_materials.adopted_by -> auth.users` (migration 0120). É auditoria de
+ * · `catalog_materials.adopted_by -> auth.users` (migration 0124). É auditoria de
  *   curadoria da PRÓPRIA instalação: quem, aqui dentro, adotou localmente aquele
  *   material. Não é dado de cliente e não é identificador de organização — `auth.users`
  *   é a tabela de operadores do sistema, não de leads. Sem essa marca, ninguém sabe a

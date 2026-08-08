@@ -15,8 +15,8 @@
  *
  *  1. A versão nova nasce `origin='local'`, `adopted_at=now()`, `adopted_by=<curador>` —
  *     `inserirVersaoLocal` cuida disso. É a adoção que faz a próxima versão semeada
- *     daquele slug nascer inerte (trigger da migration 0120).
- *  2. `fn_buscar_lastro` (0120) ancora, por slug, APENAS a maior versão não-inerte. Sem
+ *     daquele slug nascer inerte (trigger da migration 0124).
+ *  2. `fn_buscar_lastro` (0124) ancora, por slug, APENAS a maior versão não-inerte. Sem
  *     esse recorte, a versão anterior continuaria respondendo ao lado da correção — as
  *     duas ao mesmo tempo, uma delas dizendo justamente o que o curador consertou.
  *

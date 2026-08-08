@@ -4,7 +4,7 @@ import pg from "pg";
 /**
  * A semeadura acrescenta e nunca apaga — e a edição local vence (SC-018, FR-037).
  *
- * Spec 002 (RAG por operadora), fatias F2/F3, migrations 0117 e 0120.
+ * Spec 002 (RAG por operadora), fatias F2/F3, migrations 0117 e 0124.
  *
  * ═══ POR QUE ESTE ARQUIVO MEDE A RESPOSTA, E NÃO SÓ AS LINHAS ═══
  *

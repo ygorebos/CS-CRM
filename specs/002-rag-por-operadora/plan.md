@@ -260,8 +260,8 @@ supabase/
 │   ├── <ts>_0116_aviso_de_assistencia_sem_lastro.sql # F1 — só vocabulário de inbox
 │   ├── <ts>_0117_catalogo_curado_particao.sql        # F2
 │   ├── <ts>_0118_escopos_por_tenant_e_vinculo.sql    # F2 — inclui o eixo no acervo existente
-│   ├── <ts>_0119_busca_de_lastro.sql                 # F2
-│   ├── <ts>_0120_adocao_local_do_catalogo.sql        # F3
+│   ├── <ts>_0123_busca_de_lastro.sql                 # F2
+│   ├── <ts>_0124_adocao_local_do_catalogo.sql        # F3
 │   ├── <ts>_0121_divergencia_de_conteudo.sql         # F4
 │   └── <ts>_0122_rastreabilidade_validade_lacunas.sql # F5
 ├── baseline.sql                                      # apêndice idempotente por fatia
@@ -391,7 +391,7 @@ afirmação contra o repositório: **19 achados**, dos quais três derrubariam a
 
 **Os três que quebrariam de verdade**
 
-1. **A `fn_buscar_lastro` lia colunas de duas migrations à frente.** Ela nasce na 0119 (F2) e filtra
+1. **A `fn_buscar_lastro` lia colunas de duas migrations à frente.** Ela nasce na 0123 (F2) e filtra
    o acervo do tenant por `scope_id` e por `valid_until` — colunas que a 0120 (F4) criava. A função
    não criaria, ou criaria sem filtro nenhum do lado do tenant, e a F2 seria declarada pronta com
    metade do isolamento que ela existe para provar. **As colunas foram para a 0118.**

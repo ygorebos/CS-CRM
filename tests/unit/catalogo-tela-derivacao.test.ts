@@ -7,7 +7,7 @@
  * regras que o Postgres já aplica, e é a divergência entre as duas cópias que este arquivo
  * vigia — não a existência delas:
  *
- *  · `versaoVigente` tem de dar a MESMA resposta que `fn_buscar_lastro` (migration 0120),
+ *  · `versaoVigente` tem de dar a MESMA resposta que `fn_buscar_lastro` (migration 0124),
  *    que ancora, por slug, apenas a maior versão NÃO inerte. Se a tela usasse "a mais
  *    recente por data" ou "a última da lista", ela apontaria como vigente uma versão que o
  *    agente não usa — e o curador corrigiria o texto errado, com tudo verde.

@@ -7,7 +7,7 @@
  *
  * Duas das contas aqui repetem, em TypeScript, regras que o banco já aplica:
  *
- *  · `versaoVigente` repete o recorte de `fn_buscar_lastro` (migration 0120): por slug,
+ *  · `versaoVigente` repete o recorte de `fn_buscar_lastro` (migration 0124): por slug,
  *    apenas a MAIOR versão não-inerte responde. Se a tela usasse outro critério (a mais
  *    recente por data, por exemplo), ela mostraria como "valendo" uma versão que o agente
  *    não usa — e o curador corrigiria o material errado, sem nada ficar vermelho.
@@ -57,7 +57,7 @@ export interface GrupoDeMaterial {
 /**
  * A versão que o agente usa: maior `version` entre as NÃO inertes.
  *
- * Espelha `fn_buscar_lastro` (0120): `where not inert ... distinct on (slug) order by
+ * Espelha `fn_buscar_lastro` (0124): `where not inert ... distinct on (slug) order by
  * version desc`. Data de publicação não entra — o desempate é por número de versão, e uma
  * versão semeada pode chegar com `published_at` mais novo e `version` menor.
  */

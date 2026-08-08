@@ -242,12 +242,20 @@ TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMEN
 TODO(CLAUDE_MD_TESTES).
 
 ==================================================================================
-EMENDA — 2026-08-08 (terceira do dia)
+EMENDA — 2026-08-08 (trabalho em paralelo)
 
-Version change: 2.1.0 -> 2.2.0
+Version change: 2.2.0 -> 2.3.0
 Bump rationale: MINOR - orientacao nova e material numa secao existente ("Fluxo de
 Desenvolvimento e Portoes"). Nenhum principio foi adicionado, removido ou redefinido; I-XII
 seguem integros, e a contagem de gates do Constitution Check nao muda.
+
+RENUMERADA em 2026-08-08, na reconciliacao com a `main`. Esta emenda nasceu na branch da
+spec 002 como 2.1.0 -> 2.2.0, e outra frente publicou na `main`, no mesmo dia, uma 2.2.0
+DIFERENTE (reconciliacao de duas frentes: principios XIII e XIV, e Missao e Escopo reescrita
+para SaaS de instancia unica). Duas emendas legitimas cunharam o mesmo numero porque nenhuma
+enxergava a outra. A da `main` ficou com o 2.2.0 - ela ja estava publicada e e a referenciada
+pelo `CLAUDE.md`; esta passou a 2.3.0, empilhada sobre ela. Nenhum texto normativo mudou na
+renumeracao: o que a emenda determina e palavra por palavra o que foi ratificado.
 
 Secao alterada:
   - "Fluxo de Desenvolvimento e Portoes" -> subsecao nova **"Trabalho em paralelo"**, entre
@@ -266,10 +274,10 @@ dois casos, para a decisao deixar de depender de julgamento por sessao.
 Base empirica (medida nesta sessao, spec 002, fatia F2):
   - `Bind for 127.0.0.1:54329 failed: port is already allocated` - duas execucoes do portao de
     banco concorrentes colidem por porta fixa.
-  - O apendice de baseline da migration 0120 e um `create or replace` do da 0119. Invertida a
+  - O apendice de baseline da migration 0124 e um `create or replace` do da 0123. Invertida a
     ordem, a correcao desaparece EM SILENCIO, com o banco aparentemente correto.
   - A propria spec 002 teve um defeito de ORDENACAO de migration achado na analise cruzada
-    (colunas de escopo trazidas da 0120 para a 0118) - a cadeia nao tolera reordenacao.
+    (colunas de escopo trazidas de uma migration posterior para a 0118) - a cadeia nao tolera reordenacao.
 
 Plano de migracao (exigencia (c) da Governanca):
   - **Nenhum trabalho ja feito e invalidado.** A regra vale do merge em diante.
@@ -280,7 +288,7 @@ Plano de migracao (exigencia (c) da Governanca):
     orquestrador, depois da integracao.
 
 Artefatos dependentes propagados:
-  ✅ rodape deste arquivo - Version 2.2.0, Last Amended 2026-08-08
+  ✅ rodape deste arquivo - Version 2.3.0, Last Amended 2026-08-08
 
 TODO(CLAUDE_MD_PARALELO): `CLAUDE.md` nao fala de paralelismo - nao desatualiza com esta
 emenda, mas ganharia a regra do conjunto de escrita na secao de fluxo. Alinhamento de documento
@@ -290,9 +298,9 @@ TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMEN
 TODO(CLAUDE_MD_TESTES), TODO(CLAUDE_MD_CADENCIA).
 
 ==================================================================================
-EMENDA — 2026-08-08 (quarta do dia)
+EMENDA — 2026-08-08 (porta exclusiva no portao de banco)
 
-Version change: 2.2.0 -> 2.2.1
+Version change: 2.3.0 -> 2.3.1
 Bump rationale: PATCH - esclarecimento da condicao 3 de "Trabalho em paralelo", sem efeito
 semantico sobre o que a regra proibe de fato. Nenhum principio tocado.
 
@@ -304,10 +312,10 @@ producao continuam intocaveis por agente paralelo, sem excecao - esses sao unico
 
 Por que corrigir no mesmo dia: a regra na forma anterior obrigaria os agentes a entregarem teste
 escrito e nunca executado, e teste nunca executado volta quebrado. A depuracao serial de todos
-eles no fim anula exatamente o ganho que a emenda 2.2.0 existe para capturar. Corrigir a regra e
+eles no fim anula exatamente o ganho que a emenda 2.3.0 existe para capturar. Corrigir a regra e
 melhor que contorna-la - contorno vira precedente.
 
-Secoes removidas: nenhuma. Artefato dependente: rodape (Version 2.2.1).
+Secoes removidas: nenhuma. Artefato dependente: rodape (Version 2.3.1).
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES), TODO(CLAUDE_MD_CADENCIA), TODO(CLAUDE_MD_PARALELO).
@@ -811,4 +819,4 @@ aprofundamento por tipo de task, está no Princípio XII.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.2.1 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.3.1 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08

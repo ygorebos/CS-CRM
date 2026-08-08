@@ -5,14 +5,14 @@
  *
  * Até aqui isto chamava `retrieve_top_k_chunks(p_organization_id, p_kb_version_id, …)`:
  * a organização era **afirmada pelo chamador**. Passa a chamar `fn_buscar_lastro`
- * (migrations 0119 + 0120), que recebe `p_agent_id` e **consulta** a organização e o
+ * (migrations 0123 + 0124), que recebe `p_agent_id` e **consulta** a organização e o
  * acervo ativo a partir dele. É o que FR-019 exige — o isolamento deixa de depender de
  * o chamador informar corretamente o próprio tenant.
  *
  * `organizationId` continua aqui, e continua sendo o da ROW do job (fonte confiável), mas
  * só para duas coisas que não são a busca: o orçamento do `embedText` e a linha de
  * telemetria. **Ele nunca entra na chamada da função de busca** — se um dia alguém o
- * acrescentar ali, terá reaberto a porta que a migration 0119 fechou.
+ * acrescentar ali, terá reaberto a porta que a migration 0123 fechou.
  *
  * ═══ O ESCOPO (OPERADORA), E POR QUE UMA BUSCA POR ESCOPO ═══
  *

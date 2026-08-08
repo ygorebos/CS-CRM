@@ -41,8 +41,8 @@ base de asserção.
 **Sintoma** — nenhum. Em banco novo a função nem cria e a cadeia para com erro claro; em banco que
 já tem parte do schema, ela **cria filtrando só metade** e todo o resto passa verde.
 
-**Causa** — ordenação. Na spec 002, `fn_buscar_lastro` (0119) lê `ai_knowledge_sources.scope_id` e
-`ai_chunks.scope_id`, que estavam planejados para a 0120 — duas migrations à frente. O caso ruim
+**Causa** — ordenação. Na spec 002, `fn_buscar_lastro` (0123) lê `ai_knowledge_sources.scope_id` e
+`ai_chunks.scope_id`, que estavam planejados para duas migrations à frente. O caso ruim
 não é a falha: é a função criada **sem o filtro do lado do tenant**, que responde, ancora e vaza
 entre escopos com a suíte inteira verde.
 

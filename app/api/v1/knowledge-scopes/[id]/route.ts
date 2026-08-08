@@ -7,7 +7,7 @@
  * ## Esta rota É a trava 4 (FR-008)
  *
  * `knowledge_scopes.is_active` é lido ao vivo pela CTE `escopo_ativo` de
- * `fn_buscar_lastro` (migrations 0119/0120). Não há cache, índice de busca nem job entre o
+ * `fn_buscar_lastro` (migrations 0123/0124). Não há cache, índice de busca nem job entre o
  * UPDATE daqui e o comportamento do agente: desligar um escopo torna o material dele
  * inerte para ESTE tenant na próxima pergunta, e não toca no catálogo nem em nenhuma outra
  * organização. É o "imediatamente" que FR-008 exige, e o motivo de a trava viver numa

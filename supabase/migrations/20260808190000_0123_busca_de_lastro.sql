@@ -1,4 +1,4 @@
--- 0119 — `fn_buscar_lastro`: a busca que fundamenta a resposta
+-- 0123 — `fn_buscar_lastro`: a busca que fundamenta a resposta
 --
 -- Spec 002 (RAG por operadora), fatia F2. Tarefas T046, T047, T048 e T049.
 --
@@ -31,7 +31,7 @@
 -- ═══ O QUE ESTA MIGRATION AINDA NÃO FAZ ═══
 --
 -- A regra da versão inerte (FR-037) NÃO está aqui: a coluna `catalog_materials.inert`
--- nasce na 0120, junto com a adoção local. A T134 aplica a inércia por
+-- nasce na 0124, junto com a adoção local. A T134 aplica a inércia por
 -- `create or replace` desta mesma função, forward-fix, e espelha no baseline. Escrever
 -- agora uma referência a coluna inexistente faria esta migration não criar.
 
@@ -154,7 +154,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
-  'Migration 0119 (spec 002, F2): busca de lastro nas duas camadas. Tenant e acervo ativo '
+  'Migration 0123 (spec 002, F2): busca de lastro nas duas camadas. Tenant e acervo ativo '
   'derivados de p_agent_id, NUNCA recebidos do chamador (FR-019). Escopo desconhecido ou '
   'desligado devolve só material "vale para todos" — nunca busca ampla (FR-017, trava 4). '
   'Material vencido não ancora (FR-026). Precedência de camada vale dentro do mesmo balde '

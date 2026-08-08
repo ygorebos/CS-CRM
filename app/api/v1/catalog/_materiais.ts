@@ -14,7 +14,7 @@
  * Só criar `version + 1` NÃO faz a correção local vencer. A versão que chega na próxima
  * release é sempre a mais recente, e o desempate de FR-035 é por recência: a semeada
  * ganharia da correção **no comportamento**, com o banco intacto e o SC-018 verde. É
- * exatamente o defeito que a migration 0120 fecha, e o gatilho dela
+ * exatamente o defeito que a migration 0124 fecha, e o gatilho dela
  * (`fn_versao_semeada_sobre_adotado_nasce_inerte`) só dispara se ALGUMA versão daquele
  * `slug` tiver `adopted_at` preenchido.
  *
@@ -184,7 +184,7 @@ export async function inserirVersaoLocal(db: SupabaseClient, entrada: EntradaDeV
       adopted_by: entrada.actorUserId,
       // Explícito, apesar do default: quem lê esta linha precisa ver que a versão local
       // nasce ativa. Só a semeada sobre slug adotado nasce inerte, e quem decide isso é
-      // o trigger da 0120, não esta rota.
+      // o trigger da 0124, não esta rota.
       inert: false,
     })
     .select(CAMPOS_MATERIAL)

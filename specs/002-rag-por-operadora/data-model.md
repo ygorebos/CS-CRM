@@ -49,7 +49,7 @@ A unidade que quem cura reconhece e corrige. **Versionada e nunca reescrita** (t
 | `valid_until` | `date` | opcional (FR-025). Nulo = não vence |
 | `published_at` | `timestamptz not null default now()` | é a "recência" do desempate de FR-035 |
 | `origin` | `text not null check in ('seed','local')` | `seed` = veio da semeadura; `local` = escrito pelo administrador daquela instalação. Separar os dois é o que permite provar SC-018 |
-| `adopted_at` | `timestamptz` | **F3, migration 0120.** Preenchido quando o administrador da instalação edita um material `seed`: aquele `slug` passa a ser **adotado localmente** |
+| `adopted_at` | `timestamptz` | **F3, migration 0124.** Preenchido quando o administrador da instalação edita um material `seed`: aquele `slug` passa a ser **adotado localmente** |
 | `adopted_by` | `uuid references auth.users(id)` | quem adotou — a curadoria é auditada (FR-036) |
 | `inert` | `boolean not null default false` | versão que chegou por semeadura **depois** de o `slug` ser adotado. Não ancora, não desempata, fica visível para ser aceita (FR-037) |
 
@@ -130,7 +130,7 @@ Nulo em qualquer uma delas = escopo desconhecido, que é **estado tratado, não 
 
 ### `ai_knowledge_sources` — colunas novas e um índice a menos — **F2, migration 0118**
 
-> Estas colunas estavam na 0120 (F4) e **foram para a 0118**. A `fn_buscar_lastro` da 0119 as lê:
+> Estas colunas estavam na 0124 (F4) e **foram para a 0118**. A `fn_buscar_lastro` da 0123 as lê:
 > criá-las duas migrations depois faria a função não criar, ou criar sem filtro nenhum do lado do
 > tenant. Achado da revisão cruzada de 2026-08-08.
 

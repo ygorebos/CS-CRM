@@ -4,10 +4,10 @@
 -- Spec 002 (RAG por operadora), fatia F2. Tarefas T044, T132 e a parte de T045 que cabe
 -- aqui.
 --
--- ═══ POR QUE O EIXO DO ACERVO EXISTENTE ESTÁ NESTA MIGRATION, E NÃO NA 0120 ═══
+-- ═══ POR QUE O EIXO DO ACERVO EXISTENTE ESTÁ NESTA MIGRATION, E NÃO NA DA F4 ═══
 --
--- Ele estava planejado para a 0120 (fatia F4), duas migrations à frente. A revisão
--- cruzada de 2026-08-08 achou o defeito: `fn_buscar_lastro` (migration 0119, a PRÓXIMA)
+-- Ele estava planejado para a migration da fatia F4, duas à frente. A revisão
+-- cruzada de 2026-08-08 achou o defeito: `fn_buscar_lastro` (migration 0123, a PRÓXIMA)
 -- lê `ai_knowledge_sources.scope_id`, `ai_chunks.scope_id` e `applies_to_all`. Criar a
 -- função antes das colunas faria uma de duas coisas, ambas ruins — ou a função não cria
 -- (a cadeia para no meio), ou ela cria filtrando só o lado do catálogo e o acervo do
@@ -132,7 +132,7 @@ create index if not exists contacts_knowledge_scope_idx
 
 -- ── 4 · T132 · o eixo de escopo no acervo QUE JÁ EXISTE ─────────────────────
 --
--- Sem isto, `fn_buscar_lastro` (0119) filtra o catálogo por escopo e deixa o acervo do
+-- Sem isto, `fn_buscar_lastro` (0123) filtra o catálogo por escopo e deixa o acervo do
 -- corretor passar inteiro — o vazamento entre operadoras aconteceria justamente na
 -- camada que tem precedência.
 alter table public.ai_knowledge_sources

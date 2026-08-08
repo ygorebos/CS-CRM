@@ -194,16 +194,16 @@ nada, e a resposta continua vindo da **versão local**.
 - [X] T042 [US7] Criar migration `supabase/migrations/<ts>_0117_catalogo_curado_particao.sql` com `catalog_scopes`, `catalog_materials` e `catalog_chunks` conforme `data-model.md` — **sem `organization_id`**, com os checks de `applies_to_all` e o unique `(slug, version)`
 - [X] T043 [US7] Ligar RLS nas três tabelas em `supabase/migrations/<ts>_0117_catalogo_curado_particao.sql`: leitura para `authenticated`, escrita condicionada a `fn_is_platform_admin()` (trava 1)
 - [X] T044 [US7] Criar migration `supabase/migrations/<ts>_0118_escopos_por_tenant_e_vinculo.sql` com `knowledge_scopes` (tenant-aware, RLS `tenant_isolation_knowledge_scopes_all`, `is_active` **default false** para escopo espelhado do catálogo — A-20), as colunas de vínculo em `contacts` e a função idempotente `fn_sincronizar_escopos_do_catalogo(p_organization_id)`
-- [X] T132 [US7] Acrescentar **na mesma migration 0118** o eixo de escopo no acervo que já existe: `scope_id`, `applies_to_all` e `valid_until` em `ai_knowledge_sources`, `scope_id` e `applies_to_all` em `ai_chunks`, o backfill (`applies_to_all = true` nas linhas legadas) **antes** dos checks, e o `drop index if exists ai_knowledge_sources_unique_per_agent` — na migration **e** no apêndice de `supabase/baseline.sql`, porque o snapshot o recria em toda instalação nova. **Estava na 0120, duas fases depois**: a `fn_buscar_lastro` da 0119 lê essas colunas, e sem elas a função não cria — ou cria sem filtro nenhum do lado do tenant
+- [X] T132 [US7] Acrescentar **na mesma migration 0118** o eixo de escopo no acervo que já existe: `scope_id`, `applies_to_all` e `valid_until` em `ai_knowledge_sources`, `scope_id` e `applies_to_all` em `ai_chunks`, o backfill (`applies_to_all = true` nas linhas legadas) **antes** dos checks, e o `drop index if exists ai_knowledge_sources_unique_per_agent` — na migration **e** no apêndice de `supabase/baseline.sql`, porque o snapshot o recria em toda instalação nova. **Estava na 0124, duas fases depois**: a `fn_buscar_lastro` da 0123 lê essas colunas, e sem elas a função não cria — ou cria sem filtro nenhum do lado do tenant
 - [ ] T045 [US7] Revogar `execute` das **duas** origens (`public` e `anon`) de toda função nova criada em `public`, nas migrations 0118/0119 e no apêndice de `supabase/baseline.sql` — sem isso o PostgREST a expõe pela anon key
-- [X] T046 [US7] Criar migration `supabase/migrations/<ts>_0119_busca_de_lastro.sql` com `fn_buscar_lastro` conforme `contracts/busca-de-lastro.md` — tenant e acervo ativo derivados de `p_agent_id`, **nunca** recebidos do chamador
-- [X] T047 [US7] Implementar em `supabase/migrations/<ts>_0119_busca_de_lastro.sql` o filtro por escopo, o corte de escopo desativado, o corte de material vencido e a precedência de camada **dentro do mesmo balde** (research D7, brecha 8)
-- [X] T048 [US7] Revogar `fn_buscar_lastro` de `public`, `anon` e `authenticated` em `supabase/migrations/<ts>_0119_busca_de_lastro.sql`, concedendo só a `service_role`
+- [X] T046 [US7] Criar migration `supabase/migrations/<ts>_0123_busca_de_lastro.sql` com `fn_buscar_lastro` conforme `contracts/busca-de-lastro.md` — tenant e acervo ativo derivados de `p_agent_id`, **nunca** recebidos do chamador
+- [X] T047 [US7] Implementar em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` o filtro por escopo, o corte de escopo desativado, o corte de material vencido e a precedência de camada **dentro do mesmo balde** (research D7, brecha 8)
+- [X] T048 [US7] Revogar `fn_buscar_lastro` de `public`, `anon` e `authenticated` em `supabase/migrations/<ts>_0123_busca_de_lastro.sql`, concedendo só a `service_role`
 - [X] T049 [US7] **Forward-fix**: revogar `authenticated` de `retrieve_top_k_chunks` no apêndice de `supabase/baseline.sql` — verificado que nenhum chamador autenticado existe (worker e MCP usam admin client; o agent-engine usa Pool `pg`)
 - [X] T050 [US7] Espelhar as três migrations no apêndice idempotente de `supabase/baseline.sql`, em blocos rotulados `-- ---- <coisa> (migration NNNN) ----`
-- [X] T133 [US7] Criar migration `supabase/migrations/<ts>_0120_adocao_local_do_catalogo.sql` com o estado **adotado localmente** por material (`adopted_at`, `adopted_by`) e a regra de inércia: versão semeada que chega sobre material adotado nasce inerte e não ancora até ser aceita (FR-037, decisão de 2026-08-08). Espelhar no apêndice de `supabase/baseline.sql`
-- [X] T134 [US7] Aplicar a inércia dentro de `fn_buscar_lastro`, em `supabase/migrations/<ts>_0120_adocao_local_do_catalogo.sql` (forward-fix por `create or replace`, espelhado no apêndice de `supabase/baseline.sql`): versão inerte **não entra** no conjunto, e o desempate por recência não a considera — sem isso o release apaga a correção local no comportamento enquanto o banco fica intacto, e SC-018 passa medindo linha em vez de resposta
-- [X] T051 [US7] Registrar 0117, 0118, 0119 e 0120 em `supabase/migrations/MANIFEST.md`
+- [X] T133 [US7] Criar migration `supabase/migrations/<ts>_0124_adocao_local_do_catalogo.sql` com o estado **adotado localmente** por material (`adopted_at`, `adopted_by`) e a regra de inércia: versão semeada que chega sobre material adotado nasce inerte e não ancora até ser aceita (FR-037, decisão de 2026-08-08). Espelhar no apêndice de `supabase/baseline.sql`
+- [X] T134 [US7] Aplicar a inércia dentro de `fn_buscar_lastro`, em `supabase/migrations/<ts>_0124_adocao_local_do_catalogo.sql` (forward-fix por `create or replace`, espelhado no apêndice de `supabase/baseline.sql`): versão inerte **não entra** no conjunto, e o desempate por recência não a considera — sem isso o release apaga a correção local no comportamento enquanto o banco fica intacto, e SC-018 passa medindo linha em vez de resposta
+- [X] T051 [US7] Registrar 0117, 0118, 0123 e 0124 em `supabase/migrations/MANIFEST.md`
 - [X] T052 [US7] Regenerar `lib/database.types.ts`
 
 ### Implementation — semeadura (F2)
@@ -240,7 +240,7 @@ nada, e a resposta continua vindo da **versão local**.
 
 - [ ] T071 [US7] **Registrar a linha de base de SC-006 ANTES da semeadura** (rodar entre T052 e T053), com **1 escopo** carregado à mão: bateria de perguntas, p95 do tempo até a resposta, em `.superpowers/evidence/`. Depois de T053–T055 o catálogo já traz vários escopos e esse número deixa de existir — medir "com 1 escopo" no fim da fase seria inventá-lo
 - [X] T072 [US7] Provar install + update + update-de-novo num Postgres descartável (`pgvector/pgvector:pg17`), conforme `contracts/semeadura-do-catalogo.md`
-- [X] T073 [US7] **Sabotar e confirmar**: quebrar o filtro de escopo em `supabase/migrations/<ts>_0119_busca_de_lastro.sql` e verificar que `tests/invariants/busca-escopo-nao-vaza.test.ts` fica vermelho; reverter
+- [X] T073 [US7] **Sabotar e confirmar**: quebrar o filtro de escopo em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/busca-escopo-nao-vaza.test.ts` fica vermelho; reverter
 - [ ] T074 [US7] Rodar a sequência completa de gates e registrar evidência visual da jornada de instalação fresca em `.superpowers/evidence/` — **a regressão dela não é protegida por nenhum job**
 
 **Checkpoint**: a instalação nasce sabendo, e o que curamos chega ao clone sem apagar nada dele.
@@ -278,7 +278,7 @@ sobrescrever um assunto de um escopo do catálogo prova as duas camadas e a prec
 - [ ] T090 [US1] Substituir os 4 slots fixos por lista de N materiais por escopo em `app/app/ai/knowledge/sources/_client.tsx` (hoje `:22` e `:56-68`), com estado inequívoco por material e contagem de trechos (FR-005)
 - [ ] T091 [US1] Exibir em `app/app/ai/knowledge/scopes/_client.tsx` quais escopos vieram do catálogo e quais são próprios, com os dois caminhos disponíveis ao corretor: desativar para si ou sobrepor com material próprio
 - [ ] T092 [US1] Exigir papel de gestor ou superior e emitir `api_audit_log` em todas as mutações de `app/api/v1/knowledge-scopes/` (FR-032)
-- [ ] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0119_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
+- [ ] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
 - [ ] T094 [US1] Cronometrar SC-003 (primeiro material próprio, do login ao primeiro trecho buscável, ≤5 min) e registrar evidência em `.superpowers/evidence/`
 
 **Checkpoint**: o corretor manda no que vale para ele.
@@ -428,12 +428,12 @@ com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 | 0116 | F1 | vocabulário de `agent_inbox_items` |
 | 0117 | F2 | partição do catálogo (`catalog_*`) |
 | 0118 | F2 | `knowledge_scopes`, vínculo em `contacts` **e o eixo de escopo/validade no acervo que já existe** + backfill + `drop index` |
-| 0119 | F2 | `fn_buscar_lastro` |
-| 0120 | F3 | adoção local do catálogo e inércia da versão semeada |
+| 0123 | F2 | `fn_buscar_lastro` |
+| 0124 | F3 | adoção local do catálogo e inércia da versão semeada |
 | 0121 | F4 | registro de divergência de conteúdo |
 | 0122 | F5 | rastreabilidade, validade e lacunas |
 
-As colunas de escopo saíram da 0120 e foram para a **0118**: a `fn_buscar_lastro` da 0119 as lê, e
+As colunas de escopo saíram da 0124 e foram para a **0118**: a `fn_buscar_lastro` da 0123 as lê, e
 duas fases depois é tarde — a função não criaria, ou criaria sem filtro nenhum do lado do tenant.
 
 ### Parallel Opportunities
@@ -473,7 +473,7 @@ Análise dos três artefatos juntos depois de `tasks.md` pronto: **19 achados**,
 derrubar a execução. O que mudou aqui:
 
 - **A `fn_buscar_lastro` lia colunas que só existiam duas fases depois.** As colunas de escopo e
-  validade do acervo existente foram da 0120 para a **0118** (T132). Era o defeito que quebraria na
+  validade do acervo existente foram da 0124 para a **0118** (T132). Era o defeito que quebraria na
   primeira aplicação de migration.
 - **A instalação fresca não recusaria nada.** O gate nasce desarmado (T022) e nada armava o agente
   padrão — `createDefaultAgent.ts` não grava guardrail nenhum hoje. **T130** conserta; sem ela

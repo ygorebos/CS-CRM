@@ -109,7 +109,7 @@ describe('T059 · o isolamento não depende do chamador (FR-019)', () => {
     const params = buscas[0]?.[1] as unknown[];
     expect(params[0]).toBe(AGENTE);
     // A prova NEGATIVA é a que importa: se alguém reintroduzir o org como argumento da
-    // busca, a porta que a migration 0119 fechou volta a existir e nada mais reclama.
+    // busca, a porta que a migration 0123 fechou volta a existir e nada mais reclama.
     expect(params).not.toContain(ORG);
     expect(String(buscas[0]?.[0])).not.toContain('retrieve_top_k_chunks');
   });

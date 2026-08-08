@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import pg from "pg";
 
 /**
- * `fn_buscar_lastro` (migration 0119) — o que ela NUNCA pode devolver.
+ * `fn_buscar_lastro` (migration 0123) — o que ela NUNCA pode devolver.
  *
  * Spec 002 (RAG por operadora), fatia F2. Cobre SC-005 (não-vazamento entre escopos),
  * SC-007 (isolamento entre corretores), FR-016, FR-017, FR-026 e a precedência de camada

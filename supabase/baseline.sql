@@ -9702,7 +9702,7 @@ grant  execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) to se
 notify pgrst, 'reload schema';
 
 
--- ---- busca de lastro nas duas camadas (migration 0119) ----
+-- ---- busca de lastro nas duas camadas (migration 0123) ----
 --
 -- Tenant e acervo ativo derivados de `p_agent_id`, NUNCA recebidos do chamador (FR-019):
 -- a organização é CONSULTADA a partir do agente, não AFIRMADA por quem chama.
@@ -9716,7 +9716,7 @@ notify pgrst, 'reload schema';
 -- desastre silencioso: um texto do corretor sobre o horário de atendimento dele passaria
 -- o limiar e apagaria o procedimento de boleto da operadora.
 --
--- A regra da versão inerte (FR-037) entra na 0120, por `create or replace` — a coluna
+-- A regra da versão inerte (FR-037) entra na 0124, por `create or replace` — a coluna
 -- `catalog_materials.inert` ainda não existe neste ponto.
 
 create or replace function public.fn_buscar_lastro(
@@ -9823,7 +9823,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
-  'Migration 0119 (spec 002, F2): busca de lastro nas duas camadas. Tenant e acervo ativo '
+  'Migration 0123 (spec 002, F2): busca de lastro nas duas camadas. Tenant e acervo ativo '
   'derivados de p_agent_id, NUNCA recebidos do chamador (FR-019). Escopo desconhecido ou '
   'desligado devolve só material "vale para todos" — nunca busca ampla (FR-017, trava 4). '
   'Material vencido não ancora (FR-026). Precedência de camada vale dentro do mesmo balde '
@@ -9842,7 +9842,7 @@ revoke execute on function public.retrieve_top_k_chunks(uuid, uuid, public.vecto
 notify pgrst, 'reload schema';
 
 
--- ---- adoção local do catálogo e inércia da versão semeada (migration 0120) ----
+-- ---- adoção local do catálogo e inércia da versão semeada (migration 0124) ----
 --
 -- Fecha um defeito em que duas frases verdadeiras do desenho, juntas, produziam o
 -- oposto de FR-037: "a semeadura só ACRESCENTA versão" (trava 6) mais "o desempate é
@@ -9850,7 +9850,7 @@ notify pgrst, 'reload schema';
 -- recente, vence a correção local NO COMPORTAMENTO enquanto o banco fica intacto.
 -- SC-018 passaria contando linhas e o requisito falharia respondendo.
 --
--- Este bloco roda DEPOIS do bloco da 0119 e substitui a fn_buscar_lastro por
+-- Este bloco roda DEPOIS do bloco da 0123 e substitui a fn_buscar_lastro por
 -- create or replace — forward-fix, no padrão do repositório. Duas mudanças no lado do
 -- catálogo: versão inerte não entra, e por slug ancora só a MAIOR versão não-inerte.
 -- A segunda não estava na tarefa e faltava: sem ela a versão seed ANTERIOR continuava
@@ -9902,16 +9902,16 @@ create trigger trg_catalog_materials_inercia
   for each row execute function public.fn_versao_semeada_sobre_adotado_nasce_inerte();
 
 comment on column public.catalog_materials.inert is
-  'Migration 0120 (spec 002, F3): versão semeada que chegou depois de o slug ser adotado '
+  'Migration 0124 (spec 002, F3): versão semeada que chegou depois de o slug ser adotado '
   'localmente. Não ancora e não desempata (FR-037); fica visível para ser aceita.';
 
 comment on column public.catalog_materials.adopted_at is
-  'Migration 0120: marca o slug como adotado por esta instalação. Gravado na versão local '
+  'Migration 0124: marca o slug como adotado por esta instalação. Gravado na versão local '
   'criada pela edição. Estado por material, nunca chave global (A-21).';
 
 -- ── T134 · forward-fix da busca ─────────────────────────────────────────────
 --
--- `create or replace` da 0119. Duas mudanças, ambas no lado do catálogo:
+-- `create or replace` da 0123. Duas mudanças, ambas no lado do catálogo:
 --   · versão inerte não entra no conjunto;
 --   · por `slug`, só a MAIOR versão não-inerte ancora.
 create or replace function public.fn_buscar_lastro(
@@ -10026,7 +10026,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
-  'Migrations 0119 + 0120 (spec 002): busca de lastro nas duas camadas. Tenant e acervo '
+  'Migrations 0123 + 0124 (spec 002): busca de lastro nas duas camadas. Tenant e acervo '
   'derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou desligado '
   'devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora (FR-026). '
   'Precedência de camada dentro do balde (research D7). No catálogo, por slug ancora só a '
