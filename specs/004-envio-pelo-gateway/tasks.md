@@ -223,14 +223,35 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
     caso `meta_cloud` passou a exercitar `resolveMetaCreds` de verdade (o dublê do admin ganhou
     `.from`).
   - Verde: `pnpm test:unit` 3096/3096, `pnpm test:db` 555/555, typecheck e `lint-channels` zerados.
-- [ ] **T036** Tratar a resposta do gateway como **aceite provisório**: estado definitivo só pela
+- [X] **T036** ✅ Resposta do gateway tratada como **aceite provisório**: estado definitivo só pela
       confirmação assíncrona. **(FR-021)**
+  - O handler grava `sent` + `ack: 0` — "recebi", não "chegou". Quem promove para `delivered`/`read`
+    é `fn_gateway_update_message_status`, com a guarda de não-regressão de estado (Fase 1). O
+    `external_id` do aceite é gravado no mesmo update **porque é por ele que a confirmação
+    assíncrona acha a linha depois** — sem id, o estado definitivo nunca chega.
+  - Prova: `tests/unit/messages-handler-desfechos.test.ts` caso `T036/FR-021`. Sabotagem
+    (`status: 'delivered', ack: 2` na resposta síncrona): 6 casos reprovam, inclusive este.
 - [ ] **T037** Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário
       (`agent_inbox_items`). Silêncio é proibido. **(FR-023, Princípio XIV)**
-- [ ] **T038** Mídia entregue por referência de endereço, com validade **≥ 1 h** — cobre a
+- [X] **T038** ✅ Mídia entregue por referência de endereço, com validade **≥ 1 h** — cobre a
       retentativa do gateway mais a busca do provedor, com margem para reinício. **(FR-024)**
-- [ ] **T039** Envio para grupo continua impedido pelo caminho novo, com o mesmo desfecho de hoje —
+  - **Defeito medido:** o handler assinava a URL por **600 s**. Dez minutos cobrem o canal que baixa
+    na hora e mais nada — com o gateway no caminho a mensagem pode esperar na fila em disco. A
+    referência vencia antes da busca do provedor e virava anexo que não abre no celular do cliente,
+    com o CRM achando que o envio deu certo. Agora `MEDIA_SIGNED_URL_TTL_S = 60 * 60`, exportada e
+    documentada como piso.
+  - Prova: caso `T038/FR-024` afirma `>= 3600`. Sabotagem (voltar a 600): reprova.
+- [X] **T039** ✅ Envio para grupo continua impedido pelo caminho novo, com o mesmo desfecho de hoje —
       e não vira erro obscuro. **(FR-025)**
+  - O desfecho é o MESMO (`failed`, nada sai); o que muda é o motivo. O ramo `!chatId` do handler
+    gravava `missing_phone_number` para as duas causas — e numa conversa de grupo isso é mentira: o
+    grupo não tem telefone e nunca vai ter, e quem lia ia procurar um cadastro para consertar. Agora
+    grupo sai como `group_send_unsupported` com mensagem legível. **Conserta também o canal
+    oficial**, que já devolvia `null` para grupo e herdava o mesmo erro obscuro.
+  - **Par de casos, de propósito:** o segundo prova que o canal que SABE endereçar grupo continua
+    enviando. Sem ele, "impedir grupo" poderia ter virado proibição geral e uma capacidade existente
+    morreria sem ninguém notar.
+  - Prova: casos `T039/FR-025` e o par. Sabotagem (voltar o `error_code` fixo): reprova.
 
 ---
 

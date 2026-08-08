@@ -19,6 +19,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { sendMessageHandler } from '@/app/api/v1/messages/_handler';
 import type { HandlerCtx } from '@/lib/api/handlers/types';
 import type { SendMessageInput } from '@/lib/schemas';
+// O adapter do gateway lê a config a cada chamada, do singleton de `lib/env` —
+// `vi.stubEnv` não o alcança. Mutar o objeto é o caminho; restaurado no afterEach.
+import { env as envDoApp } from '@/lib/env';
 
 const ORG = '11111111-1111-4111-8111-111111111111';
 const CONV = '22222222-2222-4222-8222-222222222222';
@@ -538,5 +541,140 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
 
     expect(msg.status).toBe('sent');
     expect(msg.external_id).toBe('TEXT9');
+  });
+});
+
+/**
+ * Spec 004 — os desfechos do envio PELO GATEWAY (T036, T038, T039).
+ *
+ * Mesma rede da de cima, mesmo handler; o que muda é o canal da sessão. Os três
+ * casos aqui são requisitos que só têm sentido com o gateway no caminho — e o de
+ * grupo conserta, de quebra, uma mentira que o canal oficial já contava.
+ */
+describe('sendMessageHandler — envio pelo gateway (spec 004)', () => {
+  const baseUrlOriginal = envDoApp.GATEWAY_BASE_URL;
+  const tokenOriginal = envDoApp.GATEWAY_INTERNAL_TOKEN;
+
+  function gatewayConfigurado() {
+    // `lib/env` é singleton parseado no import — `vi.stubEnv` não o alcança.
+    envDoApp.GATEWAY_BASE_URL = 'https://gw.exemplo';
+    envDoApp.GATEWAY_INTERNAL_TOKEN = 'tok-interno';
+  }
+
+  afterEach(() => {
+    envDoApp.GATEWAY_BASE_URL = baseUrlOriginal;
+    envDoApp.GATEWAY_INTERNAL_TOKEN = tokenOriginal;
+  });
+
+  it('T036/FR-021. a resposta do gateway é ACEITE PROVISÓRIO: sent com ack 0, nunca delivered', async () => {
+    gatewayConfigurado();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ message_id: 'wamid.GW' }),
+      text: async () => '{}',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const msg = await sendMessageHandler(
+      makeSupabase(conversationRow({ provider: 'whatsapp_uazapi' })),
+      ctx,
+      textInput(),
+    );
+
+    const linha = msg as unknown as { status: string; ack: number; external_id: string };
+    // `sent` + `ack: 0` É o aceite provisório: o gateway disse "recebi", não
+    // "chegou". Quem promove para delivered/read é a confirmação assíncrona
+    // (`fn_gateway_update_message_status`), com a guarda de não-regressão de
+    // estado. Gravar delivered aqui mostraria dois tiques para uma mensagem que
+    // ainda pode falhar no provedor.
+    expect(linha.status).toBe('sent');
+    expect(linha.ack).toBe(0);
+    expect(linha.status).not.toBe('delivered');
+    expect(linha.status).not.toBe('read');
+    // O id do aceite tem de ser guardado: é por ele que a confirmação assíncrona
+    // acha esta linha depois. Sem ele o estado definitivo nunca chega.
+    expect(linha.external_id).toBe('wamid.GW');
+  });
+
+  it('T038/FR-024. a referência de mídia vale ao menos 1 hora', async () => {
+    gatewayConfigurado();
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ message_id: 'wamid.GWM' }),
+      text: async () => '{}',
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    await sendMessageHandler(
+      makeSupabase(conversationRow({ provider: 'whatsapp_uazapi' })),
+      ctx,
+      textInput({
+        type: 'image',
+        body: undefined,
+        media_storage_path: `${ORG}/${CONV}/a.jpg`,
+        media_mime: 'image/jpeg',
+      }),
+    );
+
+    const ttl = (signedUrl.mock.calls[0] as unknown as [string, number])[1];
+    expect(
+      ttl,
+      'A referência era assinada por 600 s. Com o gateway no caminho a mensagem pode\n' +
+        'esperar na fila em disco antes de o provedor buscar o arquivo — referência\n' +
+        'vencida vira anexo que não abre, e o CRM acha que o envio deu certo (FR-024).',
+    ).toBeGreaterThanOrEqual(3600);
+  });
+
+  it('T039/FR-025. grupo segue impedido, e o motivo deixa de ser "sem telefone"', async () => {
+    gatewayConfigurado();
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const msg = await sendMessageHandler(
+      makeSupabase(
+        conversationRow({
+          provider: 'whatsapp_uazapi',
+          isGroup: true,
+          groupChatId: '120363000000000000@g.us',
+        }),
+      ),
+      ctx,
+      textInput(),
+    );
+
+    const linha = msg as unknown as { status: string; error_code: string; error_message: string };
+    // Desfecho IGUAL ao de hoje — `failed`, nada sai. Só o motivo mudou: um
+    // grupo não tem telefone e nunca vai ter, e "contato sem telefone" mandava
+    // quem lê procurar um cadastro para consertar.
+    expect(linha.status).toBe('failed');
+    expect(linha.error_code).toBe('group_send_unsupported');
+    expect(linha.error_message).toMatch(/grupo/i);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('T039. o canal que ENDEREÇA grupo continua enviando — o desfecho de hoje não mudou', async () => {
+    // O par do caso acima. Sem ele, "impedir grupo" poderia ter virado uma
+    // proibição geral, e o WAHA — que resolve `group_chat_id` e envia — perderia
+    // uma capacidade que tem hoje.
+    wahaConfigured(true);
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      json: async () => ({ id: { id: '3EB0GRUPO' } }),
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const msg = await sendMessageHandler(
+      makeSupabase(
+        conversationRow({ isGroup: true, groupChatId: '120363000000000000@g.us' }),
+      ),
+      ctx,
+      textInput(),
+    );
+
+    expect((msg as unknown as { status: string }).status).toBe('sent');
+    expect(fetchMock).toHaveBeenCalled();
   });
 });
