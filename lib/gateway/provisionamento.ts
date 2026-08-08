@@ -64,6 +64,44 @@ export function estadoConhecido(cru: unknown): EstadoDaConexao {
     : "failed";
 }
 
+/**
+ * Vocabulário da COLUNA `channel_sessions.status`, que é o que a tela lê
+ * (CHECK `channel_sessions_status_check` no `baseline.sql`).
+ */
+export type StatusDeCanal = "STARTING" | "SCAN_QR_CODE" | "WORKING" | "STOPPED" | "FAILED";
+
+/**
+ * Traduz o estado normalizado do gateway para o vocabulário da tela
+ * (spec 004, T042 / FR-032).
+ *
+ * A tradução existe porque as duas pontas nomeiam a mesma coisa de formas
+ * diferentes e **nenhuma das duas pode ceder**: o gateway normaliza N provedores
+ * num vocabulário só (é o motivo de ele normalizar, e não o CRM), e a coluna tem
+ * CHECK com o vocabulário que toda a tela, todo o envio e todos os invariantes já
+ * usam. Mudar a coluna seria migração destrutiva num banco único para renomear
+ * estado; mudar o gateway espalharia o vocabulário do CRM por N provedores.
+ *
+ * `connecting` e `created` caem no MESMO `STARTING` de propósito: a tela não tem
+ * o que mostrar de diferente entre "registro criado" e "subindo" — nos dois o
+ * corretor espera, e inventar um estado a mais só para preservar a distinção
+ * daria a ele uma tela que muda sem que nada tenha mudado para ele.
+ */
+export function statusDeCanalPara(estado: EstadoDaConexao): StatusDeCanal {
+  switch (estado) {
+    case "awaiting_scan":
+      return "SCAN_QR_CODE";
+    case "connected":
+      return "WORKING";
+    case "disconnected":
+      return "STOPPED";
+    case "failed":
+      return "FAILED";
+    case "created":
+    case "connecting":
+      return "STARTING";
+  }
+}
+
 export interface ConexaoProvisionada {
   connectionId: string;
   platform: string;

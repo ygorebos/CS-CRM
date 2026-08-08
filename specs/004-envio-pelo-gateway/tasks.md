@@ -299,8 +299,21 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
 - [ ] **T041** Tela detecta sozinha que conectou — sem recarregar, sem confirmar à mão. Consome
       `expires_at` para pedir material novo **quando expira**, em vez de refazer a imagem a cada
       15 s no escuro. **(FR-031)**
-- [ ] **T042** Traduzir os estados do gateway para o vocabulário da tela; estado desconhecido cai em
-      estado seguro e legível — **nunca tela vazia**. **(FR-032)**
+- [X] **T042** ✅ Traduzir os estados do gateway para o vocabulário da tela; estado desconhecido cai
+      em estado seguro e legível — **nunca tela vazia**. **(FR-032)**
+  - Duas funções, e as duas em `lib/gateway/provisionamento.ts`: `estadoConhecido()` (cru → um dos
+    seis do contrato §5.1; qualquer outra coisa vira `failed`, com o cru preservado em
+    `provider_status` para o diagnóstico) e `statusDeCanalPara()` (os seis → o vocabulário da COLUNA
+    `channel_sessions.status`, que é o que a tela, o envio e os invariantes já leem).
+  - **Por que traduzir, em vez de alinhar as pontas:** nenhuma das duas pode ceder. O gateway
+    normaliza N provedores num vocabulário só — é exatamente o motivo de a normalização ser dele e
+    não nossa; e a coluna tem CHECK, então mudá-la seria migração destrutiva num banco único só para
+    renomear estado.
+  - `created` e `connecting` caem no MESMO `STARTING`: a tela não tem o que mostrar de diferente
+    entre "registro criado" e "subindo" — nos dois o corretor espera. Inventar um estado a mais daria
+    a ele uma tela que muda sem que nada tenha mudado.
+  - Prova: casos `T042` e "estado desconhecido cai em failed" em `tests/unit/conexao-tudo-ou-nada.test.ts`.
+  - **Falta a metade de TELA** (mostrar o estado traduzido na Central), que anda junto com T040/T041.
 - [X] **T043** ✅ Criar canal tudo-ou-nada: provisionamento falhando não deixa linha órfã no CRM nem
       instância órfã no provedor. **O CRM é o dono da compensação** (T003). **(FR-033, FR-012)**
   - **Cliente do contrato:** `lib/gateway/provisionamento.ts` — as cinco rotas do

@@ -43,6 +43,7 @@ import {
   ErroDoGateway,
   estadoConhecido,
   provisionamentoConfigurado,
+  statusDeCanalPara,
 } from "@/lib/gateway/provisionamento";
 
 const fetchMock = vi.fn();
@@ -166,6 +167,29 @@ describe("vocabulário de estado (FR-032)", () => {
     ] as const) {
       expect(estadoConhecido(e)).toBe(e);
     }
+  });
+
+  it("T042. cada estado do gateway vira um estado que a tela sabe mostrar", () => {
+    // A coluna `channel_sessions.status` tem CHECK com o vocabulário que a tela,
+    // o envio e os invariantes já usam. Estado que não traduz viraria linha
+    // recusada pelo banco — ou, pior, tela sem estado nenhum.
+    const naColuna = ["STARTING", "SCAN_QR_CODE", "WORKING", "STOPPED", "FAILED"];
+    for (const e of [
+      "created",
+      "awaiting_scan",
+      "connecting",
+      "connected",
+      "disconnected",
+      "failed",
+    ] as const) {
+      expect(naColuna).toContain(statusDeCanalPara(e));
+    }
+    // Os que decidem o que o corretor vê e faz agora.
+    expect(statusDeCanalPara("awaiting_scan")).toBe("SCAN_QR_CODE");
+    expect(statusDeCanalPara("connected")).toBe("WORKING");
+    // Desconhecido chega aqui já como `failed` — e vira FAILED, que a tela
+    // mostra com motivo, em vez de um estado em branco.
+    expect(statusDeCanalPara(estadoConhecido("nunca_visto"))).toBe("FAILED");
   });
 
   it("estado desconhecido cai em failed — nunca em tela vazia", () => {
