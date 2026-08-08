@@ -45,8 +45,10 @@ estado das três frentes num só lugar, atravessando as duas specs.
 > 2. **A entrada da spec 001 fica sem uso no caminho do gateway** (rota assinada, ACK-primeiro,
 >    `webhook_events_log` como fila). O que esta spec herda de 001 encolhe para o **envelope de
 >    saída**, o `ingest_path` e o `gateway_connection_id`.
-> 3. **A doutrina passa a conflitar** — `CLAUDE.md` ("o gateway NUNCA escreve no banco do CRM") e
->    Princípio VII. Emendar é ato separado, ainda **não feito**.
+> 3. **A doutrina foi emendada** — constituição **v2.3.0** (2026-08-08) nomeou a **quarta
+>    superfície** (função `security definer` versionada) e a cercou com seis travas; `CLAUDE.md` e
+>    `AGENTS.md` propagados. ⚠️ **A permissão é condicional**: sem T011 (invariante que reprova
+>    grant de tabela) e T016 (sem HTTP na função), a superfície volta a ser proibida.
 
 ---
 

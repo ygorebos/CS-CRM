@@ -117,15 +117,25 @@ o que muda de dono:
 |---|---|---|
 | Entrada da mensagem | `POST /api/v1/webhooks/gateway/[token]`, HMAC, ACK-primeiro | função `security definer` chamada pelo gateway |
 | Idempotência | `unique (organization_id, external_id)` + catch de 23505 em TypeScript | **mesma constraint**, catch em SQL — e exige `set constraints ... immediate`, porque a constraint é `DEFERRABLE` e o `on conflict` **não funciona** contra ela (medido) |
-| Fila durável | duas: disco do gateway **e** `webhook_events_log` | **uma**: só o disco do gateway. Vira item de primeira classe |
+| Fila durável | duas: disco do gateway **e** `webhook_events_log` | **duas ainda** — a do CRM muda de FORMA, não some: fila de entrada vira **reconciliação periódica** (FR-013a). Uma ponta só é descumprimento do XIV, não escolha de custo |
 | Acordar o agente | `lib/gateway/ingest.ts:253` emite `ai_agent.dispatch_requested` | dentro da mesma função/transação do insert — mais seguro que hoje |
 | Tenant | resolvido do `webhook_path_token` da rota | resolvido de `channel_sessions.gateway_connection_id`. **Nunca do corpo**, nos dois |
 | Credencial do gateway | segredo HMAC por conexão | papel Postgres `gateway_writer`, `EXECUTE` só nas funções, zero grant de tabela |
 
-**A doutrina passa a conflitar** (`CLAUDE.md` "o gateway NUNCA escreve no banco do CRM", anti-pattern
-15, Princípio VII). Emendar é ato separado e ainda **não foi feito** — ver §7 da decisão, que também
-argumenta por que o caso é de **redação nova**, não de revogação: a intenção do princípio (tenant
-não vem do corpo; schema não vaza para o gateway) sobrevive ao desenho proposto.
+**A doutrina foi emendada** — constituição **v2.3.0**, em 2026-08-08. O Princípio VII passou de três
+para **quatro superfícies**: a nova é a **função `security definer` versionada**, e a proibição que
+sobrevive ficou mais precisa que a antiga — "acesso direto ao **banco**" virou "acesso direto **a
+tabela**", que é o que de fato acopla ao schema. A superfície existe **só sob seis travas** (zero
+grant de tabela nem `select` · papel dedicado, nunca `service_role` nem o segredo do JWT · tenant
+resolvido dentro do banco · assinatura versionada · invariante em CI · sem HTTP na função), e falhar
+em qualquer uma a torna proibida, não degradada. Ela **não** se estende ao Cotador. O XIV também foi
+esclarecido: a ponta de durabilidade do CRM muda de **forma** (fila com dreno / reconciliação
+periódica), nunca de obrigatoriedade. `CLAUDE.md` e `AGENTS.md` propagados na mesma data.
+
+⚠️ **A permissão é condicional, e isso importa na revisão de PR**: enquanto o invariante que reprova
+grant de tabela e a varredura de HTTP na função não estiverem verdes, a conformidade é promessa. Se
+a função existir e o invariante não, **reprove o PR** — a emenda permitiu a superfície *sob
+condição*, e sem a condição ela é proibida.
 
 ### A inversão de doutrina, registrada de propósito
 

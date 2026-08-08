@@ -9,7 +9,7 @@
 - [`docs/current-state.md`](docs/current-state.md) — o que está pronto, incompleto e quebrado. **Leia antes de estimar ou prometer qualquer coisa.**
 - [`docs/harness-audit.md`](docs/harness-audit.md) — onde a verificação tem buraco. Importante: `pnpm gov:verify` **não** cobre `test:db` nem `test:e2e` — verde ali não é prova para mudança de schema ou de UI.
 - [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real da instância.
-- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.2.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
+- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.3.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
 
 ---
 
@@ -84,9 +84,10 @@ DeskcommCRM é um sistema operacional de vendas com agentes de IA nativos — ni
 ### Gateway (`gateway_go`) — porta de entrada de TODO tráfego
 - É o **receptor geral**: mensagens de todos os canais (WhatsApp oficial e não-oficial, Instagram Direct, o que vier) e demais webhooks. Recebe, autentica a origem, **normaliza para um envelope único** e entrega ao CRM
 - **Código novo do CRM NÃO lê payload cru de provedor** — nem WAHA, nem uazapi, nem Meta. Só envelope
-- **O gateway NUNCA escreve no banco do CRM.** Quem persiste é o CRM, com `organization_id` resolvido de fonte confiável (path token / segredo), nunca do corpo
+- **O gateway NUNCA toca tabela do CRM.** Escrever tabela crua a partir dele é proibido, sem exceção. O que a constituição **v2.3.0** passou a permitir é a **quarta superfície**: função `security definer` versionada, e só sob as seis travas do Princípio VII — (1) zero grant de tabela, nem `select`; (2) papel Postgres dedicado, **nunca** `service_role` nem segredo capaz de emitir outro papel; (3) `organization_id` resolvida **dentro do banco**, a partir da conexão pela qual a mensagem chegou — **nunca** de parâmetro nem do corpo; (4) assinatura versionada como contrato; (5) invariante em CI que reprova se o papel ganhar privilégio de tabela; (6) sem HTTP dentro da função. Falhar em **qualquer** uma torna a superfície proibida, não degradada. Desenho: [`specs/004-envio-pelo-gateway/decisao-escrita-direta.md`](specs/004-envio-pelo-gateway/decisao-escrita-direta.md)
+- **A quarta superfície é só do gateway.** Ela **não** se estende ao Cotador — a ponte com ele é contrato HTTP explícito, nada além
 - **Instância única, compartilhada, sem réplica, deploy separado.** Sem `localhost`, sem nome de serviço de compose — endereço é configuração. Não entra no `docker-compose.prod.yml` do CRM
-- **Sem réplica = SPOF declarado:** mensagem tem de sobreviver ao gateway reiniciar — retentativa durável + fila em disco do lado dele, dreno periódico do lado do CRM. Queda vira alerta pra nós **e** aviso na Central pro usuário; silêncio é proibido
+- **Sem réplica = SPOF declarado:** mensagem tem de sobreviver ao gateway reiniciar. **As duas pontas são obrigatórias**, e a do CRM muda de forma conforme o caminho: entrega por HTTP → fila de entrada com dreno periódico; escrita pela quarta superfície → **reconciliação periódica** (o CRM pergunta ao gateway o que foi entregue numa janela e grava o que faltar, idempotente). Divergência vira **alerta** — reconciliar em silêncio é proibido. **Uma ponta só é descumprimento, não escolha de custo:** a que empurra só protege contra o CRM estar fora do ar; a que puxa é a única que enxerga mensagem que nunca chegou a existir aqui. Queda vira alerta pra nós **e** aviso na Central pro usuário
 - Teto de taxa **por conexão**, nunca global nem por IP (todas as entregas vêm do mesmo endereço)
 
 ### Cobrança — não mora aqui
@@ -147,6 +148,9 @@ DeskcommCRM é um sistema operacional de vendas com agentes de IA nativos — ni
 13. Bearer plaintext armazenado no DB (deve ser hash SHA256)
 14. `console.log` deixado em código merged (use logger estruturado ou Sentry breadcrumb)
 15. Código novo do CRM lendo **payload cru de provedor** (WAHA/uazapi/Meta) em vez do envelope do gateway
+15a. Gateway tocando **tabela** do CRM — `insert`/`update`/`select` direto. Só função versionada, sob as seis travas do Princípio VII (v2.3.0). E `service_role` key ou segredo do JWT na mão do gateway é a mesma violação por outro caminho: com eles o papel dedicado vira decoração
+15b. Gateway escrevendo com o tenant vindo de **parâmetro** ou do corpo, em vez de resolvido dentro do banco pela conexão
+15c. Escrita do gateway com **uma ponta só** de durabilidade — fila no gateway sem reconciliação no CRM, ou vice-versa
 16. Supor o gateway na mesma máquina/rede/deploy (`localhost`, nome de serviço de compose, "sobe junto")
 17. Dado de cobrança (plano, assinatura, pagamento, cartão) modelado neste repo — o dono é o Cotador
 18. Mudança destrutiva de schema sem caminho de volta (renomear coluna, dropar coluna em uso) — instância única não tem versão de escape

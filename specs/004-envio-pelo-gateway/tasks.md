@@ -19,8 +19,12 @@ opcionais nem agrupáveis no fim.
 
 ## Fase 0 — Decisões que bloqueiam (nenhuma é código)
 
-- [ ] **T001** Emendar a constituição (`/speckit-constitution`, versão própria). **Dois princípios,
-      não um** — e a análise cruzada achou que só citar VII era insuficiente:
+- [X] **T001** ✅ **FEITA em 2026-08-08 — constituição v2.3.0.** Emendados VII (quarta superfície
+      nomeada e cercada por seis travas) e XIV (a ponta de durabilidade do CRM muda de forma:
+      reconciliação periódica quando o gateway escreve por função). Três inconsistências internas
+      corrigidas junto e declaradas no Sync Impact Report. **O que a emenda NÃO fez**: ela permitiu
+      a superfície **sob condição**. As travas 1, 5 e 6 só ficam cumpridas com T011 e T016 verdes —
+      sem elas, VII volta a ser violado e não há emenda que conserte. O pedido original era:
       - **VII**: não basta afrouxar "acesso direto ao banco". VII **enumera** as superfícies
         permitidas (API REST `/api/v1/`, MCP, webhooks) e RPC PostgREST não é nenhuma. A emenda tem
         de **nomear e delimitar a quarta superfície**: função `security definer` versionada, papel
@@ -28,8 +32,15 @@ opcionais nem agrupáveis no fim.
       - **XIV**: reler antes de concluir que só VII muda. A spec passou a cumpri-lo (FR-013 +
         FR-013a), mas a emenda tem de deixar claro que as **duas** pontas de durabilidade seguem
         obrigatórias quando o gateway escreve direto.
-- [ ] **T002** Refletir a emenda em `CLAUDE.md` (seção Gateway + anti-pattern 15) e em `AGENTS.md`.
-- [ ] **T003** **Desempatar quem provisiona** — item 5 do §8 da decisão, hoje em aberto e a causa de
+- [X] **T002** ✅ **FEITA em 2026-08-08.** `CLAUDE.md`: seção Gateway reescrita ("nunca toca
+      **tabela**" + as seis travas + a quarta superfície não alcança o Cotador + as duas pontas de
+      durabilidade); anti-patterns **15a/15b/15c** novos (tocar tabela ou segurar `service_role`/
+      segredo do JWT · tenant vindo de parâmetro · durabilidade com uma ponta só). `AGENTS.md`
+      **ganhou a seção de canal e gateway, que não existia** — ele mencionava o gateway uma única
+      vez e nenhum agente externo tinha como saber destas regras. `.specify/templates/plan-template.md`:
+      gates VII e XIV atualizados (era o `TODO(PLAN_TEMPLATE_VII)` do Sync Impact Report).
+- [ ] **T003** ⛔ **ÚNICO BLOQUEIO RESTANTE DA FASE 0 — precisa de decisão do dono.**
+      **Desempatar quem provisiona** — item 5 do §8 da decisão, hoje em aberto e a causa de
       T014 e T029 fazerem a mesma coisa por caminhos diferentes. Escolher: (a) rota HTTP no gateway
       (`gateway-provisioning-v1.md`), (b) função no CRM (`fn_gateway_provision_connection`), ou
       (c) as duas com dono declarado. **Registrar a escolha no contrato**; a task perdedora morre.
@@ -210,7 +221,8 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
 ## Ordem e o que trava o quê
 
 ```
-T001-T003  emenda + desempate  ──▶ libera Fase 1 (T003 decide T014 vs T029)
+T001 ✅ T002 ✅  emenda + propagação feitas
+T003 ⛔ AGUARDA DECISÃO  ──▶ libera Fase 1 (decide T014 vs T029)
 T010-T011  papel + trava       ──▶ T012-T016
 T012-T016  funções             ──▶ T017-T019 (provas)  e  ──▶ T022
 T020-T021  costura             ──▶ T022-T025

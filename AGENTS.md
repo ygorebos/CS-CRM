@@ -14,7 +14,7 @@ de plano de saúde (multi-nicho é capacidade, não prioridade). WhatsApp como c
 primário, com **todo tráfego de entrada chegando pelo `gateway_go`**. Multi-tenant com
 RLS desde o dia 1, LGPD nativa. **Entrega: SaaS de instância única, operada por nós** —
 ninguém instala nada. **Cobrança é gerenciada no Cotador Simplificado, não aqui.**
-Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.2.0).
+Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.3.0).
 
 **Consequência que muda como você trabalha:** existe **uma** instância e **um** banco.
 Bug em produção atinge todos os tenants ao mesmo tempo, e **não há versão de escape** —
@@ -87,6 +87,35 @@ o summary do job. Se você mexeu em UI fora desse subconjunto, a prova é sua.
 - Log: `lib/logger.ts` (estruturado). **`console.log` é proibido** em código merged.
 - Testes ao lado do código (`lib/foo/bar.test.ts`) ou em `tests/{unit,api,invariants,e2e}/`.
 - Comentários em PT-BR são a norma neste repo — mantenha o idioma do arquivo que editar.
+
+## Canal e gateway (`gateway_go`) — regras que não se negociam
+
+Todo tráfego de entrada chega pelo `gateway_go`, **repo irmão com deploy separado**
+(`/root/PROJETOS/gateway_go`). Constituição v2.3.0, Princípios VII e XIV.
+
+- **Código novo do CRM não lê payload cru de provedor** (WAHA/uazapi/Meta). Só envelope
+  normalizado.
+- **O gateway nunca toca tabela do CRM.** `insert`/`update`/`select` direto é proibido, sem
+  exceção. Ele escreve **só por função `security definer` versionada** — a "quarta superfície" —
+  e só sob as seis travas: (1) zero grant de tabela, nem `select`; (2) papel Postgres dedicado,
+  **nunca** `service_role` nem o segredo do JWT; (3) `organization_id` resolvida **dentro do
+  banco** pela conexão de origem, nunca de parâmetro nem do corpo; (4) assinatura versionada como
+  contrato; (5) invariante em CI reprovando se o papel ganhar privilégio de tabela; (6) sem HTTP
+  dentro da função. Falhar em qualquer uma torna a superfície proibida, não degradada.
+- **A quarta superfície é só do gateway.** Não se estende ao Cotador Simplificado — a ponte com
+  ele é contrato HTTP explícito, nada além.
+- **Endereço do gateway é configuração.** Sem `localhost`, sem nome de serviço de compose, sem
+  "sobe junto". Ele não entra no `docker-compose.prod.yml` do CRM.
+- **Sem réplica = ponto único de falha declarado, e a durabilidade tem duas pontas
+  obrigatórias.** A do gateway é fila em disco com retentativa; a do CRM é fila de entrada com
+  dreno (quando a entrega é HTTP) ou **reconciliação periódica** (quando o gateway escreve por
+  função). Divergência vira alerta — reconciliar em silêncio é proibido. Uma ponta só é
+  descumprimento.
+- **Teto de taxa por conexão**, nunca global nem por IP — todas as entregas vêm do mesmo endereço.
+- Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário. Silêncio é
+  proibido: o sintoma natural é "as mensagens pararam", sem lugar nenhum para olhar.
+
+Desenho e medições: `specs/004-envio-pelo-gateway/decisao-escrita-direta.md`.
 
 ## Diretórios e arquivos SENSÍVEIS
 

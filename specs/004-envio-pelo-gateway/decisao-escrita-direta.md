@@ -310,7 +310,7 @@ um commit de implementação.
 
 | Onde | Texto que passa a conflitar |
 |---|---|
-| `CLAUDE.md`, seção Gateway | "**O gateway NUNCA escreve no banco do CRM.** Quem persiste é o CRM" |
+| `CLAUDE.md`, seção Gateway | ✅ **RESOLVIDO 2026-08-08.** "NUNCA escreve no banco" virou "**nunca toca tabela**", com as seis travas da quarta superfície escritas por extenso |
 | `CLAUDE.md`, anti-pattern 15 | "Código novo do CRM lendo payload cru de provedor em vez do envelope" — muda de sentido, já que não haverá envelope na entrada |
 | Constituição v2.2.0, Princípio VII | mesma regra, com autoridade acima do `CLAUDE.md` |
 | `specs/004.../contracts/gateway-provisioning-v1.md` §1 | escrito para um gateway dono do próprio armazenamento |
