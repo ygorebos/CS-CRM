@@ -2,6 +2,7 @@
  * A porta de entrada do seam. Feature nenhuma importa `lib/waha/*` direto —
  * pede o adapter do provider da conversa e o descritor de capabilities.
  */
+import { gatewayAdapter } from "./adapters/gateway";
 import { metaCloudAdapter } from "./adapters/meta-cloud";
 import { wahaAdapter } from "./adapters/waha";
 import type { ChannelAdapter, ChannelProvider } from "./types";
@@ -14,7 +15,10 @@ const ADAPTERS: Record<ChannelProvider, ChannelAdapter | null> = {
   // adapter, `getAdapter()` lança — que é o comportamento certo. Fingir que
   // sabemos enviar por um canal cujo envio ninguém escreveu manda a mensagem
   // para o lugar errado ou para lugar nenhum, em silêncio.
-  whatsapp_uazapi: null,
+  // O envio pelo gateway (spec 004, Fase 3). Só o uazapi por ora: é o canal da
+  // migração. Os outros três continuam null até alguém escrever E PROVAR o
+  // envio deles — fingir mandaria mensagem para lugar nenhum, em silêncio.
+  whatsapp_uazapi: gatewayAdapter,
   whatsapp_cloud: null,
   instagram: null,
   messenger: null,

@@ -51,8 +51,9 @@ describe("canal não nasce sem saber enviar (FR-014)", () => {
   );
 
   it("provider sem adapter é reconhecido como incapaz de enviar, e não silenciosamente aceito", () => {
-    // Estes chegam pelo gateway (spec 001) e o envio deles é a Fase 3 da spec 004.
-    for (const provider of ["whatsapp_uazapi", "whatsapp_cloud", "instagram", "messenger"] as const) {
+    // Estes chegam pelo gateway (spec 001); o envio deles ainda não existe.
+    // `whatsapp_uazapi` SAIU desta lista em 2026-08-08: a Fase 3 lhe deu adapter.
+    for (const provider of ["whatsapp_cloud", "instagram", "messenger"] as const) {
       expect(providerPodeEnviar(provider)).toBe(false);
       expect(() => getAdapter(provider)).toThrow(/unknown_channel_provider/);
     }
@@ -62,6 +63,6 @@ describe("canal não nasce sem saber enviar (FR-014)", () => {
     // Se um adapter for removido ou virar null, esta lista muda e o teste reprova.
     // Não é redundância com o caso acima: aquele cobre o que É criável, este cobre
     // o inverso — perder capacidade de envio que já existia.
-    expect(providersQuePodemEnviar().sort()).toEqual(["meta_cloud", "waha"]);
+    expect(providersQuePodemEnviar().sort()).toEqual(["meta_cloud", "waha", "whatsapp_uazapi"]);
   });
 });
