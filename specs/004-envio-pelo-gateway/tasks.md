@@ -459,8 +459,23 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       numa janela, grava o que faltar pelo caminho idempotente, e **alarma** na divergência —
       reconciliar em silêncio esconde o defeito que se queria medir. É a segunda ponta que o
       Princípio XIV exige. **(FR-013a)**
-- [ ] **T051** Reversibilidade por canal: migrar e voltar sem tocar nos demais e sem perder mensagem
-      em voo. **(FR-041)**
+- [X] **T051** ✅ Reversibilidade por canal: migrar e voltar sem tocar nos demais e sem perder
+      mensagem em voo. **(FR-041)**
+  - `PATCH /api/v1/channel-sessions/[id]/ingest-path`. A coluna era por conexão desde a 0119 — o que
+    faltava era o jeito de virá-la sem `UPDATE` na mão, e `UPDATE` na mão não deixa autoria, não
+    deixa data e não aparece para ninguém.
+  - **Sem tocar nos demais** é o filtro `id` no UPDATE, e o teste afirma o FILTRO, não só o corpo:
+    sem ele a virada de uma conexão levaria junto todas as outras da organização — o oposto exato do
+    requisito. Sabotagem (remover o `.eq("id")`): reprova.
+  - **Sem perder mensagem em voo, e isso foi MEDIDO:** a rota de recebimento recusa a entrega de
+    conexão não migrada com 409 — mas **antes** de recusar grava a linha em `webhook_events_log` com
+    `status='error'` (`webhooks/gateway/[token]/route.ts:137`). O dreno recolhe linhas `error` e
+    reingere, e a ingestão não pergunta `ingest_path`. A entrega que chegar no instante exato da
+    reversão entra pelo dreno no minuto seguinte em vez de sumir.
+  - **Recusa migrar canal sem `gateway_connection_id`:** ele ficaria MUDO — a rota de recebimento
+    não teria como reconhecê-lo e nenhuma mensagem entraria por caminho nenhum. Erro legível é melhor
+    que canal que para de receber sem ninguém entender.
+  - Prova: `tests/unit/canal-reversivel-e-auditado.test.ts` (5).
 - [X] **T052** ✅ Estender o vigia mecânico de payload cru para o caminho de **envio**.
       **(FR-042, anti-pattern 15)**
   - **Invariante 2** em `scripts/lint-channels.pattern.ts` (`leFormaCruaDeProvedor`), ligado à mesma
@@ -479,7 +494,17 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
   - **Prova:** 3 casos em `tests/unit/lint-channels-fronteira.test.ts`, incluindo o que afirma que o
     código CERTO passa. Sabotagem (introduzir `_serialized` no caminho de envio): o lint reprova
     nomeando o arquivo.
-- [ ] **T053** Auditoria de toda mudança de canal: criar, migrar, reverter, apagar. **(FR-043)**
+- [X] **T053** ✅ Auditoria de toda mudança de canal: criar, migrar, reverter, apagar. **(FR-043)**
+  - **Inventário medido antes de escrever:** `channel.connected`, `channel.reconnected`,
+    `channel.archived`, `channel.deleted` e `channel.reactivated` já existiam. Faltavam **migrar e
+    reverter** — e faltavam porque a operação em si não existia (T051).
+  - `channel.migrated` e `channel.reverted` entram como ações **distintas**, não uma com campo de
+    direção: a pergunta que se faz num incidente é "alguém migrou algo hoje?", e ela tem de ser
+    respondível **filtrando a ação**, não lendo o metadata de cada linha. O `de`/`para` viaja junto
+    mesmo assim — saber o destino sem a origem não responde "o que mudou?".
+  - **A criação passou a auditar nas DUAS portas** na T044: antes, a porta do onboarding (usada por
+    100% dos usuários novos) punha número no ar sem registrar quem o ligou.
+  - Prova: casos de trilha em `tests/unit/canal-reversivel-e-auditado.test.ts`.
 - [X] **T054** ✅ **JÁ ENTREGUE pela spec 001** — verificado, não reimplementado. `GATEWAY_BASE_URL`,
       `GATEWAY_INTERNAL_TOKEN`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e
       `GATEWAY_MAX_MEDIA_BYTES` existem em `lib/env.ts` **e** em `.env.example`, e `lib/env.ts:238`

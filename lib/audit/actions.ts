@@ -147,6 +147,14 @@ export type AuditAction =
   // `lib/channels/reactivate.ts` — o único caminho de volta, e é o que faz a
   // frase acima valer para os DOIS casos em vez de para o que lembraram.
   | "channel.reactivated"
+  // (spec 004, T051/T053 — FR-041/FR-043) Por onde as mensagens DESTA conexão
+  // entram. Duas ações e não uma com campo `de`/`para`: a pergunta que se faz
+  // num incidente é "alguém migrou algo hoje?", e ela tem de ser respondível
+  // filtrando a ação — não lendo o metadata de cada linha. O `de`/`para` viaja
+  // junto mesmo assim, porque saber o destino sem a origem não responde "o que
+  // mudou?".
+  | "channel.migrated"
+  | "channel.reverted"
   | "authz.denied"
   | "team.role_changed"
   | "leads.bulk_assigned"
