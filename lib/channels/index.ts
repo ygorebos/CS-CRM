@@ -30,6 +30,31 @@ export function getAdapter(provider: ChannelProvider): ChannelAdapter {
   return adapter;
 }
 
+/**
+ * O canal deste provider consegue ENVIAR hoje? (spec 004, FR-014 / T030)
+ *
+ * `getAdapter` já é fail-closed, mas ele falha **no envio** — fundo na pilha,
+ * horas ou dias depois de o corretor ter parear o número, e com mensagem de erro
+ * técnica (`unknown_channel_provider`). Para quem está na tela, o desfecho é um
+ * canal que conectou, recebe, e nunca responde: o "canal morto na mão do
+ * corretor" que a FR-014 nomeia.
+ *
+ * Esta função existe para a recusa acontecer **na criação**, onde ainda dá para
+ * explicar. Hoje nenhuma rota de criação produz provider sem adapter — as duas
+ * gravam `waha` e `meta_cloud` —, então isto é **guarda preventiva**, e é
+ * deliberado: a spec 004 vai acrescentar providers do gateway, e o momento em
+ * que alguém acrescentar um sem adapter é exatamente o momento em que ninguém
+ * vai lembrar desta consequência.
+ */
+export function providerPodeEnviar(provider: ChannelProvider): boolean {
+  return ADAPTERS[provider] != null;
+}
+
+/** Os providers que hoje sabem enviar. Serve ao teste que vigia a matriz. */
+export function providersQuePodemEnviar(): ChannelProvider[] {
+  return (Object.keys(ADAPTERS) as ChannelProvider[]).filter(providerPodeEnviar);
+}
+
 export { capabilitiesOf, CHANNEL_CAPABILITIES, DEFAULT_CHANNEL_PROVIDER } from "./capabilities";
 export { CHANNEL_SESSION_REF_COLUMNS, resolveSessionRef } from "./session-ref";
 export type { ChannelSessionRef } from "./session-ref";

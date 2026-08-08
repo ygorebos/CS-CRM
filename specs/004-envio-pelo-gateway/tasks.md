@@ -157,8 +157,15 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
 
 ## Fase 3 — CRM: envio pelo gateway (F2)
 
-- [ ] **T030** Recusar criação de canal de gateway com erro legível enquanto a Fase 2 não estiver de
-      pé. **Entra antes de tudo nesta fase.** **(FR-014)**
+- [X] **T030** ✅ **FEITA em 2026-08-08** — `providerPodeEnviar()` / `providersQuePodemEnviar()` em
+      `lib/channels/index.ts` + `tests/unit/canal-nasce-com-envio.test.ts` (4 testes, **vermelhos sob
+      sabotagem**: `waha: null` derruba 2).
+      **Medição que mudou a forma da task:** nenhuma rota de criação produz hoje canal sem envio — as
+      duas gravam `waha` (default da coluna) e `meta_cloud`, ambos com adapter. Então isto é **guarda
+      preventiva**, e está escrito como tal no código. O `getAdapter()` já era fail-closed, mas falha
+      **no envio**, fundo na pilha, com erro técnico — para o corretor o desfecho é um canal que
+      conecta, recebe e nunca responde. A guarda existe para o instante em que a Fase 3 acrescentar
+      provider do gateway, que é exatamente o instante em que ninguém vai lembrar disto. **(FR-014)**
 - [ ] **T031** Adapter de envio atrás do seam `getAdapter(provider)`, fail-closed. Nenhuma feature do
       CRM passa a nomear provedor. **(FR-015, FR-016)**
 - [ ] **T032** Resolver a conexão de destino do próprio canal, nunca de corpo de requisição. É o
@@ -218,8 +225,10 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
 - [ ] **T052** Estender o vigia mecânico de payload cru — hoje cobre só o caminho de **recebimento**
       — para o caminho de **envio**. **(FR-042, anti-pattern 15)**
 - [ ] **T053** Auditoria de toda mudança de canal: criar, migrar, reverter, apagar. **(FR-043)**
-- [ ] **T054** Env vars de endereço e credencial do gateway em `lib/env.ts` **e** `.env.example`, com
-      ausência falhando de forma legível no momento certo. **(FR-044)**
+- [X] **T054** ✅ **JÁ ENTREGUE pela spec 001** — verificado, não reimplementado. `GATEWAY_BASE_URL`,
+      `GATEWAY_INTERNAL_TOKEN`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e
+      `GATEWAY_MAX_MEDIA_BYTES` existem em `lib/env.ts` **e** em `.env.example`, e `lib/env.ts:238`
+      já falha no boot quando `GATEWAY_INBOUND_ENABLED=true` sem `GATEWAY_BASE_URL`. **(FR-044)**
 - [ ] **T055** Toda mudança de estado de canal/mensagem sai como migration versionada + apêndice no
       baseline + linha no MANIFEST. Conferir ao fim de cada fase, não no fim de tudo. **(FR-040)**
 
