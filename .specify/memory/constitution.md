@@ -142,6 +142,61 @@ mensagem de commit já publicada não pode ser reescrita.
 
 Lição registrada, porque custou retrabalho: arquivo rastreado que "voltou" ao conteúdo antigo
 quase sempre está commitado em outra ref. `git log --all -- <arquivo>` antes de reescrever.
+
+==================================================================================
+EMENDA — 2026-08-08
+
+Version change: 1.2.0 → 2.0.0
+Bump rationale: MAJOR — redefinição incompatível do Princípio X. A versão anterior afirmava,
+sem exceção, que "conteúdo de operadora é dado de tenant e entra no isolamento por
+`organization_id` como qualquer outro". Esta emenda abre uma segunda camada, compartilhada
+pela instalação e não pertencente a nenhuma organização. Doutrina e código escritos contra a
+regra antiga passam a estar errados sobre onde o conteúdo pode viver — por isso MAJOR, e não
+MINOR. Nenhum outro princípio foi removido ou redefinido; I–IX, XI e XII seguem íntegros,
+palavra por palavra, e o título do Princípio X é preservado.
+
+Princípio alterado:
+  - X. Conhecimento de Operadora é Dado Curado, Nunca Código — corpo reescrito. O que passa a
+    existir: as duas camadas (acervo do tenant × catálogo curado) e as SETE travas sob as quais
+    a exceção ao Princípio I é aceitável. Faltando qualquer uma, a exceção não se aplica.
+
+Origem: decisão do dono do produto registrada na sessão de clarificação da feature
+`002-rag-por-operadora` em 2026-08-08. A instalação nova precisa já saber assistir antes de o
+corretor carregar a primeira coisa (Princípio VIII), e isso só é possível com conteúdo que o
+fabricante cura e distribui. A sessão reportou a divergência em vez de resolvê-la em silêncio,
+conforme o Princípio XII, e a feature ficou bloqueada até esta emenda.
+
+Plano de migração (exigência (c) da Governança):
+  - **Nenhum código existente é invalidado.** Não há catálogo compartilhado no repositório hoje:
+    todo conhecimento é tenant-scoped (`ai_knowledge_sources`, `ai_kb_versions`, `ai_kb_chunks`,
+    `retrieve_top_k_chunks`). A emenda abre caminho, não pede refactor. Nenhuma tabela existente
+    perde `organization_id` nem afrouxa RLS — a trava 3 proíbe exatamente isso.
+  - **A dívida nasce com a primeira linha do catálogo, não com esta emenda.** No momento em que
+    a partição compartilhada existir, o Princípio XI passa a exigir invariante em
+    `tests/invariants/` para as travas 1, 2 e 3: escrita a partir de papel de tenant barrada por
+    todos os caminhos; catálogo sem dado pessoal e sem identificador de organização; consulta
+    que cruza as duas camadas devolvendo zero linhas de outra organização. Sem esses três, a
+    exceção não pode ser considerada implementada.
+  - **Trava 6 é responsabilidade do Princípio III.** O apêndice do `baseline.sql` que semeia o
+    catálogo precisa ser idempotente **e** não-destrutivo — só acrescentar versão. Idempotência
+    sozinha não basta: um `upsert` idempotente apagaria a correção local, que é justamente o que
+    a trava proíbe.
+  - **Nada a alinhar em documento derivado.** Varredura em `CLAUDE.md`, `AGENTS.md` e
+    `docs/doctrine/` não encontrou nenhuma ocorrência de "operadora": nenhum deles repetia a
+    regra antiga, e nenhum desatualiza com esta emenda.
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/plan-template.md — fonte atualizada para v2.0.0 e a pergunta do gate X
+                                           reescrita para cobrir as duas camadas e as sete travas
+  ✅ rodapé deste arquivo                 — Version 2.0.0, Last Amended 2026-08-08
+
+Fora deste PR, de propósito: a spec `specs/002-rag-por-operadora/` que motivou a emenda segue na
+branch da feature. A Governança proíbe emenda no mesmo PR da feature que a motivou. Depois do
+merge, o item CHK028 do checklist daquela spec — reprovado hoje justamente por esta contradição —
+volta a passar sem nenhuma mudança na spec.
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES).
 -->
 
 # DeskcommCRM Constitution
@@ -327,16 +382,55 @@ dano ao cliente final do corretor — e quem responde por isso é ele, não o fa
 ### X. Conhecimento de Operadora é Dado Curado, Nunca Código
 
 A informação específica de cada operadora de plano de saúde — como emitir boleto, onde acessar
-carteirinha, rede, regras de uso — MUST viver como conteúdo versionado e curado no RAG do tenant.
-MUST NOT viver em `if`, prompt hardcoded, tabela de código ou deploy. **Operadora nova = carregar
-conteúdo, não fazer release**: se o corretor precisa de deploy para atender uma operadora nova, o
-desenho está errado. Toda resposta de assistência MUST ser rastreável ao trecho que a originou —
-sem trecho, sem resposta (Princípio IX). Conteúdo de operadora é dado de tenant e entra no
-isolamento por `organization_id` como qualquer outro (Princípio I).
+carteirinha, rede, regras de uso — MUST viver como conteúdo versionado e curado no RAG. MUST NOT
+viver em `if`, prompt hardcoded, tabela de código ou deploy. **Operadora nova = carregar conteúdo,
+não fazer release**: se alguém precisa de deploy para atender uma operadora nova **na própria
+instalação**, o desenho está errado. Toda resposta de assistência MUST ser rastreável ao trecho que
+a originou — sem trecho, sem resposta (Princípio IX).
+
+Esse conhecimento vive em **duas camadas**, e a diferença entre elas é de dono, não de formato:
+
+- **Acervo do tenant** — o que o corretor carrega. É dado da organização e entra no isolamento por
+  `organization_id` como qualquer outro (Princípio I), sem exceção.
+- **Catálogo curado** — o que o fabricante mantém e distribui com o produto, para que uma instalação
+  nova já saiba assistir antes de o corretor carregar a primeira coisa. É uma partição
+  **compartilhada pela instalação** e a única do sistema que não pertence a nenhuma organização.
+
+O catálogo curado é uma exceção **de mão única** ao Princípio I, e ela só é aceitável sob **todas**
+as travas abaixo. Faltando qualquer uma, a exceção não vale e o conteúdo MUST voltar a ser dado de
+tenant:
+
+1. **Legível por todos, gravável por ninguém do tenant.** A escrita no catálogo MUST exigir papel de
+   plataforma (`is_platform_admin`); qualquer outra origem MUST ser barrada, inclusive `admin` da
+   organização e inclusive chamada direta às operações de dados.
+2. **Sem dado de ninguém dentro.** O catálogo MUST conter apenas procedimento de operadora. Dado
+   pessoal de cliente e dado pertencente a uma organização MUST NOT entrar nele — é isso que mantém
+   a partição fora do alcance da LGPD e do Princípio I.
+3. **Não afrouxa nenhuma tabela tenant-aware.** A exceção MUST ser uma partição própria. Retirar
+   `organization_id` de tabela existente ou relaxar RLS para acomodá-la é proibido, e consulta que
+   cruza as duas camadas MUST NOT poder devolver linha de outra organização.
+4. **O tenant manda no que vale para ele.** Cada organização MUST poder desativar para si qualquer
+   operadora ou material do catálogo, e material próprio dela MUST vencer o catálogo quando os dois
+   afirmam coisas incompatíveis sobre o mesmo assunto. Quem conhece a regional é o corretor.
+5. **A origem MUST dizer a camada.** A rastreabilidade exigida acima MUST identificar se o trecho
+   veio do catálogo ou do acervo do tenant. A responsabilidade editorial é de pessoas diferentes nos
+   dois casos, e sem essa marca ninguém sabe a quem cobrar a correção.
+6. **Distribuir MUST NOT destruir.** A semeadura do catálogo viaja pelo caminho do Princípio III e
+   MUST ser reaplicável: ela só acrescenta versão, e MUST NOT reescrever, apagar ou desativar
+   material já existente na instalação — inclusive o que o administrador local editou. Atualização
+   que apaga correção local é defeito, não efeito colateral aceitável.
+7. **Nada volta.** Lacuna, pergunta de cliente, métrica de uso e telemetria de conteúdo MUST NOT
+   atravessar a fronteira de uma instalação de volta ao fabricante. Quem instala um clone herda o
+   papel de curador do catálogo dele e responde pelo que editar ali.
 
 **Rationale**: são dezenas de operadoras, cada uma mudando processo no próprio ritmo. Qualquer
-desenho que exija release por operadora transforma manutenção de conteúdo em fila de engenharia,
-e a informação fica velha exatamente onde errar custa mais caro.
+desenho que exija release por operadora transforma manutenção de conteúdo em fila de engenharia, e
+a informação fica velha exatamente onde errar custa mais caro. A camada curada existe porque o
+Princípio VIII cobra valor em 10 minutos: uma instalação que nasce sem saber nada obriga o corretor
+a curar conteúdo antes de ver o produto funcionar, e ele não vai fazer isso. E a exceção é estreita
+de propósito — a redação anterior deste princípio dizia que todo conteúdo de operadora é dado de
+tenant, e ela estava certa sobre o risco: um acervo compartilhado é a primeira porta por onde o
+isolamento vaza. As sete travas existem para que essa porta abra num sentido só.
 
 ### XI. Toda Entrega Nasce com Teste que Prova e que Vigia (NÃO NEGOCIÁVEL)
 
@@ -531,4 +625,4 @@ aprofundamento por tipo de task, está no Princípio XII.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 1.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-07
+**Version**: 2.0.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
