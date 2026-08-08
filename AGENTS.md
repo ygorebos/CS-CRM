@@ -212,3 +212,13 @@ Este repositório tem PRDs, specs, regras de negócio e doutrina escritos
 Se a regra não está escrita, diga que não está e pergunte — não preencha a lacuna com
 suposição plausível. Ao documentar, marque o que é `CONFIRMADO` (provado por código) e o
 que é `INFERIDO`.
+
+## Planejamento acompanha a execução (constituição v2.4.0)
+
+A cada **5 tasks** avançadas — ou ao fechar uma fase, o que vier primeiro — atualize os artefatos de
+planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se o desenho mudou, e
+`docs/current-state.md` se o que está pronto/quebrado mudou.
+
+Planejamento atualizado só no fim mentiu o caminho inteiro. Quem retoma lê o plano, não o histórico
+de commits — e um plano atrasado manda a próxima sessão refazer o que já existe.
+

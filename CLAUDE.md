@@ -346,6 +346,15 @@ Processo padrão (siga sempre):
 
 ---
 
+## Planejamento acompanha a execução (constituição v2.4.0)
+
+A cada **5 tasks** avançadas — ou ao fechar uma fase, o que vier primeiro — atualize os artefatos de
+planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se o desenho mudou, e
+`docs/current-state.md` se o que está pronto/quebrado mudou.
+
+Planejamento atualizado só no fim mentiu o caminho inteiro. Quem retoma lê o plano, não o histórico
+de commits — e um plano atrasado manda a próxima sessão refazer o que já existe.
+
 ## Definition of Done
 
 Antes de declarar uma task pronta:

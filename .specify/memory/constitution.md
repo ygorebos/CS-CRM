@@ -275,7 +275,8 @@ Seções removidas: nenhuma.
 ==================================================================================
 EMENDA — 2026-08-08 (terceira do dia — a quarta superfície)
 
-Version change: 2.2.0 → 2.3.0
+Version change: 2.3.0 → 2.4.0 (MINOR — regra de governança nova: planejamento atualizado a cada 5 tasks)
+Version change anterior: 2.2.0 → 2.3.0
 Bump rationale: MINOR — expansão material do Princípio VII (superfície nova, nomeada e
 delimitada por seis travas) e do Princípio XIV (a forma que a ponta de durabilidade do CRM
 assume quando não há fila de entrada). Nenhum princípio removido; nenhuma regra que valia
@@ -938,10 +939,22 @@ reprova a revisão. Complexidade MUST ser justificada, nunca presumida.
 contexto foi compactado ou retomado. A regra completa, com a declaração exigida e o
 aprofundamento por tipo de task, está no Princípio XII.
 
+**Planejamento acompanha a execução — no máximo a cada 5 tasks.** Ao avançar **cinco tasks** (ou
+sempre que uma fase fechar, o que vier primeiro), atualizar os artefatos de planejamento antes de
+seguir: `tasks.md` da spec com o estado real de cada uma, `plan.md` quando o desenho mudou, e
+`docs/current-state.md` quando o que está pronto/quebrado mudou.
+
+*Rationale*: planejamento atualizado só no fim é planejamento que mentiu o caminho inteiro. Quem
+retoma — outra sessão, outro agente, o dono — lê o plano, não o histórico de commits; um plano
+atrasado em vinte tasks manda a próxima sessão refazer o que já existe ou construir sobre o que já
+mudou. Cinco é o teto porque acima disso a memória do porquê de cada decisão já se perdeu, e o que
+se escreve depois vira resumo do diff em vez de registro da decisão. Não é burocracia de fim de
+ciclo: é o que impede a próxima sessão de começar errado.
+
 **Orientação de runtime**: `CLAUDE.md` (convenções detalhadas e Definition of Done),
 `AGENTS.md` (mesmo contrato em forma portável para outros agentes),
 `docs/doctrine/sistema-vivo.md` (invariantes do Princípio II),
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.3.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.4.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08

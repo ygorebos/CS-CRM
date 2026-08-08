@@ -112,6 +112,18 @@ async function entrar(page: Page): Promise<void> {
 /** Segredo TOTP capturado no enrolamento — reusado pelos logins seguintes. */
 let segredoTotp: string | null = null;
 
+/**
+ * O ÚLTIMO código enviado. Sem isto, casos que logam em sequência caem na mesma
+ * janela de 30 s e mandam o MESMO código — e o servidor aceita cada um **uma
+ * vez** (proteção contra replay). O segundo é recusado, e a falha lê como "MFA
+ * quebrado" quando é o teste se repetindo. Medido nesta spec: os 2 primeiros
+ * casos passavam e do 3º em diante todos caíam.
+ *
+ * Mesmo cuidado que `tests/e2e/helpers/login-admin.ts` já documentava — eu não
+ * tinha portado.
+ */
+let ultimoCodigo: string | null = null;
+
 /** Digita o código de 6 dígitos, com retry na virada da janela de 30 s. */
 async function digitarCodigo(
   page: Page,
@@ -120,8 +132,16 @@ async function digitarCodigo(
 ): Promise<void> {
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     if (msUntilNextTotpWindow() < 4_000) await page.waitForTimeout(msUntilNextTotpWindow() + 300);
+    let codigo = generateTotp(segredoTotp!);
+    // Código repetido = replay recusado. Espera a janela virar em vez de mandar
+    // o mesmo de novo e culpar a tela.
+    if (codigo === ultimoCodigo) {
+      await page.waitForTimeout(msUntilNextTotpWindow() + 500);
+      codigo = generateTotp(segredoTotp!);
+    }
+    ultimoCodigo = codigo;
     await page.locator('input[aria-label="Dígito 1"]').click();
-    await page.keyboard.type(generateTotp(segredoTotp!), { delay: 40 });
+    await page.keyboard.type(codigo, { delay: 40 });
     try {
       if (opts.esperandoSumir) await expect(alvo).toHaveCount(0, { timeout: 8_000 });
       else await expect(alvo).toBeVisible({ timeout: 8_000 });
@@ -192,6 +212,32 @@ async function passarPeloMfa(page: Page): Promise<void> {
  * mede a Central de Conexões no estado que interessa em vez de medir o wizard
  * duas vezes — a jornada dele já tem spec (`vps-fresh-onboarding`).
  */
+async function zerarMfaDoDono(): Promise<void> {
+  // Fator de MFA SOBREVIVE entre execuções, e o segredo não — ele vive em módulo
+  // e morre com o processo. Numa re-execução o app vai direto ao DESAFIO e a
+  // spec não tem como responder: mediu-se isso, e o resultado foi 5 vermelhos
+  // logo depois de 2 verdes, sem nada do produto ter mudado.
+  //
+  // Remover os fatores antes de cada execução devolve o estado que a spec supõe
+  // — conta nova, MFA por enrolar —, e é o mesmo que a `vps-fresh-onboarding`
+  // faz no `beforeAll` dela.
+  const { createClient } = await import("@supabase/supabase-js");
+  const svc = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  );
+  const { data: lista } = await svc.auth.admin.listUsers();
+  const dono = lista?.users.find((u) => u.email === OWNER_EMAIL);
+  if (!dono) return;
+  const { data: fatores } = await svc.auth.admin.mfa.listFactors({ userId: dono.id });
+  for (const f of fatores?.factors ?? []) {
+    await svc.auth.admin.mfa.deleteFactor({ userId: dono.id, id: f.id });
+  }
+  segredoTotp = null;
+  ultimoCodigo = null;
+}
+
 async function concluirWizard(): Promise<void> {
   const { createClient } = await import("@supabase/supabase-js");
   const svc = createClient(
@@ -207,6 +253,7 @@ async function concluirWizard(): Promise<void> {
 
 test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)", () => {
   test.beforeAll(async () => {
+    await zerarMfaDoDono();
     await concluirWizard();
   });
 
