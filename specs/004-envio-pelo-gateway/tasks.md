@@ -682,9 +682,20 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
     devolve QR (T040), o vocabulário traduz (T042), a conexão nasce tudo-ou-nada (T043). O que falta
     é a **costura**: quem chama `GET /v1/connections/{id}` e grava `statusDeCanalPara(...)` na coluna.
     Peça faltando entre peças corretas — a família de defeito que só a jornada inteira revela.
-  - **O que fecha a task:** um sincronizador de estado (cron curto ou poll na própria tela) que leve
-    o estado do gateway para `channel_sessions.status`. `statusDeCanalPara()` já existe e está
-    testado; falta o chamador. Depois disso, re-rodar a spec.
+  - **CORRIGIDO em 2026-08-08** — o chamador entrou na rota `GET /api/v1/channel-sessions/[id]`, que
+    é **a que a tela já consulta a cada 3 s**. Canal do gateway: pergunta `observarNoGateway`,
+    traduz com `statusDeCanalPara` e grava na coluna. Cron novo seria peça a mais para agendar e
+    esquecer — e chegaria depois de o corretor desistir.
+  - **Um segundo defeito, no mesmo lugar:** o `select` daquela rota não trazia `gateway_connection_id`,
+    então `classificarRef` devolveria "transporte" e o ramo novo **nunca dispararia**. Trocado por
+    `CHANNEL_SESSION_REF_COLUMNS` — é o mesmo modo de falha que a T035 já tinha custado uma vez.
+  - ⚠️ **A correção NÃO foi re-executada contra a spec** (ambiente derrubado, instância paga
+    apagada). `pnpm test:unit` 3157/3157 e `pnpm test:db` 555/555 seguem verdes. Re-rodar a spec é o
+    passo que fecha a task.
+  - **Nenhuma tela nova foi criada** — e não podia ser: a FR-030 exige "sem passo a mais". Mesma
+    Central de Conexões, mesmo botão, mesmo diálogo. O que mudou foi o encanamento: uma rota de API
+    (`/pairing`, porque a `/qr` devolve bytes e o gateway devolve QR **+ validade**) e o sincronismo
+    dentro da rota que a tela já chamava.
   - **Harness resolvido no caminho** (3 bugs meus, todos medidos e corrigidos): senha truncada pelo
     `#` no dotenv; condição de sucesso do MFA sendo a própria tela de desafio; e login por caso
     mandando código TOTP repetido dentro da mesma janela de 30 s — agora **uma sessão para todos os
