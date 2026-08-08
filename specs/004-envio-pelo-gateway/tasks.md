@@ -610,6 +610,12 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
     nessa forma composta, o casamento client-side do nosso `reconciliation/fetch` (`querido[m.MessageID]`)
     **nunca casa** — e aí não é latência: é a reconciliação declarando **toda** mensagem como faltante,
     para sempre, disparando o alarme de divergência em cada rodada.
+  - **Evidência que ESTREITA (não fecha) a quarta hipótese:** o payload real capturado de webhook no
+    repo do gateway traz `"messageid": "3EB0538DA65A59F6D8A251"` — forma **pura**, 22 hex, a mesma
+    do wamid que o envio nos devolveu. O exemplo `user123:r3EB0538` da spec está documentado no campo
+    `id` de **entrada** do filtro, não na saída. Isso torna (d) menos provável e devolve o peso para
+    (a) latência ou (b) outbound recente fora da busca — **mas não decide**: a forma do `messageid`
+    de saída do `/message/find` continua sem medição direta.
   - **Como decidir entre as quatro, sem adivinhar:** uma chamada crua ao `/message/find` do provedor,
     imprimindo o `messageid` de uma mensagem recém-enviada, e comparar com o wamid que o envio
     devolveu. É uma medição de dois minutos e responde tudo. **Não foi feita** — a instância já tinha
