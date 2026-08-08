@@ -716,9 +716,9 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
   - **Sabotagem — removida a `messages_org_external_id_unique`:** `linhas_depois_do_replay: 40`,
     `duplicatas: 20`. O cliente receberia cada mensagem duas vezes no histórico. É a **constraint**,
     e não a lógica da aplicação, que segura a idempotência — e a medição é o que prova qual das duas.
-- [~] **T067** **3 de 3 ACEITAS e entregues** pelo canal real, com `external_id` cada uma. **Falta a
-      confirmação humana de que ABREM no aparelho** — que é o que o SC-010 pede e nenhum código prova.
-      **(SC-010)**
+- [X] **T067** ✅ **3 de 3, CONFIRMADO NO APARELHO pelo dono em 2026-08-08.** Ele olhou o celular
+      (85992431936) e confirmou — respondendo às próprias mensagens no WhatsApp, o que também prova o
+      caminho de volta. **(SC-010)**
 
     | Tipo | Aceita | `external_id` | ms |
     |---|---|---|---|
@@ -995,3 +995,26 @@ rodada, e cada leitura da captura do Playwright resolveu em um minuto.
 
 **A T063 continua ABERTA**, e o que falta é fazer o desafio de MFA funcionar entre casos. É trabalho
 de harness de teste, não de produto — todo o produto que esta jornada exercita já foi corrigido.
+
+### O bug do desafio de MFA, encontrado por leitura (T063)
+
+A sexta rodada piorou de 1 para 0 casos verdes, e a causa estava no meu código, não no produto:
+
+```ts
+await digitarCodigo(page, page.getByRole("heading", { name: /verificação em duas etapas/i }));
+```
+
+**A condição de sucesso era a própria tela de desafio — que já está visível quando se digita.** O
+`toBeVisible()` passava na hora, sem o código ter sido aceito, e a falha reaparecia no `waitForURL`
+seguinte dizendo "navegação não aconteceu" em vez de "código recusado". Diagnóstico errado embutido
+no teste.
+
+**Corrigido:** o sinal de que o código foi aceito é a tela **SUMIR**. `digitarCodigo` ganhou
+`esperandoSumir` e o desafio usa `toHaveCount(0)`.
+
+**A regra que vale além deste caso:** asserção de **ausência** para provar transição, asserção de
+**presença** para provar chegada. Trocar as duas produz um verde imediato que não mede nada — a
+mesma família do caso que passou medindo a tela de login.
+
+⚠️ **Não re-executado** — o ambiente estava derrubado quando o bug foi encontrado (por leitura do
+próprio código, não por nova rodada).

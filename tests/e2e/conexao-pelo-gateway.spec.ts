@@ -113,13 +113,18 @@ async function entrar(page: Page): Promise<void> {
 let segredoTotp: string | null = null;
 
 /** Digita o código de 6 dígitos, com retry na virada da janela de 30 s. */
-async function digitarCodigo(page: Page, alvo: ReturnType<Page["getByRole"]>): Promise<void> {
+async function digitarCodigo(
+  page: Page,
+  alvo: ReturnType<Page["getByRole"]>,
+  opts: { esperandoSumir?: boolean } = {},
+): Promise<void> {
   for (let tentativa = 0; tentativa < 3; tentativa++) {
     if (msUntilNextTotpWindow() < 4_000) await page.waitForTimeout(msUntilNextTotpWindow() + 300);
     await page.locator('input[aria-label="Dígito 1"]').click();
     await page.keyboard.type(generateTotp(segredoTotp!), { delay: 40 });
     try {
-      await expect(alvo).toBeVisible({ timeout: 8_000 });
+      if (opts.esperandoSumir) await expect(alvo).toHaveCount(0, { timeout: 8_000 });
+      else await expect(alvo).toBeVisible({ timeout: 8_000 });
       return;
     } catch {
       if (tentativa === 2) throw new Error("código TOTP recusado três vezes");
@@ -155,7 +160,15 @@ async function passarPeloMfa(page: Page): Promise<void> {
   const iniciar = page.getByRole("button", { name: /iniciar configuração/i });
   if (!(await iniciar.isVisible().catch(() => false))) {
     if (!segredoTotp) throw new Error("desafio de MFA sem segredo — o enrolamento não rodou antes");
-    await digitarCodigo(page, page.getByRole("heading", { name: /verificação em duas etapas/i }).first());
+    // ⚠️ A condição de sucesso NÃO pode ser a própria tela de desafio: ela já
+    // está visível quando se digita, então `toBeVisible()` passa na hora, sem o
+    // código ter sido aceito — e a falha reaparece no `waitForURL` seguinte,
+    // dizendo "navegação não aconteceu" em vez de "código recusado". Foi o que
+    // fez a sexta rodada piorar de 1 para 0 casos verdes.
+    //
+    // O sinal certo é a tela SUMIR. Asserção de ausência para provar transição,
+    // asserção de presença para provar chegada.
+    await digitarCodigo(page, gate, { esperandoSumir: true });
     await page.waitForURL(/\/(app|onboarding)/, { timeout: 20_000 });
     return;
   }
