@@ -863,3 +863,26 @@ Acabou o contexto da sessão.
 login) e passou a ter um só, que é localizar o controle no estado vazio — trabalho de minutos com a
 tela aberta na frente. Ambiente derrubado de novo; zero containers `f6004`; app da outra sessão em
 307.
+
+### O defeito que a T063 encontrou (2026-08-08) — e é do PRODUTO
+
+Os 4 casos que sobraram vermelhos não eram da spec. `app/app/connections/page.tsx` calculava
+`wahaConfigured` **só** do transporte legado, e o `ConnectionsClient` fazia
+`disabled={creating || !wahaConfigured}` no botão de conectar.
+
+**Consequência numa instalação migrada:** o corretor vê a tela certa, com o botão certo, **e não
+consegue clicar** — porque o gateway, que é quem provisiona ali, não precisa das variáveis do
+transporte antigo. É a FR-030 quebrada de um jeito que nenhum teste unitário pega: a tela existe, o
+botão existe, e a ação não acontece.
+
+**O nome da flag mentia junto.** `wahaConfigured` decidia se dá para CONECTAR — que é uma pergunta
+sobre haver **algum** caminho de provisionamento, não sobre um provedor específico. Virou
+`podeConectar`, e agora é a união dos dois caminhos.
+
+**Este é exatamente o tipo de achado que justifica a Fase 6 existir.** As Fases 1–5 provaram cada
+peça e todas passaram; o defeito estava na costura entre a tela e a configuração, e só apareceu com
+uma conta de verdade, numa instalação de verdade, clicando de verdade.
+
+⚠️ **A correção não foi re-executada contra a spec** — o ambiente já estava derrubado quando ela foi
+diagnosticada. `pnpm test:unit` segue 3157/3157 e o `lint-channels` zerado, mas a prova de tela é a
+primeira coisa a rodar na próxima sessão.
