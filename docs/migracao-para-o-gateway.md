@@ -105,6 +105,27 @@ conexão e expô-lo por contrato — que é o que o Princípio VII manda de qual
 | Ciclo de vida da conexão fica fora da 001 | `specs/001/spec.md` Assumptions | Preservou o teto de 10 min; virou a F3 da 004 |
 | Envio fica fora da 001 | `specs/001/spec.md` Assumptions | Virou a F2 da 004 |
 | Eco de envio já é desambiguado | T054 da 001 | `sent_by_api=false` + `direction: outbound` grava `sent_via='external_device'`, sem duplicar |
+| **Fork do gateway escrevendo no banco do CRM** | dono do produto, 2026-08-08 | Duas versões, uma por produto. A do CRM grava conexão, instância, mensagem, conversa e contato **no banco do CRM**. Desenho e preço em [`specs/004/decisao-escrita-direta.md`](../specs/004-envio-pelo-gateway/decisao-escrita-direta.md) |
+
+### A escrita direta — o que ela custa, em uma tabela
+
+A decisão de 2026-08-08 é a maior mudança de rumo desde a v2.2.0 e reorganiza tudo que está acima.
+O detalhe está na [decisão](../specs/004-envio-pelo-gateway/decisao-escrita-direta.md); aqui fica só
+o que muda de dono:
+
+| Coisa | Antes | Depois |
+|---|---|---|
+| Entrada da mensagem | `POST /api/v1/webhooks/gateway/[token]`, HMAC, ACK-primeiro | função `security definer` chamada pelo gateway |
+| Idempotência | `unique (organization_id, external_id)` + catch de 23505 em TypeScript | **mesma constraint**, catch em SQL — e exige `set constraints ... immediate`, porque a constraint é `DEFERRABLE` e o `on conflict` **não funciona** contra ela (medido) |
+| Fila durável | duas: disco do gateway **e** `webhook_events_log` | **uma**: só o disco do gateway. Vira item de primeira classe |
+| Acordar o agente | `lib/gateway/ingest.ts:253` emite `ai_agent.dispatch_requested` | dentro da mesma função/transação do insert — mais seguro que hoje |
+| Tenant | resolvido do `webhook_path_token` da rota | resolvido de `channel_sessions.gateway_connection_id`. **Nunca do corpo**, nos dois |
+| Credencial do gateway | segredo HMAC por conexão | papel Postgres `gateway_writer`, `EXECUTE` só nas funções, zero grant de tabela |
+
+**A doutrina passa a conflitar** (`CLAUDE.md` "o gateway NUNCA escreve no banco do CRM", anti-pattern
+15, Princípio VII). Emendar é ato separado e ainda **não foi feito** — ver §7 da decisão, que também
+argumenta por que o caso é de **redação nova**, não de revogação: a intenção do princípio (tenant
+não vem do corpo; schema não vaza para o gateway) sobrevive ao desenho proposto.
 
 ### A inversão de doutrina, registrada de propósito
 

@@ -32,7 +32,23 @@ onde entregar o que chegar nela.
 
 ---
 
-## 1. Onde o registro mora — a decisão que este contrato NÃO toma
+## 1. Onde o registro mora — SUPERADO em 2026-08-08
+
+> ⚠️ **Esta seção está desatualizada e é mantida para registro.** Ela assumia um gateway dono do
+> próprio armazenamento. A decisão de 2026-08-08 — [`../decisao-escrita-direta.md`](../decisao-escrita-direta.md) —
+> aponta o fork do gateway para o banco do CRM: conexão, instância, mensagem, conversa e contato
+> passam a ser gravados lá, por **função `security definer` versionada**, com papel Postgres próprio
+> e sem grant de tabela.
+>
+> **O que sobrevive desta seção**: `organization_id` continua sem vir do corpo (resolvido da conexão,
+> §3c da decisão), e o gateway continua sem tocar tabela crua. **O que caiu**: a fronteira de rede e,
+> com ela, o `webhook_events_log` como segunda rede de proteção.
+>
+> **As seções 2 a 12 abaixo seguem válidas** como contrato HTTP de provisionamento, mas o
+> provisionamento passa a ter uma segunda forma possível — `fn_gateway_provision_connection` — e a
+> escolha entre as duas é trabalho aberto (§8 item 5 da decisão).
+
+O texto original, para não se perder o motivo de ele ter sido escrito assim:
 
 O contrato é indiferente ao armazenamento. Isso é deliberado: se o registro mora numa base própria
 do gateway, num schema separado, ou em qualquer outro lugar, **nada nas seções 3 a 8 muda**.

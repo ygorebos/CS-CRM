@@ -22,12 +22,31 @@ abandono. Esta feature não pode acrescentar nenhum passo, nem trocar o vocabul�
 `003-estruturas-agente-pre-prontas` já existiam na `main` quando o pedido foi feito.
 
 **Antecessora**: [`specs/001-migracao-waha-uazapi/`](../001-migracao-waha-uazapi/) — recebimento
-unificado, 78 de 82 tarefas, mesclada na `main` em 2026-08-08. Esta spec **herda** dela o envelope
+unificado, 76 de 82 tarefas, mesclada na `main` em 2026-08-08. Esta spec **herda** dela o envelope
 normalizado, a rota assinada `/api/v1/webhooks/gateway/[token]`, a coluna de corte `ingest_path` e
 a coluna `gateway_connection_id`.
 
 **Fio da meada**: [`docs/migracao-para-o-gateway.md`](../../docs/migracao-para-o-gateway.md) — o
 estado das três frentes num só lugar, atravessando as duas specs.
+
+> ### ⚠️ Decisão de 2026-08-08 que muda o alvo desta spec
+>
+> O dono do produto decidiu **forkar o gateway**: haverá duas versões, uma apontada para o banco do
+> Cotador Simplificado e outra para o **banco do CRM**. Na versão do CRM o gateway grava conexão,
+> instância, mensagem, conversa e contato **direto no banco do CRM** — WhatsApp e demais canais.
+>
+> O desenho, as quatro pendências resolvidas e o preço estão em
+> [**`decisao-escrita-direta.md`**](decisao-escrita-direta.md). **Leia antes de trabalhar em F1.**
+>
+> Três consequências para o texto abaixo, sem reescrevê-lo ainda:
+>
+> 1. **F1 muda de forma.** Provisionar deixa de ser só rota HTTP no gateway e passa a poder ser
+>    função no CRM. A dependência externa continua existindo — o que muda é onde a linha nasce.
+> 2. **A entrada da spec 001 fica sem uso no caminho do gateway** (rota assinada, ACK-primeiro,
+>    `webhook_events_log` como fila). O que esta spec herda de 001 encolhe para o **envelope de
+>    saída**, o `ingest_path` e o `gateway_connection_id`.
+> 3. **A doutrina passa a conflitar** — `CLAUDE.md` ("o gateway NUNCA escreve no banco do CRM") e
+>    Princípio VII. Emendar é ato separado, ainda **não feito**.
 
 ---
 
@@ -38,7 +57,7 @@ e essa dependência é a descoberta mais cara deste levantamento.
 
 | # | Frente | Onde mora o trabalho | Estado hoje |
 |---|---|---|---|
-| **F1** | **Provisionamento** — existir uma conexão que o gateway saiba resolver, sem o CRM tocar banco alheio | **`gateway_go`** (repo irmão) | **Não existe.** Bloqueia F2 e F3 |
+| **F1** | **Provisionamento** — existir uma conexão que o gateway saiba resolver | **`gateway_go`** (repo irmão) — e, pela decisão de 2026-08-08, o registro passa a nascer no **banco do CRM** | **Não existe.** Bloqueia F2 e F3 |
 | **F2** | **Envio** — o CRM manda mensagem pelo gateway em vez de pelo WAHA | CRM (adapter novo atrás do seam que já existe) | Superfície do gateway pronta; falta o adapter e desarmar dois desvios |
 | **F3** | **Conexão** — o corretor pareia um número novo pelo gateway, pela tela | CRM + `gateway_go` | Gateway tem QR/status/desconectar; falta criar a conexão e falta a tela não falar "WAHA" |
 
