@@ -289,9 +289,22 @@ export async function desconectarNoGateway(connectionId: string): Promise<Estado
  * já tratando outra falha, e uma exceção aqui trocaria "não consegui criar" por
  * um erro sobre a limpeza. Devolve se conseguiu, para quem quiser alertar.
  */
+export async function apagarNoGateway(connectionId: string): Promise<void> {
+  await chamar(`/v1/connections/${encodeURIComponent(connectionId)}`, { method: "DELETE" });
+}
+
+/**
+ * A mesma remoção, engolindo a falha.
+ *
+ * As duas existem porque o SILÊNCIO é certo num caso e errado no outro. Quando a
+ * remoção é COMPENSAÇÃO (T043), quem chama já está tratando outra falha e uma
+ * exceção aqui trocaria "não consegui criar o canal" por um erro sobre a
+ * limpeza. Quando a remoção é o PEDIDO do usuário (T046), falhar calado deixaria
+ * a tela dizendo que o número saiu enquanto ele continua ligado e cobrando.
+ */
 export async function apagarNoGatewaySemLancar(connectionId: string): Promise<boolean> {
   try {
-    await chamar(`/v1/connections/${encodeURIComponent(connectionId)}`, { method: "DELETE" });
+    await apagarNoGateway(connectionId);
     return true;
   } catch {
     return false;

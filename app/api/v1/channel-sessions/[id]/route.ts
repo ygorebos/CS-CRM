@@ -25,6 +25,12 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import {
+  CHANNEL_SESSION_REF_COLUMNS,
+  classificarRef,
+  type ChannelSessionRef,
+} from "@/lib/channels/session-ref";
+import { apagarNoGateway, ErroDoGateway } from "@/lib/gateway/provisionamento";
 import { isChannelStatus } from "@/lib/schemas/channels";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -284,7 +290,7 @@ export async function DELETE(
   const supabase = await createClient();
   const { data: session } = await supabase
     .from("channel_sessions")
-    .select("id, provider, waha_session_name, display_name, phone_number")
+    .select(`id, ${CHANNEL_SESSION_REF_COLUMNS}, display_name, phone_number`)
     .eq("organization_id", activeOrg.orgId)
     .eq("id", id)
     .maybeSingle();
@@ -300,7 +306,32 @@ export async function DELETE(
     last_status_change_at: now,
   };
 
-  if (session.provider === CHANNEL_PROVIDER_WAHA) {
+  // Canal do GATEWAY: excluir é DESPROVISIONAR (spec 004, T046 / FR-036).
+  //
+  // Sem esta guarda ele caía no ramo do canal oficial abaixo — que só zera
+  // credencial e roda o token de webhook. A linha sumiria da tela e **a
+  // instância continuaria viva no provedor**: recebendo, sendo cobrada todo mês,
+  // e sem nenhum lado reconhecendo-a como sua. É a instância órfã da T043
+  // chegando pela porta de saída em vez da de entrada.
+  const natureza = classificarRef(session as Partial<ChannelSessionRef>);
+  if (natureza?.via === "gateway") {
+    // Não usa `apagarNoGatewaySemLancar` de propósito: lá o silêncio é certo
+    // (a compensação roda enquanto se trata outra falha). Aqui a exclusão É o
+    // pedido do usuário, e falhar calado deixaria a tela dizendo que o número
+    // saiu enquanto ele continua ligado e cobrando.
+    try {
+      await apagarNoGateway(natureza.ref);
+    } catch (err) {
+      const e = err instanceof ErroDoGateway ? err : null;
+      return fail(
+        "gateway_error",
+        e?.message ??
+          "não consegui desconectar este número no serviço de conexão — nada foi excluído",
+        e && e.status >= 500 ? 502 : 422,
+        { requestId, details: { codigo: e?.codigo ?? "desconhecido" } },
+      );
+    }
+  } else if (session.provider === CHANNEL_PROVIDER_WAHA) {
     const waha = getWahaClient();
     if (!waha) {
       return fail(

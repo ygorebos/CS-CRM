@@ -399,8 +399,22 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
   - **Prova:** 6 casos novos em `tests/unit/rbac-matrix.test.ts` — o par das duas portas existe
     porque o defeito ERA a divergência; cobrir só a consertada deixaria a outra livre para divergir
     de novo. Sabotagem (`requireRole("viewer")`): 2 reprovam.
-- [ ] **T046** Desconectar e reconectar pela tela no canal migrado, com os mesmos desfechos de hoje.
-      **(FR-036)**
+- [X] **T046** ✅ Desconectar e reconectar pela tela no canal migrado, com os mesmos desfechos de
+      hoje. **(FR-036)**
+  - **Reconectar** caía no 422 de "canal oficial" — mensagem errada sobre um canal que TEM sessão, e
+    beco sem saída na tela: o corretor lia que precisava atualizar a credencial de uma API que ele
+    não usa. Agora reconectar é **re-parear** pelo gateway, com o mesmo `force` de hoje, o mesmo
+    audit `channel.reconnected` e o status já traduzido para o vocabulário da tela.
+  - **Excluir era o caro.** O canal migrado caía no ramo do canal oficial, que só zera credencial e
+    roda o token de webhook. A linha sumiria da tela e **a instância continuaria viva no provedor** —
+    recebendo, sendo cobrada todo mês, sem nenhum lado reconhecendo-a como sua. É a instância órfã da
+    T043 chegando pela porta de SAÍDA em vez da de entrada. Agora excluir desprovisiona.
+  - **Duas remoções, de propósito:** `apagarNoGateway` lança, `apagarNoGatewaySemLancar` engole. O
+    silêncio é certo na compensação (quem chama já trata outra falha; uma exceção trocaria "não
+    consegui criar" por um erro sobre a limpeza) e errado no pedido do usuário (falhar calado deixa a
+    tela dizendo que o número saiu enquanto ele continua ligado e cobrando).
+  - Prova: caso `T046/FR-036` em `tests/unit/conexao-tudo-ou-nada.test.ts`; `test:db` 555/555 (as
+    rotas tocam schema de canal).
 - [X] **T047** ✅ Cada canal continua com segredo de recebimento próprio — a migração não pode
       reintroduzir segredo global. **(FR-037)**
   - Satisfeito por construção depois da T044: o caminho único chama

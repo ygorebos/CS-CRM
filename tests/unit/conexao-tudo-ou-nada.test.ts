@@ -38,6 +38,7 @@ vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
 
 import { provisionarEGravarConexao } from "@/lib/channels/criar-conexao";
 import {
+  apagarNoGateway,
   apagarNoGatewaySemLancar,
   criarConexaoNoGateway,
   ErroDoGateway,
@@ -151,6 +152,20 @@ describe("a compensação (FR-012)", () => {
     // Uma exceção aqui trocaria "não consegui criar o canal" por um erro sobre a
     // limpeza, e o usuário leria a mensagem errada sobre o problema errado.
     fetchMock.mockRejectedValue(new Error("gateway sumiu"));
+    expect(await apagarNoGatewaySemLancar("conn-1")).toBe(false);
+  });
+});
+
+describe("T046/FR-036. excluir canal migrado desprovisiona — e falha ALTO", () => {
+  it("a remoção do PEDIDO lança; a da compensação engole", async () => {
+    // As duas existem porque o silêncio é certo num caso e errado no outro.
+    // Compensação (T043): quem chama já trata outra falha, e uma exceção aqui
+    // trocaria "não consegui criar" por um erro sobre a limpeza. Pedido do
+    // usuário (T046): falhar calado deixaria a tela dizendo que o número saiu
+    // enquanto ele continua ligado e sendo cobrado todo mês.
+    fetchMock.mockResolvedValue(resposta(502, { error: { code: "erro_do_provedor" } }));
+
+    await expect(apagarNoGateway("conn-1")).rejects.toBeInstanceOf(ErroDoGateway);
     expect(await apagarNoGatewaySemLancar("conn-1")).toBe(false);
   });
 });
