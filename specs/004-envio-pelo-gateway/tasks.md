@@ -603,6 +603,21 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
   - **Por que isto importa além da T061:** se for (b), a reconciliação (T050) tem um ponto cego para
     mensagens de saída, e o alarme de divergência dispararia para sempre sobre elas. Vale medir com
     a janela aberta por minutos antes de concluir qualquer coisa.
+  - **Uma quarta hipótese, e ela é a mais séria — vinda da spec do PROVEDOR**
+    (`docs/uazapi-openapi-spec.yaml:6362`): o filtro `id` do `/message/find` documenta o exemplo
+    **`user123:r3EB0538`** — um id **prefixado pelo dono**, enquanto o envio nos devolve o wamid
+    **puro** (`3EB01400C9DF74F3420BCF`, medido na T067). Se o `messageid` que a busca devolve vier
+    nessa forma composta, o casamento client-side do nosso `reconciliation/fetch` (`querido[m.MessageID]`)
+    **nunca casa** — e aí não é latência: é a reconciliação declarando **toda** mensagem como faltante,
+    para sempre, disparando o alarme de divergência em cada rodada.
+  - **Como decidir entre as quatro, sem adivinhar:** uma chamada crua ao `/message/find` do provedor,
+    imprimindo o `messageid` de uma mensagem recém-enviada, e comparar com o wamid que o envio
+    devolveu. É uma medição de dois minutos e responde tudo. **Não foi feita** — a instância já tinha
+    sido apagada quando a hipótese apareceu.
+  - **Enquanto isso não for medido, a T050 não pode ser considerada provada em campo.** Ela está
+    correta por teste (5 casos, sabotagem), e o que está em dúvida é o FORMATO do id no mundo real —
+    exatamente o tipo de coisa que teste com dublê não pega, porque o dublê usa o formato que eu
+    escrevi.
 - [X] **T062** ✅ **AS DUAS METADES.** A varredura mecânica (SC-005) e a **rajada de 50 medida**
       (SC-004), executada em 2026-08-08 contra Postgres real com o `baseline.sql`, servido por
       PostgREST, usando a **ação de automação de verdade** (obtida do registro por `getAction`) — não
