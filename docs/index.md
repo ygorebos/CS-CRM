@@ -34,6 +34,7 @@ de menor precedência e registre.
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Como contribuir |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Mudanças por versão (SemVer). **Quem roda VPS lê antes de `update.sh`** — mudança que exige ação manual aparece sob "⚠️ Requer atenção" |
 | [`docs/current-state.md`](current-state.md) | **O que está pronto, incompleto e quebrado hoje** |
+| [`docs/migracao-para-o-gateway.md`](migracao-para-o-gateway.md) | **O fio da meada da migração para o gateway** — as três frentes (recebimento, envio, conexão), o que bloqueia cada uma, e a inversão de doutrina que a v2.2.0 provocou. Leia antes de mexer em qualquer coisa de canal |
 
 ## 2. Produto e intenção
 
