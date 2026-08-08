@@ -35,6 +35,7 @@ import type { NextRequest } from "next/server";
 
 import { fail, ok } from "@/lib/api/wrappers";
 import { env } from "@/lib/env";
+import { avisarEntregaDescartada } from "@/lib/gateway/aviso-de-descarte";
 import { parseEnvelope } from "@/lib/gateway/envelope";
 import { ingerirEnvelope } from "@/lib/gateway/ingest";
 import { logger } from "@/lib/logger";
@@ -95,7 +96,7 @@ async function handle(req: NextRequest): Promise<Response> {
 
   for (const linha of linhas) {
     if (linha.attempts >= MAX_TENTATIVAS) {
-      await marcarMorta(admin, linha, "max_tentativas_excedido");
+      await marcarMorta(admin, linha, "max_tentativas_excedido", requestId);
       mortas += 1;
       continue;
     }
@@ -103,7 +104,7 @@ async function handle(req: NextRequest): Promise<Response> {
     if (!linha.organization_id || !linha.channel_session_id) {
       // Sem dono não há o que ingerir, e a linha não pode ficar rodando para
       // sempre. Vira `dead` com motivo, para alguém ver.
-      await marcarMorta(admin, linha, "linha_sem_conexao_ou_organizacao");
+      await marcarMorta(admin, linha, "linha_sem_conexao_ou_organizacao", requestId);
       mortas += 1;
       continue;
     }
@@ -111,7 +112,7 @@ async function handle(req: NextRequest): Promise<Response> {
     const parse = parseEnvelope(linha.payload_parsed);
     if (!parse.ok) {
       // Envelope que não parseia não melhora com retentativa.
-      await marcarMorta(admin, linha, `envelope_invalido:${parse.motivo}`);
+      await marcarMorta(admin, linha, `envelope_invalido:${parse.motivo}`, requestId);
       mortas += 1;
       continue;
     }
@@ -156,6 +157,7 @@ async function marcarMorta(
   admin: ReturnType<typeof createAdminClient>,
   linha: LinhaPendente,
   motivo: string,
+  requestId: string,
 ): Promise<void> {
   await admin
     .from("webhook_events_log")
@@ -164,9 +166,21 @@ async function marcarMorta(
 
   if (!linha.organization_id) return;
 
-  // Descarte VISÍVEL. O Princípio II proíbe que falta de funcionamento vire
-  // silêncio: sem este evento, uma entrega perdida some num log de servidor que
-  // ninguém lê, e o corretor descobre pela reclamação do cliente.
+  // Descarte VISÍVEL, em DUAS superfícies, e nenhuma das duas é decoração:
+  //
+  //   - o item na Central é o que uma PESSOA vê. Sem ele, a mensagem perdida só
+  //     existe num log de servidor que ninguém abre, e o corretor descobre pela
+  //     reclamação do cliente;
+  //   - o `event_log` é o que outras peças consomem e o que sobra para o
+  //     diagnóstico depois. Sozinho ele era evento sem consumidor — o
+  //     anti-pattern nº 3 — e por isso não bastava.
+  await avisarEntregaDescartada(admin, {
+    organizationId: linha.organization_id,
+    channelSessionId: linha.channel_session_id,
+    motivo,
+    requestId,
+  });
+
   const { error } = await admin.rpc("emit_event" as never, {
     p_event_type: "gateway.entrega_descartada",
     p_entity_kind: "channel_session",

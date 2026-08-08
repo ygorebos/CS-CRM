@@ -190,15 +190,42 @@ reavaliado antes de qualquer investimento adicional.
 
 **Independent Test**: derrubar o CRM, mandar N mensagens, subir, e ver as N no inbox sem duplicata.
 
-- [ ] T032 [TEST] [P] [US2] Teste em Go da fila de entrega do gateway: pendência gravada **antes** da primeira tentativa; sobrevive a reinício do processo; respeita espera crescente; termina em `dead` após o teto
-- [ ] T033 [TEST] [P] [US2] `tests/invariants/gateway-inbound-dreno.test.ts` — linha `received` parada além do limite é recolhida pelo dreno; linha `processed` não é reprocessada; linha que falha N vezes vira `dead`
-- [ ] T034 [US2] Implementar `internal/delivery/` no gateway: fila durável em disco, espera crescente com teto, e estado terminal inspecionável
-- [ ] T035 [US2] Aplicar a política de retentativa do contrato (§5): retenta em rede/timeout/`5xx`/`429` respeitando `Retry-After`; **não** retenta `400`/`401`/`404` — vão direto ao descarte com aviso
+- [x] T032 [TEST] [P] [US2] Teste em Go da fila de entrega do gateway: pendência gravada **antes** da primeira tentativa; sobrevive a reinício do processo; respeita espera crescente; termina em `dead` após o teto
+
+  > `internal/entrega/fila_test.go`, 9 testes. A prova de ORDEM é feita de dentro da tentativa: o entregador lê o diretório e falha se ele estiver vazio — um teste que só checasse "acabou entregue" passaria com fila em memória. O teste de reinício lê **o disco direto**, sem passar pela fila: `Pendentes()` sozinho não distingue disco de mapa em variável de pacote, que sobrevive a um `AbrirFila` novo mas não ao processo morrer.
+
+- [x] T033 [TEST] [P] [US2] `tests/invariants/gateway-inbound-dreno.test.ts` — linha `received` parada além do limite é recolhida pelo dreno; linha `processed` não é reprocessada; linha que falha N vezes vira `dead`
+
+  > 8 testes contra o Postgres efêmero, com `emit_event` e os CHECKs reais no caminho. Além dos três exigidos: a linha recém-chegada **não** é recolhida (a carência é o que evita ingerir junto com o disparo em segundo plano), a linha sem dono morre com motivo, o aviso não duplica enquanto houver um aberto, e linha de `provider = 'waha'` fica intocada. O dublê de `ingerirEnvelope` registra quem passou por ele — sem isso, "não foi reprocessada" seria verdade por construção.
+
+- [x] T034 [US2] Implementar `internal/delivery/` no gateway: fila durável em disco, espera crescente com teto, e estado terminal inspecionável
+
+  > **Desvio declarado de caminho**: saiu como `internal/entrega/fila.go`, não `internal/delivery/`. O pacote `internal/entrega` já É esta preocupação (assina e manda), o repositório inteiro nomeia pacote em português, e um irmão em inglês partiria a entrega em dois lugares. Descarte inspecionável = arquivo em `<dir>/mortas/`, legível sem o programa.
+  >
+  > **Decisão que mudou no meio, e por quê**: o desenho inicial não gravava o segredo de assinatura em disco. Não fecha — depois de um reinício, assinar exige o segredo, e o gateway resolve conexão por **token do provedor**, não por ID; guardar esse token seria guardar um segredo maior. Manter só em memória tornaria inassinável exatamente a pendência que a fila existe para salvar. Então o segredo mora na pendência, arquivo `0600`, apagado no aceite, com o campo isolado para quem quiser cifrá-lo.
+  >
+  > Ligada no `webhook_forward.go` (enfileira em vez de disparar goroutine) e no boot (`ligarFilaDeEntrega`), com retomada imediata do que sobrou do processo anterior. `ENTREGA_FILA_DIR` vazio mantém o comportamento antigo: exigir a variável trocaria "entrega sem durabilidade" por "gateway não sobe".
+
+- [x] T035 [US2] Aplicar a política de retentativa do contrato (§5): retenta em rede/timeout/`5xx`/`429` respeitando `Retry-After`; **não** retenta `400`/`401`/`404` — vão direto ao descarte com aviso
+
+  > `entrega.Classificar`. `Retry-After` entrou em `Resultado` e vale como **piso** da espera própria. Duas leituras acrescentadas ao contrato, ambas testadas: `409` (conexão não migrada) vai ao descarte — insistir não cura, e nesse estado o caminho legado ainda entrega; qualquer outro 4xx idem, porque retentar contra um 4xx não listado é laço infinito. Só a forma em **segundos** de `Retry-After` é lida: a forma HTTP-date depende de relógios alinhados, e errar para mais é mensagem parada por horas.
+
 - [x] T036 [US2] Implementar `app/api/v1/cron/gateway-inbound-drain/route.ts` e agendá-la no `scheduler` do `docker-compose.prod.yml`, no padrão do `event-log-drain`
-- [ ] T037 [US2] Tornar o descarte visível: item na Central de avisos quando houver entrega `dead` (Princípio II — falta de funcionamento aparece na tela, não em `log.Warn`)
+- [x] T037 [US2] Tornar o descarte visível: item na Central de avisos quando houver entrega `dead` (Princípio II — falta de funcionamento aparece na tela, não em `log.Warn`)
+
+  > Migration **0118** (+ apêndice no `baseline.sql` + MANIFEST): `agent_inbox_items.kind` ganha `gateway_delivery_dead`. Kind próprio, e não reuso de `channel_secret_missing`, porque o desfecho é oposto e é ele que decide a ação de quem lê: lá nada se perde e as mensagens entram quando a chave existir; aqui **acabou**, não haverá outra tentativa. O dreno já emitia `gateway.entrega_descartada` no `event_log` e **ninguém escutava** — evento sem consumidor, anti-pattern nº 3, e na prática o mesmo silêncio do `log.Warn` que esta spec existe para acabar. Do lado do gateway, o gancho equivalente é `AoMorrer`, hoje em log de erro.
+
 - [ ] T038 [US2] Executar o roteiro do `quickstart.md` §2, incluindo o reinício do **gateway** no meio do intervalo
+
+  > **Aberta — depende de ambiente, não de código.** Exige gateway + CRM + WAHA de pé com número real. Mesma classe de T022 e T030.
+
 - [ ] T038a [US2] Executar o roteiro de rajada do `quickstart.md` §7 (200 mensagens em 60s): 100% no inbox, zero duplicatas, e o ritmo de resposta do agente ainda obedecendo os limites anti-banimento existentes — é o SC-010, que não tinha tarefa. **Rodar com o rate limit de T015 ligado**, e não desligado para o teste passar: rajada provada sem o limite ativo não prova nada sobre produção
-- [ ] T039 [US2] **Sabotagem**: trocar a fila em disco por fila em memória e confirmar que T032 fica vermelho; restaurar
+
+  > **Aberta — depende de ambiente.** Idem T038.
+
+- [x] T039 [US2] **Sabotagem**: trocar a fila em disco por fila em memória e confirmar que T032 fica vermelho; restaurar
+
+  > Feita duas vezes. A primeira derrubou 2 dos 9 e revelou um buraco: o teste de reinício passava, porque o mapa em variável de pacote sobrevive a um `AbrirFila` novo. Corrigido o teste (leitura direta do disco), a mesma sabotagem derruba **3**. Sabotagem correspondente do T033: remover o aviso na Central e remover a carência do dreno derruba exatamente os 2 testes que as vigiam.
 
 **Checkpoint**: a promessa "nada se perde" deixa de ser promessa.
 

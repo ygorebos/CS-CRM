@@ -47,6 +47,11 @@ export const KIND_LABEL = {
   // em um segundo é que existe um número por onde nada está entrando — o resto
   // fica no corpo do aviso, com o que fazer.
   channel_secret_missing: "Uma conexão não está recebendo mensagens",
+  // Diz que ACABOU, não que "falhou": o kind acima descreve mensagens que ainda
+  // vão entrar; este descreve mensagens que não vão. Quem lê precisa perceber a
+  // diferença sem abrir o aviso, porque a ação é outra — aqui é procurar o
+  // cliente, não esperar o sistema se recuperar.
+  gateway_delivery_dead: "Mensagens de clientes não chegaram e não virão",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 

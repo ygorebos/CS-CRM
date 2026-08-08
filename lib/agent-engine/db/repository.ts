@@ -43,6 +43,10 @@ export type InboxKind =
   // perde (o gateway retenta 5xx), mas nenhuma entra — e sem este aviso o
   // sintoma é "as mensagens pararam", sem lugar nenhum para olhar.
   | 'channel_secret_missing'
+  // (0118) Entrega de envelope descartada pelo dreno: tentativas esgotadas,
+  // linha sem dono ou envelope que não parseia. Diferente do kind acima, aqui
+  // NÃO haverá nova tentativa — a mensagem daquele cliente não vai chegar.
+  | 'gateway_delivery_dead'
   | 'other';
 
 export interface InboxItemRow {

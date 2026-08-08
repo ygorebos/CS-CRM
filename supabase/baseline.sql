@@ -9076,6 +9076,14 @@ alter table public.agent_inbox_items
     -- update.sh), porque a chave de cifra só existe depois deste arquivo — logo
     -- um clone que atualize pela metade cai exatamente neste estado.
     'channel_secret_missing',
+    -- (migration 0118, spec 001 §T037) Entrega de envelope DESCARTADA pelo dreno
+    -- do recebimento: as tentativas acabaram, ou a linha chegou sem
+    -- conexão/organização, ou o envelope não parseia. A diferença para o kind de
+    -- cima é o desfecho — lá nada se perde e as mensagens entram quando a chave
+    -- existir; aqui não haverá nova tentativa, a mensagem daquele cliente não vai
+    -- chegar, e esta é a única forma de alguém ficar sabendo. Entra NESTA lista,
+    -- e não num bloco novo, pela mesma razão do #159.
+    'gateway_delivery_dead',
     'other'
   ));
 

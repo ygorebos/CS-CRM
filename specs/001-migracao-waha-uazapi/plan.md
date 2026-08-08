@@ -177,15 +177,23 @@ Nenhuma camada nova, nenhum projeto novo, nenhuma dependência nova no CRM.
 | 1 · Setup | ✅ **concluída** | `6ea0a4b6` — envs com tetos medidos, serviço no compose de dev, runbook |
 | 2 · Foundational | ✅ **concluída** | `6366d5ce` (schema, tripla + vocabulário TS), `d0f9d5b6` (envelope + autenticidade), `41806231` (rota, teto por conexão, segredo por conexão), `0117` + aviso na Central quando a conexão não tem chave de verificação — recusa com código próprio `gateway_secret_not_provisioned` e **503**, não 401, para o gateway retentar e o histórico do período quebrado entrar sozinho. Modo relay no `gateway_go` (`00f9078` naquele repo): `GATEWAY_MODE=relay` dispensa as variáveis de Supabase, o modo padrão continua exigindo-as, e um typo (`relai`) **não** vira relay |
 | 3 · US1 — a costura | 🟡 **quase** | ingest único, dreno periódico, agendamento no `scheduler`, invariantes de banco (T020/T021) e a identidade canônica (T027a/T027b — a mesma pessoa com as duas grafias do número vira UM contato, regra extraída para `lib/channels/identidade-canonica.ts` com a busca injetada, para o invariante exercitar a MESMA função que o ingest). Do lado do gateway (`c3d44fd`): o encaminhamento cru virou **envelope normalizado e assinado** — `internal/envelope` (mapeador, `event_id` determinístico) e `internal/entrega` (HMAC sobre timestamp+corpo), ligados nos quatro canais, com **virada por destino** para não quebrar quem já consome o formato antigo. **Falta**: a prova pela tela (T022) e a ponta a ponta com mensagem real (T030) |
-| 4 · US2 — durabilidade | ⬜ não iniciada | depende da fila em disco do gateway (Go) |
+| 4 · US2 — durabilidade | 🟡 **quase** | a fila durável existe (`internal/entrega/fila.go` no `gateway_go`): pendência gravada em disco **antes** da primeira tentativa, espera crescente com teto, `Retry-After` como piso, política do contrato §5 (`409` e demais 4xx não listados também vão ao descarte — insistir contra eles é laço infinito), e descarte inspecionável em `mortas/`. Ligada no encaminhamento e no boot, com retomada imediata do que sobrou do processo anterior. Uma decisão mudou no caminho: o segredo de assinatura **mora na pendência** — sem ele a retentativa pós-reinício é inassinável, e o gateway resolve conexão por token do provedor, não por ID. Do lado do CRM, `0118` + `gateway_delivery_dead`: o dreno emitia evento que **ninguém escutava**, e agora o descarte chega à Central. **Falta**: T038 e T038a, que pedem ambiente real (gateway + WAHA + número), mesma classe de T022 e T030 |
 | 5 · US3 — autenticidade provada | ✅ **concluída** | as sete requisições do quickstart §3 viraram invariante de banco (`gateway-inbound-autenticidade.test.ts`), somadas ao isolamento entre duas organizações (`gateway-inbound-isolamento.test.ts`). O corpo nunca decide tenant, e a tentativa vira auditoria em vez de silêncio; recusa passou a gravar linha com motivo e `valid_signature` verdadeiro (era `true` fixo — a coluna mentia justamente para quem fosse auditar). Sabotagens do T045 confirmadas vermelhas |
 | 6–8 · mídia, estado, canal novo | ⬜ não iniciadas | |
 
-**Placar de tarefas**: 46 de 82 concluídas.
+**Placar de tarefas**: 52 de 82 concluídas.
 
 **Portões no último commit**: `typecheck` 0 · `lint` 0 erros · `lint:channels` ok ·
 `test:unit` 294 arquivos / 3006 testes verde · `test:db` 75 arquivos / 503 testes verde (1 skip) ·
 `go test ./...` verde nos 14 pacotes do `gateway_go` (rodado em contêiner: a máquina não tem Go).
+
+**Fonte do Constitution Check**: este plano foi escrito contra a **v1.2.0**. A constituição está
+em **v2.0.0** e redefiniu III e IV e acrescentou XIII e XIV. As decisões do plano seguem válidas —
+o gateway já era serviço externo e o envelope já era contrato HTTP —, mas duas mudam de estatuto:
+a fila durável da US2 deixa de ser zelo e vira **exigência do Princípio XIV** (sem réplica, a
+durabilidade tem de estar do lado de fora), e "ambiente fresco" do Princípio IV passa a significar
+**conta nova**, não instalação nova. As justificativas escritas em termos de self-host estão sob
+`TODO(SPEC001_RATIONALE_REWRITE)`.
 
 ## Estratégia de entrega — 5 fatias, cada uma utilizável sozinha
 
