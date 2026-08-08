@@ -240,6 +240,54 @@ documento derivado, fora deste PR.
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
+
+==================================================================================
+EMENDA — 2026-08-08 (terceira do dia)
+
+Version change: 2.1.0 -> 2.2.0
+Bump rationale: MINOR - orientacao nova e material numa secao existente ("Fluxo de
+Desenvolvimento e Portoes"). Nenhum principio foi adicionado, removido ou redefinido; I-XII
+seguem integros, e a contagem de gates do Constitution Check nao muda.
+
+Secao alterada:
+  - "Fluxo de Desenvolvimento e Portoes" -> subsecao nova **"Trabalho em paralelo"**, entre
+    "Cadencia de commit" e "Portoes obrigatorios". Define o conjunto de escrita disjunto como
+    o criterio que autoriza paralelismo, nomeia os quatro impedimentos, e diz o que MUST ser
+    paralelizado e o que MUST NOT ser, mesmo parecendo independente.
+
+Secoes removidas: nenhuma.
+
+Origem: pergunta do dono do produto - "por que nao usar subagentes para fazer partes da tarefa
+que nao interfiram uma na outra pra terminar bem mais rapido?". A pergunta esta certa e a
+resposta estava implicita: paralelizar folha e barato e correto, e foi subusado; paralelizar o
+que compartilha estado perde trabalho em silencio. A emenda escreve o criterio que separa os
+dois casos, para a decisao deixar de depender de julgamento por sessao.
+
+Base empirica (medida nesta sessao, spec 002, fatia F2):
+  - `Bind for 127.0.0.1:54329 failed: port is already allocated` - duas execucoes do portao de
+    banco concorrentes colidem por porta fixa.
+  - O apendice de baseline da migration 0120 e um `create or replace` do da 0119. Invertida a
+    ordem, a correcao desaparece EM SILENCIO, com o banco aparentemente correto.
+  - A propria spec 002 teve um defeito de ORDENACAO de migration achado na analise cruzada
+    (colunas de escopo trazidas da 0120 para a 0118) - a cadeia nao tolera reordenacao.
+
+Plano de migracao (exigencia (c) da Governanca):
+  - **Nenhum trabalho ja feito e invalidado.** A regra vale do merge em diante.
+  - **Sem efeito em portao de CI.** Nenhum job passa a reprovar por uso ou nao-uso de agente
+    paralelo; a regra e de metodo, verificada na revisao do PR.
+  - **Relacao com o Principio XI, resolvida aqui:** a confirmacao por sabotagem MUST NOT ser
+    delegada a agente paralelo. Ela muda implementacao compartilhada e roda o portao - e do
+    orquestrador, depois da integracao.
+
+Artefatos dependentes propagados:
+  ✅ rodape deste arquivo - Version 2.2.0, Last Amended 2026-08-08
+
+TODO(CLAUDE_MD_PARALELO): `CLAUDE.md` nao fala de paralelismo - nao desatualiza com esta
+emenda, mas ganharia a regra do conjunto de escrita na secao de fluxo. Alinhamento de documento
+derivado, fora deste PR.
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES), TODO(CLAUDE_MD_CADENCIA).
 -->
 
 # DeskcommCRM Constitution
@@ -646,6 +694,42 @@ commit da fase (Princípio XI).
 algo quebrou. Um commit por fase é a menor unidade que alguém consegue reverter inteira sem
 quebrar o meio; um commit por task é ruído com custo de bisect.
 
+**Trabalho em paralelo**: trabalho-folha independente SHOULD ser paralelizado em agentes
+simultâneos; trabalho que compartilha estado MUST ser serial. A pergunta que decide não é "estas
+tasks são relacionadas?" — é **"os conjuntos de escrita se cruzam?"**.
+
+Um agente paralelo MUST satisfazer as quatro condições abaixo, e o orquestrador MUST declará-las
+antes de lançar, não descobri-las depois:
+
+1. **Conjunto de escrita disjunto**, arquivo a arquivo, de todo outro agente em voo.
+2. **Nenhum artefato compartilhado de ordem significativa** — `supabase/baseline.sql`,
+   `supabase/migrations/MANIFEST.md`, `lib/database.types.ts`, `specs/**/tasks.md`. Nesses
+   arquivos a ORDEM carrega significado: um apêndice de baseline pode ser `create or replace` de
+   outro anterior, e invertido ele desaparece **em silêncio**, com o banco aparentemente correto.
+   Duas escritas concorrentes ou perdem uma ou trocam a ordem.
+3. **Nenhum portão de banco e nenhuma migration aplicada.** `pnpm test:db` sobe um Postgres
+   efêmero em porta fixa, e o banco de desenvolvimento é recurso único — concorrência ali é
+   colisão, não paralelismo.
+4. **Nenhum commit, push ou troca de branch.** O índice do git é do orquestrador; a árvore de
+   trabalho é compartilhada com outras sessões e worktrees.
+
+Quando as quatro valem, paralelizar MUST ser o padrão: arquivos de teste independentes, rotas
+independentes, telas independentes, leitura e pesquisa em subsistemas distintos. Serializar o que
+é folha desperdiça tempo do dono do produto sem comprar segurança nenhuma.
+
+Duas coisas MUST NOT ser paralelizadas mesmo parecendo independentes: a **cadeia de migrations**,
+porque a ordem É a feature — uma migration posterior lê coluna que a anterior cria, e reordenar
+produz ou falha de criação ou, pior, criação sem filtro que passa verde; e a **confirmação por
+sabotagem** do Princípio XI, que muda implementação compartilhada e roda o portão — ela é do
+orquestrador, depois da integração.
+
+O orquestrador MUST rodar o portão **uma vez**, depois que todos os agentes voltarem. Portão
+rodado por agente paralelo mede uma árvore que já não existe quando os outros integram.
+
+**Rationale**: o custo de serializar é tempo; o custo de paralelizar errado é trabalho perdido em
+silêncio — escrita sobrescrita, apêndice fora de ordem, portão verde medindo estado intermediário.
+O critério do conjunto de escrita separa os dois casos sem depender de julgamento por sessão.
+
 **Portões obrigatórios na branch protection da `main`**:
 
 - `verify` — typecheck + lint + lint:channels + test:unit + test:shell
@@ -698,4 +782,4 @@ aprofundamento por tipo de task, está no Princípio XII.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.1.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
