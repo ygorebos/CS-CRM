@@ -534,3 +534,43 @@ cada um no aparelho.
 - Migrar Instagram, Messenger ou canal oficial.
 - Unificar as três implementações independentes de controle de vazão que hoje coexistem.
 - Qualquer coisa de assinatura, plano ou pagamento.
+
+---
+
+## Estado da entrega (2026-08-08)
+
+**Fases 0–5: completas.** As três frentes (escrita direta no banco, envio, conexão) mais as
+transversais, com 4 migrations (0127–0130) cada uma com a tripla completa, e sabotagem executada em
+cada fatia.
+
+**Fase 6 (execução medida): 9 de 10.** T060, T061, T062, T064, T065, T066, T067, T068, T069 medidas
+com número real, gateway real e provedor real. T063 em 2 de 5 casos — o ambiente sobe por script, o
+gap de produto foi encontrado e corrigido, e o caso do QR segue sem diagnóstico.
+
+### O que a execução achou, e nenhum teste unitário acharia
+
+Cinco defeitos de PRODUTO, todos na **costura** entre peças que passavam individualmente:
+
+1. **Botão de conectar morto na instalação migrada** — a tela perguntava pelo transporte antigo em
+   vez de perguntar se existe *algum* caminho de provisionamento. Tela certa, botão certo, e o
+   corretor sem conseguir clicar.
+2. **Reconciliação olhando o passado imediato** — o provedor leva ~25 min para indexar mensagem
+   enviada por API. Varrer até `agora` declararia faltante tudo o que acabou de sair, em toda
+   rodada, e o alarme de divergência viraria ruído constante.
+3. **Estado do gateway nunca chegando à coluna que a tela lê** — a linha nascia `STARTING` e nada a
+   movia.
+4. **`select` sem a coluna que o próprio ramo novo precisa** — o mesmo modo de falha que a T035 já
+   havia custado uma vez.
+5. **Impasse `created` × `SCAN_QR_CODE`** — a tela esperava um estado que só mudava por causa do
+   pedido que ela não fazia.
+
+**A lição de método** está em `CLAUDE.md` › "Como medir sem produzir verde falso": as regras vieram
+de quatro verdes falsos meus nesta mesma sessão, e cada uma é barata de seguir e cara de descobrir.
+
+### O que falta, e de que depende
+
+| Item | Depende de |
+|---|---|
+| T063 (3 casos) | Diagnóstico do caso do QR — ler `test-results/**/error-context.md` |
+
+Nada mais. As oito outras tarefas da fase estão medidas, e o que restou não é bloqueio de recurso.

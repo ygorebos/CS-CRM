@@ -355,6 +355,63 @@ planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se
 Planejamento atualizado só no fim mentiu o caminho inteiro. Quem retoma lê o plano, não o histórico
 de commits — e um plano atrasado manda a próxima sessão refazer o que já existe.
 
+## Como medir sem produzir verde falso — DOUTRINA (aprendida medindo, 2026-08-08)
+
+Uma sessão inteira de execução da Fase 6 da spec 004 produziu **cinco defeitos de produto** que
+3157 asserções unitárias não pegavam — e, no caminho, **quatro verdes falsos meus**. As regras
+abaixo são o que separou um do outro. Elas custaram caro; leia antes de escrever teste de tela ou
+medição.
+
+### 1. Leia a captura antes de supor
+
+Playwright grava `test-results/**/error-context.md` — a **página no instante da falha**, em YAML.
+Medido: cada suposição minha sobre a causa custou **uma rodada inteira** (subir ambiente, build,
+rodar); cada leitura da captura resolveu em **um minuto**. Foi ela que revelou "Sua conta exige 2FA"
+depois de eu ter errado a causa duas vezes.
+
+### 2. Ausência prova transição; presença prova chegada
+
+Esperar que a tela de desafio **apareça** como sinal de que o código foi aceito passa na hora — ela
+já está visível. O sinal certo é ela **sumir** (`toHaveCount(0)`). Trocar os dois dá verde imediato
+que não mede nada.
+
+### 3. Asserção negativa exige âncora de lugar
+
+`expect(corpo).not.toMatch(/WAHA/)` passa em **qualquer** página que não contenha o termo —
+inclusive numa que o teste nunca quis abrir. Medido: um caso ficou verde medindo a **tela de login**.
+Afirme onde está (`toHaveURL`, ou um elemento que só existe ali) **antes** de afirmar o que não vê.
+
+### 4. Cronômetro independente do laço
+
+Medir latência com `Date.now()` antes da chamada mistura a espera com a duração da anterior — e o
+primeiro intervalo não tem predecessor. Deu **95,9%** onde a verdade era **100%**. Use carimbo de
+quem não participa do laço: `created_at` do Postgres, timestamp do outro processo.
+
+### 5. Dublê responde no formato que VOCÊ escreveu
+
+Teste com dublê não prova formato de campo nem latência de sistema externo. Dois defeitos desta spec
+viviam exatamente aí: a reconciliação varrendo até `agora` (o provedor leva ~25 min para indexar) e
+o `select` sem a coluna que o próprio ramo novo precisa. **Formato e tempo de terceiro só se sabem
+medindo o terceiro.**
+
+### 6. Estado que sobrevive entre execuções é a causa favorita do "piorou sem eu mexer"
+
+Fator de MFA fica no banco; segredo TOTP vive em módulo e morre com o processo. Re-execução começa
+no desafio sem ter o segredo — 5 vermelhos depois de 2 verdes, sem nada do produto mudar. Zere o
+estado externo no `beforeAll`.
+
+### 7. Código TOTP só vale UMA vez
+
+Casos que logam em sequência caem na mesma janela de 30 s e mandam o mesmo código; o segundo é
+recusado. Ou guarde o último enviado e espere a janela virar, ou — melhor — **logue uma vez** e
+compartilhe a sessão (`mode: serial`).
+
+### 8. Recurso pago que o teste cria, o teste apaga
+
+Instância de provedor custa por unidade. Toda execução que provisiona termina com o `DELETE`, e a
+verificação é o registro vazio — não a intenção. É a mesma doutrina de compensação que a feature
+implementa; ela vale para quem a testa.
+
 ## Definition of Done
 
 Antes de declarar uma task pronta:
