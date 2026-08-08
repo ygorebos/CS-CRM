@@ -181,6 +181,39 @@ par contraditório aparece uma vez, com contagem, não uma vez por conversa.
 **Onde aparece**: a mesma lista de lacunas de FR-028 (`components/ai/EvolutionGaps.tsx`) — o corretor
 já vai lá para saber o que carregar; contradição é o mesmo tipo de dívida, não merece tela própria.
 
+### ⚠️ BURACO ABERTO — onde mora o texto de um documento? (bloqueia T083/T084)
+
+**Achado em 2026-08-08, ao começar a F4.** Este modelo não diz onde o texto extraído de um PDF ou
+Markdown é persistido, e as duas tarefas que dependem disso pressupõem que alguém já decidiu:
+
+- **T083** manda "persistir o texto extraído" — sem destino. Hoje `ingestPolicyFile`
+  (`lib/ai/rag/ingest/policy.ts:94-126`) extrai, fragmenta, loga a contagem e **devolve**, sem
+  gravar nada.
+- **T084** manda o indexador "ler material que não é par pergunta/resposta" — sem lugar de onde ler.
+  Hoje `workers/rag-indexer.ts:312-325` consulta **só** `ai_faq_items` e encerra com
+  `skip("no_content_to_index")`.
+
+É o defeito nº 5 da seção "Por que esta feature existe" — *o material que o corretor mais tem é
+aceito e descartado em silêncio* — e ele **não tem modelagem**. Sem esta decisão, FR-004 ("todo
+material aceito DEVE virar conteúdo buscável **ou** falhar de forma visível") não é implementável.
+
+As duas saídas, e por que não é escolha de gosto:
+
+| Saída | O que custa |
+|---|---|
+| **Tabela nova** `ai_source_passages` (tenant-aware, com `scope_id` e `applies_to_all` como as demais) | Aditiva: não toca constraint existente, não migra dado gravado |
+| Afrouxar `ai_faq_items.question` para nullable e marcar o tipo | **Destrutiva**: `question` é `not null` hoje e a tabela tem dado. Exige expand/contract num banco único, sem versão de escape |
+
+**Recomendação do desenvolvedor: a tabela nova.** O Princípio III pede caminho de volta declarado
+para mudança destrutiva, e não há razão para gastar esse caminho quando a alternativa aditiva
+entrega o mesmo. `ai_faq_items` também carrega semântica de FAQ (`question`/`answer`) que um trecho
+de PDF não tem — reusá-la faria a coluna `question` existir vazia em metade das linhas, que é o
+anti-pattern nº 1 da doutrina em outra forma.
+
+**Não decidido aqui de propósito.** É modelagem nova, não detalhe de implementação, e a spec exige
+que o desenho preceda a migration. Enquanto não houver decisão, T083 e T084 ficam bloqueadas — e a
+F4 inteira depende delas para cumprir FR-004. Ver T140.
+
 ---
 
 ## Rastreabilidade e lacunas

@@ -102,7 +102,7 @@ que se descobre, antes de qualquer partição.
 
 > Escrever primeiro e **confirmar que falham** antes de implementar.
 
-- [X] T011 [P] [US2] Teste da cadeia de gates para `assistance_grounding` em `lib/agent-engine/guardrails/before-send.test.ts` — veto quando é afirmação de assistência e `groundings` está vazio, `pass` quando há âncora, `pass` quando não é assistência
+- [X] T011 [P] [US2] Teste da cadeia de gates para `assistance_grounding` em `lib/agent-engine/guardrails/before-send.test.ts` — veto quando é afirmação de assistência e `groundings` está vazio, `pass` quando há âncora, `pass` quando não é assistência — o caso `groundings` vazio É **FR-014**: acervo ausente produz recusa, nunca supressão silenciosa da verificação.
 - [X] T012 [P] [US2] Teste da classificação determinística em `lib/agent-engine/guardrails/assistance-grounding.test.ts` — inclusive o viés de A-03: na dúvida, classifica como assistência
 - [X] T013 [P] [US2] Teste de que busca indisponível é tratada como ausência de lastro em `lib/agent-engine/agent/search-knowledge.test.ts` (FR-013)
 - [X] T014 [P] [US2] Teste de **efeito** do guardrail `rag_must_hit` em `tests/unit/rag-must-hit-efeito.test.ts` — prova de que ligar a opção muda o comportamento, não de que o valor foi gravado (FR-015, SC-012)
@@ -113,8 +113,8 @@ que se descobre, antes de qualquer partição.
 - [X] T016 [US2] Criar migration `supabase/migrations/<ts>_0116_aviso_de_assistencia_sem_lastro.sql` acrescentando o `kind` `assistance_without_grounding`
 - [X] T017 [US2] Acrescentar o mesmo `kind` **na lista existente** do apêndice de `supabase/baseline.sql` (bloco da constraint `agent_inbox_items_kind_check`, hoje na linha ~8999) — nunca em bloco novo, sob pena de quebrar o `update.sh` de clones com vocabulário posterior
 - [X] T018 [US2] Registrar a migration 0116 em `supabase/migrations/MANIFEST.md` com o QUÊ e o PORQUÊ
-- [X] T019 [P] [US2] Implementar a classificação de "afirmação de assistência" em `lib/agent-engine/guardrails/assistance-grounding.ts`, consumindo o léxico de T008 — **nasce em arquivo próprio**, fora de `inbound-turn.ts`, que já tem 1789 linhas e é o hot path
-- [X] T020 [US2] Implementar o gate `assistanceGroundingGate` em `lib/agent-engine/guardrails/assistance-grounding.ts` conforme `contracts/busca-de-lastro.md`
+- [X] T019 [P] [US2] Implementar a classificação de "afirmação de assistência" em `lib/agent-engine/guardrails/assistance-grounding.ts`, consumindo o léxico de T008 — **nasce em arquivo próprio**, fora de `inbound-turn.ts`, que já tem 1789 linhas e é o hot path (FR-009)
+- [X] T020 [US2] Implementar o gate `assistanceGroundingGate` em `lib/agent-engine/guardrails/assistance-grounding.ts` conforme `contracts/busca-de-lastro.md` (FR-009, FR-010)
 - [X] T021 [US2] Inserir o gate em `BEFORE_SEND_GATES` na posição (2.5), entre `lgpd` e `pacing`, em `lib/agent-engine/guardrails/before-send.ts`, e subir `BEFORE_SEND_CHAIN_VERSION` de 6 para 7 com o comentário de racional no padrão das versões anteriores
 - [X] T022 [US2] Fazer o gate nascer **desarmado por default** (`assistanceGroundingEnforced`) em `lib/agent-engine/guardrails/before-send.ts`, no mesmo padrão do `internalVocabularyGate` da v6
 - [X] T023 [US2] Armar o gate no caminho do agente em `lib/agent-engine/agent/inbound-turn.ts`, passando `groundings` e `isAssistanceClaim` ao contexto
@@ -180,9 +180,9 @@ nada, e a resposta continua vindo da **versão local**.
 
 ### Tests for User Story 7 ⚠️
 
-- [X] T034 [P] [US7] Invariante da **trava 1** em `tests/invariants/catalogo-escrita-so-plataforma.test.ts` — escrita no catálogo a partir de qualquer papel de tenant, inclusive `admin`, é barrada por todos os caminhos (SC-021)
-- [X] T035 [P] [US7] Invariante da **trava 2** em `tests/invariants/catalogo-sem-dado-de-ninguem.test.ts` — varredura da partição devolve zero dado pessoal e zero identificador de organização (SC-020)
-- [X] T036 [P] [US7] Invariante da **trava 3** em `tests/invariants/isolamento-com-catalogo.test.ts` — consulta que cruza as duas camadas devolve zero linhas de outra organização, com caso de controle provando que as linhas da org B existem (SC-007)
+- [X] T034 [P] [US7] Invariante da **trava 1** em `tests/invariants/catalogo-escrita-so-plataforma.test.ts` — escrita no catálogo a partir de qualquer papel de tenant, inclusive `admin`, é barrada por todos os caminhos (SC-021) · FR-036
+- [X] T035 [P] [US7] Invariante da **trava 2** em `tests/invariants/catalogo-sem-dado-de-ninguem.test.ts` — varredura da partição devolve zero dado pessoal e zero identificador de organização (SC-020) · FR-038
+- [X] T036 [P] [US7] Invariante da **trava 3** em `tests/invariants/isolamento-com-catalogo.test.ts` — consulta que cruza as duas camadas devolve zero linhas de outra organização, com caso de controle provando que as linhas da org B existem (SC-007) · FR-019
 - [X] T037 [P] [US7] Invariante de não-vazamento entre escopos em `tests/invariants/busca-escopo-nao-vaza.test.ts` — trecho de outro escopo nunca ancora, e `p_scope_id IS NULL` devolve só "vale para todos" (SC-005, FR-016, FR-017)
 - [X] T038 [P] [US7] Invariante de **não-destrutividade** da semeadura em `tests/invariants/semeadura-nao-sobrescreve.test.ts` — install, editar `seed`, criar `local`, update, update de novo: zero perdas, zero sobrescritas, zero duplicatas, e o estado após duas reaplicações idêntico ao de uma (SC-018). **Medir também a resposta, não só as linhas**: com material adotado localmente e versão semeada mais nova presente, a busca ancora na **versão local** (FR-037) — é aqui que a versão anterior de SC-018 passava e o requisito falhava
 - [X] T039 [P] [US7] Invariante em `tests/invariants/indice-unico-de-fontes-removido.test.ts` de que `ai_knowledge_sources_unique_per_agent` **não existe** nem no banco instalado do zero nem no atualizado (brecha 10)
@@ -265,18 +265,19 @@ sobrescrever um assunto de um escopo do catálogo prova as duas camadas e a prec
 
 ### Implementation for User Story 1
 
+- [ ] T140 [US1] ⚠️ **DECIDIR onde mora o texto de um documento** — **bloqueia T083 e T084, e com elas FR-004 inteiro**. O `data-model.md` não modela destino para texto extraído de PDF/Markdown: `ingestPolicyFile` extrai e devolve sem gravar (`lib/ai/rag/ingest/policy.ts:94-126`), e o indexador só lê `ai_faq_items` (`workers/rag-indexer.ts:312-325`). Duas saídas, e uma é destrutiva: **tabela nova `ai_source_passages`** (aditiva, tenant-aware, com `scope_id` e `applies_to_all`) OU afrouxar `ai_faq_items.question` para nullable (expand/contract num banco único, sobre tabela com dado gravado). **Recomendação do desenvolvedor: a tabela nova** — ver a seção do buraco em `data-model.md`. Decisão de modelagem, não de implementação: precede a migration
 - [ ] T079 [US1] Criar migration `supabase/migrations/<ts>_0125_divergencia_de_conteudo.sql` com o registro de divergência (tenant-aware, RLS, material vencedor e perdedor, assunto, data) — **FR-035 tem duas metades e só a do desempate tinha tarefa**; "DEVE registrar a divergência para o corretor" não existia em lugar nenhum. Espelhar no apêndice de `supabase/baseline.sql`
 - [ ] T080 [US1] Gravar a divergência quando o desempate acontecer, no caminho que usa `fn_buscar_lastro` (`lib/agent-engine/agent/search-knowledge.ts`) — registro derivado do que a busca já sabe, sem segunda consulta (DIRC: Calcular)
 - [ ] T081 [US1] Exibir a divergência ao corretor na mesma lista de lacunas de FR-028 (`components/ai/EvolutionGaps.tsx`), identificando os dois materiais — divergência sem superfície é requisito que ninguém cumpre (SC-016)
 - [ ] T082 [US1] Registrar a 0125 em `supabase/migrations/MANIFEST.md` e regenerar `lib/database.types.ts`
-- [ ] T083 [US1] Persistir o texto extraído de PDF/Markdown em `lib/ai/rag/ingest/policy.ts` (hoje `:94-126` extrai só para validar e devolve a contagem)
-- [ ] T084 [US1] Fazer `workers/rag-indexer.ts` ler material que não é par pergunta/resposta (hoje `:313` lê exclusivamente pares e encerra com `skip("no_content_to_index")`)
+- [ ] T083 [US1] ⚠️ **BLOQUEADA por T140** (sem destino modelado). Persistir o texto extraído de PDF/Markdown em `lib/ai/rag/ingest/policy.ts` (hoje `:94-126` extrai só para validar e devolve a contagem)
+- [ ] T084 [US1] ⚠️ **BLOQUEADA por T140** (sem destino modelado). Fazer `workers/rag-indexer.ts` ler material que não é par pergunta/resposta (hoje `:313` lê exclusivamente pares e encerra com `skip("no_content_to_index")`)
 - [ ] T085 [US1] Propagar `scope_id` e `applies_to_all` da fonte para o trecho em `workers/rag-indexer.ts`, e levar `tags`/`locale` de `ai_faq_items` ao trecho, que hoje morrem na ingestão
-- [ ] T086 [P] [US1] Criar a rota `POST /api/v1/knowledge-scopes` em `app/api/v1/knowledge-scopes/route.ts`, com `Idempotency-Key`, rate limit e o `409 escopo_ja_existe` que também cobre colisão com espelho do catálogo
+- [ ] T086 [P] [US1] Criar a rota `POST /api/v1/knowledge-scopes` em `app/api/v1/knowledge-scopes/route.ts`, com `Idempotency-Key`, rate limit e o `409 escopo_ja_existe` que também cobre colisão com espelho do catálogo (FR-002)
 - [ ] T087 [P] [US1] Criar `PATCH /api/v1/knowledge-scopes/{id}` em `app/api/v1/knowledge-scopes/[id]/route.ts`, com renomear, ligar/desligar (é a rota que o interruptor de T068 chama), rate limit e o `403 escopo_do_catalogo_nao_editavel`
 - [ ] T088 [P] [US1] Criar `app/api/v1/knowledge-scopes/[id]/materials/route.ts` (`POST` e `GET`), com rate limit, declarando formato e tamanho máximo **antes** de aceitar (FR-007) e **recusando material que não declara escopo nem "vale para todas"** com `400` e motivo acionável em português — FR-001 diz que material sem as duas declarações não pode ser aceito, e o check do banco sozinho devolve erro que ninguém entende
 - [ ] T089 [P] [US1] Estender `app/api/v1/contacts/[id]/route.ts` para aceitar `knowledge_scope_id` e gravar `knowledge_scope_source = 'cadastro'`, que **vence** o que veio da conversa (FR-017)
-- [ ] T090 [US1] Substituir os 4 slots fixos por lista de N materiais por escopo em `app/app/ai/knowledge/sources/_client.tsx` (hoje `:22` e `:56-68`), com estado inequívoco por material e contagem de trechos (FR-005)
+- [ ] T090 [US1] Substituir os 4 slots fixos por lista de N materiais por escopo em `app/app/ai/knowledge/sources/_client.tsx` (hoje `:22` e `:56-68`), com estado inequívoco por material e contagem de trechos (FR-005), e nenhum material aceito pode ficar sem virar trecho buscável (FR-004)
 - [ ] T091 [US1] Exibir em `app/app/ai/knowledge/scopes/_client.tsx` quais escopos vieram do catálogo e quais são próprios, com os dois caminhos disponíveis ao corretor: desativar para si ou sobrepor com material próprio
 - [ ] T092 [US1] Exigir papel de gestor ou superior e emitir `api_audit_log` em todas as mutações de `app/api/v1/knowledge-scopes/` (FR-032)
 - [ ] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
@@ -327,7 +328,7 @@ sozinha na tela, com o debug desligado.
 ### Implementation for User Story 3
 
 - [ ] T104 [US3] Criar migration `supabase/migrations/<ts>_0126_rastreabilidade_validade_lacunas.sql` com `message_groundings` (tenant-aware, `layer`, `source_ref` com a cópia histórica), espelhá-la no apêndice de `supabase/baseline.sql` e registrar no MANIFEST
-- [ ] T105 [US3] Gravar `message_groundings` no mesmo caminho que envia a mensagem, em `lib/agent-engine/agent/inbound-turn.ts` — ou a resposta é rastreável, ou não é enviada (FR-024)
+- [ ] T105 [US3] Gravar `message_groundings` no mesmo caminho que envia a mensagem, em `lib/agent-engine/agent/inbound-turn.ts` — ou a resposta é rastreável, ou não é enviada (FR-024) Também é o que cumpre FR-021: a âncora vira registro permanente, não campo de conveniência.
 - [ ] T106 [US3] Tirar a citação de trás do toggle de depuração em `components/inbox/MessageBubble.tsx` (hoje `:40-43`) e `hooks/ai/useDebugToggle.ts`
 - [ ] T107 [US3] Exibir em `components/inbox/MessageBubble.tsx` o texto do trecho, o material, o escopo, a data de atualização **e a camada** de origem (FR-022, FR-039)
 - [ ] T108 [US3] Tratar em `components/inbox/MessageBubble.tsx` a ausência de origem em resposta que **não** é de assistência como normal, sem sinalizar problema (US3 cenário 4)
