@@ -12,7 +12,7 @@ clarificação de 2026-08-08. Não há incógnita de produto aqui — só de des
 ## D1 — Onde vive o catálogo curado
 
 **Decisão**: partição própria, três tabelas novas **sem `organization_id`** —
-`catalog_operadoras`, `catalog_materials`, `catalog_chunks`. RLS ligada com policy de leitura para
+`catalog_scopes`, `catalog_materials`, `catalog_chunks`. RLS ligada com policy de leitura para
 `authenticated` e escrita condicionada a `fn_is_platform_admin()`.
 
 **Racional**: a trava 3 do Princípio X v2.0.0 proíbe relaxar RLS de tabela tenant-aware para
@@ -31,11 +31,20 @@ que hoje prova "zero linhas cruzadas" sem exceções a explicar.
 
 ## D2 — Como a busca junta as duas camadas
 
-**Decisão**: função SQL nova — `fn_buscar_lastro(p_agent_id, p_operadora_id, p_embedding, p_k,
+**Decisão**: função SQL nova — `fn_buscar_lastro(p_agent_id, p_scope_id, p_embedding, p_k,
 p_threshold)` — que faz `union all` sobre `ai_chunks` (camada do tenant) e `catalog_chunks` (camada
-curada), devolvendo a camada de cada linha. **Ela não recebe `organization_id` do chamador**:
-deriva de `fn_user_org_ids()`/`auth.uid()` para o caminho autenticado e é revogada de
-`authenticated`, ficando só com `service_role`.
+curada), devolvendo a camada de cada linha. **Ela não recebe `organization_id` do chamador**: o
+tenant e o acervo ativo são **derivados de `p_agent_id`** (`ai_agents.organization_id` e
+`ai_agents.active_kb_version_id`). É revogada de `public`, `anon` e `authenticated`, ficando só com
+`service_role`.
+
+**Corrigido na revisão de brechas de 2026-08-08 (brecha 7).** A primeira redação dizia "deriva de
+`fn_user_org_ids()`/`auth.uid()`", e isso **não funcionaria**: o chamador real é o agent-engine,
+que fala com o banco por Pool `pg` com credencial de serviço (`search-knowledge.ts:65`) — não há
+sessão de usuário, `auth.uid()` é NULL, e a função devolveria vazio sempre. Derivar de `p_agent_id`
+resolve e mantém a exigência: o chamador **aponta um agente**, resolvido server-side a partir da
+conversa, em vez de **afirmar um tenant**. A diferença é a de FR-019 — o isolamento não depende de
+o chamador informar corretamente o próprio tenant.
 
 **Racional**: duas coisas empurram para isso.
 
@@ -161,9 +170,16 @@ gerar um índice ligeiramente diferente.
 
 ## D7 — Precedência entre camadas na recuperação
 
-**Decisão**: quando **qualquer** trecho do acervo do tenant, da operadora em questão, passa o
-limiar para aquela pergunta, os trechos do catálogo da mesma operadora **não ancoram aquela
-resposta**. Aproxima-se "mesmo assunto" por "ambos acima do limiar para a mesma pergunta".
+**Decisão**: quando **qualquer** trecho do acervo do tenant, do escopo em questão, passa o limiar
+para aquela pergunta, os trechos do catálogo **do mesmo balde** não ancoram aquela resposta.
+Aproxima-se "mesmo assunto" por "ambos acima do limiar para a mesma pergunta".
+
+**Balde** = ou o escopo específico, ou "vale para todas" — nunca os dois juntos. Material do
+corretor sobre a Operadora A suprime o material curado **da Operadora A**, e **não** suprime o
+material "vale para todas"; e vice-versa (**brecha 8**, corrigida em 2026-08-08). Sem essa
+separação, um texto do corretor sobre o horário de atendimento dele apagaria o procedimento de
+boleto da operadora, ou o contrário — dois conteúdos com propósitos diferentes disputando o mesmo
+lugar.
 
 **Racional**: FR-035 manda a camada do tenant vencer o catálogo na contradição, e detectar
 "contradição sobre o mesmo assunto" de forma exata exigiria comparar semântica de afirmações — que
@@ -183,23 +199,23 @@ número mágico que ninguém sabe calibrar e que mudaria o resultado de forma in
 
 ## D8 — A identidade da operadora, e onde o contato aponta
 
-**Decisão**: tabela `operadoras` **por tenant** (com `organization_id` e RLS), em que cada linha ou
-aponta para uma `catalog_operadoras` (`catalog_operadora_id` preenchido) ou é do próprio corretor
-(`NULL`). `contacts` ganha FK para `operadoras`, mais a coluna que diz de qual origem o vínculo
-veio.
+**Decisão**: tabela `knowledge_scopes` **por tenant** (com `organization_id` e RLS), em que cada
+linha ou aponta para uma `catalog_scopes` (`catalog_scope_id` preenchido) ou é do próprio corretor
+(`NULL`). `contacts` ganha FK para `knowledge_scopes`, mais a coluna que diz de qual origem o
+vínculo veio.
 
 As linhas espelho do catálogo são materializadas por uma função SQL idempotente, chamada (a) na
 criação da organização e (b) no fim do apêndice de semeadura, para toda organização existente — é o
 que faz operadora nova chegar a clone antigo no `update.sh`.
 
 **Racional**: o contato precisa apontar para **uma** coisa, e ela precisa ser tenant-aware para não
-abrir buraco no Princípio I. Um ponteiro direto para `catalog_operadoras` colocaria uma FK de tabela
+abrir buraco no Princípio I. Um ponteiro direto para `catalog_scopes` colocaria uma FK de tabela
 tenant-aware para tabela sem dono, e a desativação por tenant (trava 4) não teria onde morar.
 A tabela espelho resolve as duas: `is_active` por tenant é a desativação, e `display_name` por
 tenant permite renomear sem tocar no catálogo.
 
-Guardar o código de registro oficial (ANS) na `catalog_operadoras` é a única concessão a uma
-importação futura, conforme A-12 — chave estável, sem FK, sem leitura do banco do Cotador.
+Guardar o código de registro oficial (ANS) na `catalog_scopes` é a única concessão a uma importação
+futura, conforme A-12 — chave estável, sem FK, sem leitura do banco do Cotador.
 
 **Alternativa rejeitada**: `contacts.operadora` como texto. Rejeitada pelo anti-pattern nº 1 do
 `CLAUDE.md` — string que deveria ser FK — e porque "mesma operadora escrita de dois jeitos" viraria
@@ -207,10 +223,33 @@ duas operadoras na hora de filtrar a busca, quebrando SC-005 em silêncio.
 
 ---
 
+## D11 — O nome estrutural não é "operadora"
+
+*(Decisão acrescentada na revisão de brechas de 2026-08-08 — brecha 11.)*
+
+**Decisão**: as tabelas se chamam `knowledge_scopes` e `catalog_scopes`; as colunas, `scope_id`.
+"Operadora" é **rótulo de vocabulário**, resolvido na exibição pelo mesmo mecanismo configurável que
+já renomeia lead/deal/won/lost por pipeline.
+
+**Racional**: FR-033 exige que o rótulo seja configurável e não um conceito cravado — outro nicho
+(clínica com convênios, distribuidora com fornecedores) usa o mesmo mecanismo com outro nome, **sem
+mudança de estrutura**. FR-041 reforça: a estrutura não pode assumir o recorte do primeiro catálogo.
+A própria spec já dá o nome certo ao batizar a entidade "Operadora (**Escopo de Conhecimento**)".
+
+Uma tabela chamada `operadoras` cumpriria a letra de FR-033 (dá para trocar o rótulo na tela) e
+falharia no espírito: o schema passaria a afirmar que o produto é de plano de saúde, e o primeiro
+clone de clínica teria de conviver com isso ou pagar uma migration de renome.
+
+**Alternativa rejeitada**: manter `operadoras` e trocar só o rótulo na UI. Rejeitada por custo
+assimétrico — a mudança é gratuita agora, enquanto isto é documento, e cara depois que houver
+migration aplicada, `database.types.ts` gerado, RLS nomeada e rota publicada.
+
+---
+
 ## D9 — O acervo do tenant deixa de ter 4 slots
 
 **Decisão**: remover o índice único `ai_knowledge_sources_unique_per_agent (agent_id, source_type)
-WHERE is_active` (`supabase/baseline.sql:2286`) e acrescentar `operadora_id` a
+WHERE is_active` (`supabase/baseline.sql:2286`) e acrescentar `scope_id` a
 `ai_knowledge_sources`. O acervo continua sendo **um por agente** (A-04): `ai_knowledge_versions`
 mantém `ai_kbv_one_active_per_agent` (`:2278`), e a reconstrução total a cada mudança
 (`workers/rag-indexer.ts:277-294`) continua valendo.
@@ -220,10 +259,17 @@ impossível — duas FAQs ativas no mesmo agente violam a unicidade. O eixo novo
 **dentro** do acervo, não a repartição do acervo (A-04), então nada além desse índice precisa cair.
 
 **Consequência que a migration tem de tratar**: soltar um índice único é seguro, mas
-`ai_knowledge_sources.operadora_id` nasce nulo nas linhas existentes, e material sem operadora
-declarada é proibido por FR-001. A migration marca as linhas legadas como "vale para todas" — que é
-o comportamento mais próximo do que elas têm hoje (um acervo único, sem eixo) e não perde conteúdo
-de ninguém.
+`ai_knowledge_sources.scope_id` nasce nulo nas linhas existentes, e material sem escopo declarado é
+proibido por FR-001. A migration marca as linhas legadas como "vale para todas" — que é o
+comportamento mais próximo do que elas têm hoje (um acervo único, sem eixo) e não perde conteúdo de
+ninguém.
+
+**Onde o `drop index` tem de morar** (**brecha 10**, corrigida em 2026-08-08): no **apêndice do
+`baseline.sql`**, não só na migration. O snapshot do baseline **recria** esse índice
+(`supabase/baseline.sql:2286`) em toda instalação nova, e o apêndice roda depois dele. Sem o
+`drop index if exists` lá, o clone recém-instalado nasceria com o índice que impede a segunda
+operadora, enquanto o clone atualizado não teria — duas realidades a partir do mesmo arquivo, e o
+defeito apareceria só para quem instalou do zero.
 
 **Alternativa rejeitada**: acervo por operadora (uma `ai_knowledge_versions` ativa por operadora).
 Rejeitada por A-04 e porque multiplicaria por N o custo de reconstrução, que hoje já é total a cada

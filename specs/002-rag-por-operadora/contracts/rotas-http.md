@@ -6,14 +6,19 @@ Mutação bem-sucedida emite `api_audit_log`.
 
 Códigos de erro novos vão para `lib/api/errors.ts` — nunca string literal na rota.
 
+**A regra de nome que estas rotas seguem** (research D11, FR-033/FR-041): **schema e contrato de API
+são neutros de nicho** — `knowledge-scopes`, `scope_id`, `official_code`. **Tela e rótulo carregam o
+vocabulário** — a página é `/app/ai/conhecimento/operadoras` e o usuário lê "Operadora". A linha é
+onde ela dói menos: mudar um rótulo é configuração; mudar um contrato publicado é quebra.
+
 ---
 
-## Superfície do tenant — `/api/v1/operadoras`
+## Superfície do tenant — `/api/v1/knowledge-scopes`
 
 Papel mínimo: `manager` para escrita, `viewer` para leitura (FR-032, A-07). `organization_id`
 resolvido do cookie/JWT, **nunca do body** (Princípio I).
 
-### `GET /api/v1/operadoras`
+### `GET /api/v1/knowledge-scopes`
 
 Lista as operadoras que aquele tenant enxerga — espelhos do catálogo e as próprias, juntas.
 
@@ -23,7 +28,7 @@ Lista as operadoras que aquele tenant enxerga — espelhos do catálogo e as pr�
     {
       "id": "uuid",
       "display_name": "…",
-      "ans_code": "…|null",
+      "official_code": "…|null",
       "origin": "catalogo|proprio",     // FR-039: a camada é visível desde a lista
       "is_active": true,
       "materials_count": 3,
@@ -34,25 +39,25 @@ Lista as operadoras que aquele tenant enxerga — espelhos do catálogo e as pr�
 }
 ```
 
-### `POST /api/v1/operadoras`
+### `POST /api/v1/knowledge-scopes`
 
 Cria operadora própria do tenant (FR-002). Aceita `Idempotency-Key` (Princípio V).
 
-Body: `{ "display_name": "…", "ans_code": "…|null" }`
+Body: `{ "display_name": "…", "official_code": "…|null" }`
 
-`201` com a operadora criada. `409 operadora_ja_existe` quando o nome colide com uma que aquele
+`201` com a operadora criada. `409 escopo_ja_existe` quando o nome colide com uma que aquele
 tenant já enxerga — inclusive espelho do catálogo, para o corretor não criar uma duplicata do que
 já veio pronto.
 
-### `PATCH /api/v1/operadoras/{id}`
+### `PATCH /api/v1/knowledge-scopes/{id}`
 
 Renomear (`display_name`) e ligar/desligar (`is_active`).
 
 Desligar um **espelho do catálogo** é a trava 4: torna o material daquela operadora inerte para
-este tenant e não afeta nenhum outro (FR-008). `403 operadora_do_catalogo_nao_editavel` ao tentar
+este tenant e não afeta nenhum outro (FR-008). `403 escopo_do_catalogo_nao_editavel` ao tentar
 mudar qualquer outro campo de um espelho.
 
-### `POST /api/v1/operadoras/{id}/materiais`
+### `POST /api/v1/knowledge-scopes/{id}/materials`
 
 Carrega material próprio (FR-004, FR-007). `multipart/form-data` para arquivo, JSON para texto
 colado.
@@ -65,28 +70,37 @@ depois em silêncio.
 `202` com o material em `status: "building"`. O estado final chega pela tela, não por polling do
 cliente.
 
-### `GET /api/v1/operadoras/{id}/materiais`
+### `GET /api/v1/knowledge-scopes/{id}/materials`
 
 Estado por material (FR-005): `building | ready | failed | archived`, com `chunks_count` quando
 pronto e `last_index_error` em português quando falhou.
 
+### `PATCH /api/v1/contacts/{id}` — o caminho "cadastro" do vínculo
+
+FR-017 dá ao cadastro **precedência** sobre o que veio da conversa, e sem esta rota não haveria como
+gravá-lo. Aceita `knowledge_scope_id` (ou `null` para desvincular).
+
+Grava sempre `knowledge_scope_source = 'cadastro'`. O agente, quando pergunta na conversa e recebe
+resposta utilizável, grava `'conversa'` — e **nunca sobrescreve** um vínculo de origem `cadastro`.
+A precedência é verificável na coluna, não convencionada no código.
+
 ---
 
-## Superfície de plataforma — `/api/v1/catalogo`
+## Superfície de plataforma — `/api/v1/catalog`
 
 **Só `is_platform_admin`** (FR-036, trava 1). Nenhum papel de tenant alcança, por nenhum caminho —
 inclusive `admin` da organização. Toda mutação auditada com autor e data.
 
-### `GET /api/v1/catalogo/operadoras` · `POST` · `PATCH /{id}`
+### `GET /api/v1/catalog/scopes` · `POST` · `PATCH /{id}`
 
 CRUD da operadora curada. `POST` exige `slug` único — é a chave que a semeadura reconhece.
 
-### `POST /api/v1/catalogo/operadoras/{id}/materiais`
+### `POST /api/v1/catalog/scopes/{id}/materials`
 
 Cria material curado com `origin: "local"`. **Nunca** reescreve material `seed`: editar um material
 existente cria uma **versão nova** (`version + 1`), e a anterior permanece (trava 6, FR-037).
 
-### `GET /api/v1/catalogo/lacunas`
+### `GET /api/v1/catalog/gaps`
 
 O que os clientes daquela instalação perguntaram e o catálogo não cobria, agrupado por operadora e
 assunto (FR-028, lado plataforma).

@@ -52,6 +52,11 @@ migrations tem stubs `SELECT 1;` e o push "passa" deixando o banco vazio.
    **Esperado**: as 20 continuam terminando em recusa. Nenhuma em "respondo com o que eu sei"
    (FR-013, SC-002).
 
+6. **Teste de efeito da configuração** (FR-015, SC-012): desligue "Exigir citação da base" na tela e
+   repita uma pergunta de assistência; ligue e repita. **Esperado**: o comportamento muda de forma
+   observável nos dois sentidos. Hoje essa opção é salva no banco e **nenhum runtime a avalia** — é
+   o defeito que originou o Princípio XI, e provar que o valor foi gravado não fecha nada.
+
 **Sabotagem obrigatória** (Princípio XI): desarme o gate no código e rode o teste da cadeia. Se ele
 continuar verde, o teste é hipótese, não prova.
 
@@ -75,11 +80,24 @@ pnpm test:unit -- before-send
 5. Como cliente **sem operadora conhecida**: o agente pergunta **uma vez**, em linguagem natural.
    Responda; a próxima pergunta já é atendida. Não responda; **esperado**: escala, e não adivinha
    nem quando só existe uma operadora carregada (FR-017).
+6. Registre a operadora na **ficha do contato** e confira que ela vence o que veio da conversa
+   (FR-017, precedência do cadastro).
+7. Pergunta que cruza **duas** operadoras ("meu plano é o X e o da minha mãe é o Y"). **Esperado**:
+   resposta por operadora, cada parte com sua âncora; a parte sem lastro recusada **isoladamente**,
+   sem derrubar a que tem (FR-018).
+8. **Linha de base de SC-006** — com **1** escopo carregado, rode a bateria de perguntas e registre
+   o p95 do tempo até a resposta. Este número é a referência de F4/F5; sem ele, o critério de
+   "não cresce mais que 25%" não tem contra o que comparar.
 
 ```bash
-pnpm test:db     # invariantes: travas 1/2/3 + não-vazamento entre operadoras (SC-007, SC-020, SC-021)
+pnpm test:db     # invariantes: travas 1/2/3 + não-vazamento entre escopos (SC-007, SC-020, SC-021)
 pnpm test:e2e -- operadoras
 ```
+
+> **Esta prova não é vigiada por gate nenhum.** O check `e2e` **não é obrigatório** na branch
+> protection, e a spec da mesma família (`vps-fresh-onboarding`, a jornada `[P0]` de instalação
+> fresca) está entre as 4 que **não rodam no CI** — issue #63. Registre a evidência em
+> `.superpowers/evidence/` e anote no `user-journey-map.md`: nenhum job vai reprovar a regressão.
 
 ---
 
@@ -101,6 +119,17 @@ psql -f supabase/baseline.sql                              # update de novo
 
 **Esperado**: zero materiais perdidos, zero edições locais sobrescritas, zero duplicatas visíveis, e
 o estado após duas reaplicações idêntico ao de uma (SC-018).
+
+4. **O install e o update têm de concordar sobre o índice.** Depois do install fresco, confira:
+
+```sql
+select indexname from pg_indexes where indexname = 'ai_knowledge_sources_unique_per_agent';
+```
+
+**Esperado**: zero linhas, tanto no banco recém-instalado quanto no atualizado. O snapshot recria
+esse índice e o apêndice tem de derrubá-lo; se ele sobrevive num dos dois caminhos, a segunda
+operadora é impossível só para quem instalou do zero — e ninguém percebe até um self-hoster
+reclamar (brecha 10).
 
 ---
 

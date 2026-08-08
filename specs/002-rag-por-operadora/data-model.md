@@ -8,21 +8,27 @@ apêndice idempotente no `baseline.sql` + linha no MANIFEST.
 tabelas `catalog_*` **não têm** `organization_id` e existem sob as sete travas do Princípio X
 v2.0.0. Nenhuma tabela existente muda de lado.
 
+**O nome estrutural é "escopo de conhecimento", não "operadora"** (research D11, FR-033/FR-041). A
+spec batiza a entidade "Operadora (Escopo de Conhecimento)" porque outro nicho — clínica com
+convênios, distribuidora com fornecedores — usa o mesmo mecanismo com outro nome. "Operadora" é o
+**rótulo** que o nicho de validação exibe, resolvido pelo mesmo vocabulário configurável que já
+renomeia lead/deal/won/lost.
+
 ---
 
 ## Camada curada (sem dono de tenant) — F2/F3
 
-### `catalog_operadoras`
+### `catalog_scopes`
 
-A operadora como o fabricante a mantém. Compartilhada por todas as organizações da instalação.
+O escopo como o fabricante o mantém. Compartilhado por todas as organizações da instalação.
 
 | Coluna | Tipo | Regra |
 |---|---|---|
 | `id` | `uuid pk` | `gen_random_uuid()` |
 | `slug` | `text not null unique` | chave estável da semeadura; é por ela que `on conflict do nothing` reconhece o que já existe |
 | `display_name` | `text not null` | o que o corretor lê |
-| `ans_code` | `text` | registro oficial. Chave estável para uma importação futura (A-12). **Sem FK**, sem leitura de banco externo |
-| `is_active` | `boolean not null default true` | desativação **global**, do fabricante. Não confundir com a do tenant, que vive em `operadoras` |
+| `official_code` | `text` | registro oficial (ANS, no nicho de saúde). Chave estável para uma importação futura (A-12). **Sem FK**, sem leitura de banco externo |
+| `is_active` | `boolean not null default true` | desativação **global**, do fabricante. Não confundir com a do tenant, que vive em `knowledge_scopes` |
 | `created_at` / `updated_at` | `timestamptz not null default now()` | |
 
 **RLS**: leitura para `authenticated`; escrita só com `fn_is_platform_admin()` (trava 1).
@@ -34,8 +40,8 @@ A unidade que quem cura reconhece e corrige. **Versionada e nunca reescrita** (t
 | Coluna | Tipo | Regra |
 |---|---|---|
 | `id` | `uuid pk` | |
-| `catalog_operadora_id` | `uuid not null references catalog_operadoras(id)` | ou o marcador de "vale para todas" — ver abaixo |
-| `applies_to_all` | `boolean not null default false` | quando `true`, `catalog_operadora_id` é nulo. **Check**: exatamente um dos dois preenchido (FR-001) |
+| `catalog_scope_id` | `uuid references catalog_scopes(id)` | nulo quando `applies_to_all` |
+| `applies_to_all` | `boolean not null default false` | **check**: exatamente um dos dois preenchido (FR-001) |
 | `slug` | `text not null` | estável entre versões |
 | `version` | `integer not null` | **unique `(slug, version)`** — é o par que a semeadura usa para não sobrescrever |
 | `title` | `text not null` | |
@@ -44,11 +50,11 @@ A unidade que quem cura reconhece e corrige. **Versionada e nunca reescrita** (t
 | `published_at` | `timestamptz not null default now()` | é a "recência" do desempate de FR-035 |
 | `origin` | `text not null check in ('seed','local')` | `seed` = veio da semeadura; `local` = escrito pelo administrador daquela instalação. Separar os dois é o que permite provar SC-018 |
 
-**RLS**: idêntica à `catalog_operadoras`.
+**RLS**: idêntica à `catalog_scopes`.
 
-**Por que `applies_to_all` é coluna e não uma operadora fictícia "todas"**: uma operadora fictícia
+**Por que `applies_to_all` é coluna e não um escopo fictício "todos"**: um escopo fictício
 apareceria na lista do corretor e no filtro do contato, e alguém acabaria vinculando um cliente a
-ela. Coluna booleana não tem esse caminho.
+ele. Coluna booleana não tem esse caminho.
 
 ### `catalog_chunks`
 
@@ -58,7 +64,7 @@ O trecho recuperável do catálogo. Espelha `ai_chunks` no formato, sem `organiz
 |---|---|---|
 | `id` | `uuid pk` | |
 | `catalog_material_id` | `uuid not null references catalog_materials(id) on delete cascade` | |
-| `catalog_operadora_id` | `uuid` | denormalizado do material, para a busca filtrar sem join (a operadora viaja no trecho — exigência da entidade **Trecho** da spec) |
+| `catalog_scope_id` | `uuid` | denormalizado do material, para a busca filtrar sem join (o escopo viaja no trecho — exigência da entidade **Trecho** da spec) |
 | `applies_to_all` | `boolean not null default false` | idem |
 | `position` | `integer not null` | |
 | `content` | `text not null` | |
@@ -68,55 +74,55 @@ O trecho recuperável do catálogo. Espelha `ai_chunks` no formato, sem `organiz
 | `embedding_model` | `text not null` | o que permite re-embeddar só quando o modelo muda |
 | `metadata` | `jsonb not null default '{}'` | |
 
-**Duplicação declarada** (`catalog_operadora_id` e `applies_to_all` vivem no material **e** no
-trecho): source of truth é `catalog_materials`; o trecho carrega cópia porque a busca filtra por
-operadora antes de qualquer join, e porque a spec exige que a restrição de escopo seja verificável
-**no próprio trecho**, não por associação. Mantida por trigger de sincronização, não por cron
-(anti-pattern nº 5).
+**Duplicação declarada** (`catalog_scope_id` e `applies_to_all` vivem no material **e** no trecho):
+source of truth é `catalog_materials`; o trecho carrega cópia porque a busca filtra por escopo antes
+de qualquer join, e porque a spec exige que a restrição seja verificável **no próprio trecho**, não
+por associação. Mantida por trigger de sincronização, não por cron (anti-pattern nº 5).
 
 ---
 
 ## Camada do tenant — F2/F4
 
-### `operadoras` (nova, tenant-aware)
+### `knowledge_scopes` (nova, tenant-aware)
 
-A operadora **como aquele tenant a vê**. Toda operadora visível a um corretor tem linha aqui —
-inclusive as que vieram do catálogo.
+O escopo **como aquele tenant o vê**. Todo escopo visível a um corretor tem linha aqui — inclusive
+os que vieram do catálogo.
 
 | Coluna | Tipo | Regra |
 |---|---|---|
 | `id` | `uuid pk` | |
 | `organization_id` | `uuid not null references organizations(id) on delete cascade` | Princípio I |
-| `catalog_operadora_id` | `uuid references catalog_operadoras(id)` | preenchido = espelho do catálogo; nulo = criada pelo corretor (FR-002) |
+| `catalog_scope_id` | `uuid references catalog_scopes(id)` | preenchido = espelho do catálogo; nulo = criado pelo corretor (FR-002) |
 | `display_name` | `text not null` | o corretor pode renomear sem tocar no catálogo |
-| `ans_code` | `text` | herdado do catálogo quando espelho |
-| `is_active` | `boolean not null default true` | **é a desativação da trava 4**: desligar aqui torna o material daquela operadora inerte só para este tenant (FR-008) |
+| `official_code` | `text` | herdado do catálogo quando espelho |
+| `is_active` | `boolean not null default true` | **é a desativação da trava 4**: desligar aqui torna o material daquele escopo inerte só para este tenant (FR-008) |
 | `created_at` / `updated_at` | `timestamptz` | |
 
-**Índices**: `unique (organization_id, catalog_operadora_id) where catalog_operadora_id is not null`
-— um espelho por catálogo por tenant, e é o que torna a materialização idempotente.
+**Índices**: `unique (organization_id, catalog_scope_id) where catalog_scope_id is not null` — um
+espelho por escopo de catálogo por tenant, e é o que torna a materialização idempotente.
 
-**RLS**: `tenant_isolation_operadoras_all` via `fn_user_org_ids()`.
+**RLS**: `tenant_isolation_knowledge_scopes_all` via `fn_user_org_ids()`.
 
-**Materialização dos espelhos**: função SQL idempotente, sem HTTP (Princípio V), chamada (a) na
-criação da organização e (b) no fim do apêndice de semeadura para toda organização existente — é o
-que faz operadora curada nova alcançar clone antigo na atualização.
+**Materialização dos espelhos**: `fn_sincronizar_escopos_do_catalogo(p_organization_id)`, função SQL
+idempotente e sem HTTP (Princípio V), chamada (a) na criação da organização e (b) no fim do apêndice
+de semeadura para toda organização existente — é o que faz escopo curado novo alcançar clone antigo
+na atualização.
 
 ### `contacts` — colunas novas
 
 | Coluna | Tipo | Regra |
 |---|---|---|
-| `operadora_id` | `uuid references operadoras(id)` | FK, nunca texto (anti-pattern nº 1) |
-| `operadora_source` | `text check in ('cadastro','conversa')` | **cadastro vence conversa** (FR-017). É a coluna que torna a precedência verificável em vez de convencionada |
-| `operadora_confirmed_at` | `timestamptz` | quando veio da conversa, é o que sustenta a política de não perguntar de novo (A-05) |
+| `knowledge_scope_id` | `uuid references knowledge_scopes(id)` | FK, nunca texto (anti-pattern nº 1) |
+| `knowledge_scope_source` | `text check in ('cadastro','conversa')` | **cadastro vence conversa** (FR-017). É a coluna que torna a precedência verificável em vez de convencionada |
+| `knowledge_scope_confirmed_at` | `timestamptz` | quando veio da conversa, é o que sustenta a política de não perguntar de novo (A-05) |
 
-Nulo em qualquer uma delas = operadora desconhecida, que é **estado tratado, não erro**.
+Nulo em qualquer uma delas = escopo desconhecido, que é **estado tratado, não erro**.
 
 ### `ai_knowledge_sources` — colunas novas e um índice a menos
 
 | Mudança | Regra |
 |---|---|
-| `+ operadora_id uuid references operadoras(id)` | a qual operadora o material se aplica |
+| `+ scope_id uuid references knowledge_scopes(id)` | a qual escopo o material se aplica |
 | `+ applies_to_all boolean not null default false` | **check**: exatamente um dos dois (FR-001) |
 | `+ valid_until date` | validade opcional (FR-025) |
 | `− ai_knowledge_sources_unique_per_agent` | o índice que hoje impede duas fontes ativas do mesmo tipo por agente (`baseline.sql:2286`) — é ele que torna a segunda operadora impossível |
@@ -125,19 +131,32 @@ Nulo em qualquer uma delas = operadora desconhecida, que é **estado tratado, n�
 `applies_to_all = true`. É o que mais se aproxima do que elas são hoje — um acervo único, sem eixo —
 e não perde conteúdo de nenhum clone.
 
-### `ai_chunks` — coluna nova
+**O `drop index` vai no apêndice do `baseline.sql`, não só na migration** (brecha 10). O snapshot
+recria esse índice em toda instalação nova, e o apêndice roda depois dele. Sem o `drop index if
+exists` lá, instalação fresca nasceria com o índice e clone atualizado não — duas realidades a
+partir do mesmo arquivo.
 
-`+ operadora_id uuid` e `+ applies_to_all boolean`, denormalizados da fonte pela mesma razão de
+### `ai_chunks` — colunas novas
+
+`+ scope_id uuid` e `+ applies_to_all boolean`, denormalizados da fonte pela mesma razão de
 `catalog_chunks`. `organization_id` continua `not null`: **nada aqui muda de lado**.
 
 ---
 
-## Rastreabilidade e lacunas — F1/F5
+## Rastreabilidade e lacunas
 
-### `message_groundings` (nova, tenant-aware)
+### F1 — a âncora entra no `insert` da mensagem
 
-O registro permanente que liga a mensagem enviada aos trechos que a fundamentaram. É o artefato que
-torna o Princípio X verificável, e é escrito **antes do envio** (research D5).
+Sem tabela nova. As citações passam a ser gravadas em `messages.metadata` **no insert**, não num
+`update` posterior (research D5). É o que fecha FR-024 com a menor mudança possível, e é por isso
+que F1 não tem schema além de uma linha de vocabulário.
+
+### `message_groundings` (nova, tenant-aware) — **F5**
+
+O registro permanente que liga a mensagem enviada aos trechos que a fundamentaram, com a camada de
+origem e a cópia histórica do conteúdo. Entra em F5, não em F1: é onde a rastreabilidade precisa
+**sobreviver à atualização do material** (FR-023) e mostrar a camada na tela (FR-039), o que
+`messages.metadata` sozinho não sustenta.
 
 | Coluna | Tipo | Regra |
 |---|---|---|
@@ -146,7 +165,7 @@ torna o Princípio X verificável, e é escrito **antes do envio** (research D5)
 | `message_id` | `uuid not null references messages(id) on delete cascade` | |
 | `layer` | `text not null check in ('tenant','catalog')` | é o que FR-039 mostra na tela |
 | `chunk_id` | `uuid not null` | sem FK: o trecho pode ser reconstruído por uma versão nova do acervo, e a rastreabilidade tem de sobreviver a isso (FR-023) |
-| `source_ref` | `jsonb not null` | cópia do que importava na época — texto do trecho, título do material, operadora, data de atualização |
+| `source_ref` | `jsonb not null` | cópia do que importava na época — texto do trecho, título do material, escopo, data de atualização |
 | `similarity` | `real not null` | |
 | `created_at` | `timestamptz not null default now()` | |
 
@@ -156,15 +175,15 @@ reconstruído — o indexador reconstrói o acervo inteiro a cada mudança
 (`workers/rag-indexer.ts:277-294`). A duplicação é deliberada e tem source of truth declarado: a
 cópia é a verdade histórica, o material é a verdade atual.
 
-### `knowledge_gaps` — derivada, não tabela nova
+### Lacunas — derivadas, não tabela nova — **F5**
 
 As lacunas de FR-028/FR-029 saem de `knowledge_searches`, que já grava `hits`, `top_score` e
 `threshold` (`lib/agent-engine/agent/search-knowledge.ts:85-90`) e já é agregada em "sem resposta" e
-"quase acertou" (`lib/ai/evolution/aggregate.ts:88-90`). O que falta é o **eixo de operadora** e o
-**motivo da recusa**: duas colunas em `knowledge_searches` (`operadora_id`, `refusal_reason`), não
-uma tabela nova. Doutrina DIRC: **Calcular**, não Duplicar.
+"quase acertou" (`lib/ai/evolution/aggregate.ts:88-90`). O que falta é o **eixo de escopo** e o
+**motivo da recusa**: duas colunas em `knowledge_searches` (`scope_id`, `refusal_reason`), não uma
+tabela nova. Doutrina DIRC: **Calcular**, não Duplicar.
 
-### `agent_inbox_items` — vocabulário novo
+### `agent_inbox_items` — vocabulário novo — **F1**
 
 Um `kind` novo, `assistance_without_grounding`, acrescentado **na lista existente** do apêndice
 (`baseline.sql:8999`), nunca num bloco novo — reconstruir a mesma constraint em N blocos quebra o
@@ -196,12 +215,14 @@ edições sobrescritas.
 
 ## O que este modelo NÃO faz
 
-- **Não reparte o acervo por operadora.** Continua um `ai_knowledge_versions` ativo por agente
-  (A-04, `baseline.sql:2278`). A operadora é eixo **dentro** do acervo.
+- **Não reparte o acervo por escopo.** Continua um `ai_knowledge_versions` ativo por agente
+  (A-04, `baseline.sql:2278`). O escopo é eixo **dentro** do acervo.
 - **Não guarda dado de cliente no catálogo.** É a trava 2 e o critério SC-020: varredura da
   partição curada devolve zero dado pessoal e zero identificador de organização.
-- **Não cria FK atravessando a fronteira de camada a partir do tenant para o catálogo além do
-  espelho.** `operadoras.catalog_operadora_id` é o único ponto de contato, e ele existe justamente
-  para que nenhum outro precise.
+- **Não crava o nicho no schema.** Nenhuma tabela ou coluna se chama "operadora" (D11). O rótulo
+  vive no vocabulário configurável.
+- **Não cria FK atravessando a fronteira de camada além do espelho.**
+  `knowledge_scopes.catalog_scope_id` é o único ponto de contato, e ele existe justamente para que
+  nenhum outro precise.
 - **Não versiona o acervo do tenant por material.** A rastreabilidade histórica vive em
   `message_groundings.source_ref`, não numa árvore de versões de conteúdo que ninguém pediu.

@@ -53,7 +53,7 @@ e com dono declarado na Central quando travar (Princípio V).
 O bloco termina chamando a função idempotente de materialização para **toda organização existente**:
 
 ```sql
-select public.fn_sincronizar_operadoras_do_catalogo(o.id) from public.organizations o;
+select public.fn_sincronizar_escopos_do_catalogo(o.id) from public.organizations o;
 ```
 
 É isto que faz operadora curada nova chegar a quem instalou há seis meses e roda `update.sh`. Sem
@@ -61,6 +61,26 @@ essa linha, a semeadura só serviria a instalação nova — e a atualização e
 
 A mesma função é chamada na criação de organização, para que tenant novo em instalação antiga
 também nasça enxergando o catálogo.
+
+### 4. O apêndice desfaz o que o snapshot refaz.
+
+O `baseline.sql` é um dump `--schema-only` **mais** o apêndice idempotente no fim. Toda instalação
+nova executa os dois, nessa ordem — e o snapshot **recria** o índice
+`ai_knowledge_sources_unique_per_agent` (`baseline.sql:2286`), que é justamente o que impede a
+segunda operadora de existir.
+
+Por isso o apêndice de F4 tem de conter, explicitamente:
+
+```sql
+drop index if exists public.ai_knowledge_sources_unique_per_agent;
+```
+
+Sem essa linha, o clone **recém-instalado** nasce com o índice e o clone **atualizado** não — duas
+realidades diferentes a partir do mesmo arquivo, e o defeito aparece só para quem instala do zero,
+que é exatamente quem a doutrina de QA Visual manda proteger primeiro (brecha 10).
+
+A regra geral que isso ilustra: **o apêndice não é só "o que veio depois"** — é onde se corrige o
+que o snapshot afirma e a doutrina já não quer.
 
 ---
 

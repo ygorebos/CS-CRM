@@ -56,15 +56,18 @@ jornadas. Estas cinco fatias são a resposta.
 escalações e 0 afirmações factuais — inclusive com a busca de conhecimento derrubada de propósito.
 A conversão continua funcionando integralmente.
 
-Retira o maior risco do plano sem depender de nenhuma tabela nova. Se o veto determinístico não
-for viável na cadeia atual, é aqui que se descobre — antes de qualquer schema.
+Retira o maior risco do plano com a **menor mudança de schema possível**: uma linha no vocabulário
+de `agent_inbox_items` (migration 0116), e nada mais. Nenhuma tabela nova. Se o veto determinístico
+não for viável na cadeia atual, é aqui que se descobre — antes de qualquer partição.
 
 Entrega: gate `assistance_grounding` na cadeia (versão 6 → 7); classificação determinística de
 "afirmação de assistência"; `knowledge_unavailable` tratado como ausência de lastro em vez de
-"responda com o que você já sabe"; citação virando invariante de envio (some o `update` pós-envio);
-recusa gerando escalação + item na Central (`agent_inbox_items` kind novo).
+"responda com o que você já sabe"; citação virando invariante de envio, gravada no **insert** da
+mensagem (`messages.metadata`, que já existe) em vez do `update` pós-envio; o guardrail
+`rag_must_hit`, hoje salvo e nunca avaliado, passando a ter efeito observável; recusa gerando
+escalação + item na Central.
 
-Cobre: FR-009 a FR-014, FR-020, FR-024, A-02, A-03 · SC-001, SC-002, SC-011.
+Cobre: FR-009 a FR-015, FR-020, FR-024, A-02, A-03 · SC-001, SC-002, SC-011, SC-012 (parte).
 
 ### F2 — A instalação nasce sabendo *(≈2 jornadas)*
 
@@ -72,13 +75,17 @@ Cobre: FR-009 a FR-014, FR-020, FR-024, A-02, A-03 · SC-001, SC-002, SC-011.
 pergunta algo coberto pelo catálogo e recebe resposta ancorada; cliente de outra operadora
 pergunta o mesmo e é recusado.
 
-Entrega: a partição curada (`catalog_*`), a tabela `operadoras` por tenant com ponteiro para o
-catálogo, o vínculo contato↔operadora pela conversa, a função de busca nova com escopo por
-operadora e sem tenant vindo do chamador, e a semeadura versionada com embeddings pré-computados.
-Tela do tenant: lista de operadoras em leitura, com a porta declarada no registry.
+Entrega: a partição curada (`catalog_*`), a tabela `knowledge_scopes` por tenant com ponteiro para o
+catálogo, o vínculo contato↔escopo pelas duas vias, a função de busca nova com escopo por operadora
+e sem tenant vindo do chamador, e a semeadura versionada com embeddings pré-computados. Tela do
+tenant: lista de operadoras em leitura, com a porta declarada no registry e o rótulo vindo do
+vocabulário configurável, não cravado.
 
-Cobre: FR-016, FR-017 (via conversa), FR-019, FR-030, FR-038, FR-041 · SC-005, SC-007, SC-017,
-SC-020, SC-021.
+**Registra a linha de base de SC-006 aqui**, com 1 escopo carregado — é a única execução em que ela
+pode ser medida honestamente, e F4/F5 comparam contra ela.
+
+Cobre: FR-016, FR-017, FR-018, FR-019, FR-030, FR-031, FR-033, FR-038, FR-041 · SC-005, SC-007,
+SC-017, SC-020, SC-021.
 
 ### F3 — Nós curamos, e atualizar não destrói *(≈2 jornadas)*
 
@@ -127,8 +134,10 @@ SC-013, SC-015.
 agent-engine), `pgvector`, Vercel AI SDK v7 via AI Gateway, Zod, Playwright, Vitest
 
 **Storage**: Postgres (Supabase). Duas partições novas: `catalog_*` **sem** `organization_id`
-(compartilhada pela instalação) e `operadoras` + colunas em `contacts` **com** `organization_id` e
-RLS. Embeddings em `vector(1536)`, mesmo tipo de `ai_chunks`.
+(compartilhada pela instalação) e `knowledge_scopes` + colunas em `contacts` **com**
+`organization_id` e RLS. Embeddings em `vector(1536)`, mesmo tipo de `ai_chunks`. O nome estrutural
+é **escopo de conhecimento**, não "operadora" — "operadora" é o rótulo configurável que o nicho de
+validação usa (FR-033, FR-041; research D11).
 
 **Testing**: `pnpm test:db` é o gate certo — a feature toca schema, RLS e isolamento. Playwright
 pela tela para F2, F4 e F5 (Princípio IV). `test:unit` para a cadeia de gates de F1, com sabotagem
@@ -163,7 +172,7 @@ Fonte: `.specify/memory/constitution.md` **v2.0.0** — a emenda do Princípio X
 
 | # | Gate | Pergunta que o plano responde | Status |
 |---|---|---|---|
-| I | Isolamento de tenant | `operadoras` e as colunas novas de `contacts` são tenant-aware com `organization_id` + RLS. A partição `catalog_*` **não** é tenant-aware e é a exceção declarada do Princípio X — legível por todos, gravável só por `is_platform_admin`. A função de busca nova **não recebe o tenant do chamador**: deriva de `auth.uid()`/`fn_user_org_ids()` e é revogada de `authenticated`, fechando o buraco que a atual `retrieve_top_k_chunks` tem hoje. | **PASS** |
+| I | Isolamento de tenant | `knowledge_scopes` e as colunas novas de `contacts` são tenant-aware com `organization_id` + RLS. A partição `catalog_*` **não** é tenant-aware e é a exceção declarada do Princípio X — legível por todos, gravável só por `is_platform_admin`. A função de busca nova **não recebe o tenant do chamador**: deriva de `p_agent_id` (research D2) e é revogada de `public`, `anon` e `authenticated`, fechando o buraco que a atual `retrieve_top_k_chunks` tem hoje. | **PASS** |
 | II | Nada é ilha | Entrada: material curado + material do corretor + pergunta do cliente. Saída: resposta ancorada, escalação, item na Central, lacuna na tela. Atividade legível: recusa vira aviso, não `return` mudo. Portas: `lib/navigation/registry.ts` para a tela do tenant; nav do `app/admin/(protected)` para a curadoria. Anti-morte: as lacunas de FR-028 realimentam as duas camadas. Mapa vivo em `docs/architecture/` com ≥2 arestas. | **PASS** |
 | III | Schema viaja com o clone | Cada fatia com schema sai com a tripla: migration `<timestamp>_0116+_<slug>.sql`, apêndice idempotente no `baseline.sql`, linha no MANIFEST. A semeadura do catálogo é idempotente **e não-destrutiva** — `on conflict do nothing`, nunca `do update` (trava 6; ver research.md D6). Constraint nova corrige dados antes de existir. | **PASS** |
 | IV | Prova pela tela | F2, F4 e F5 provadas por Playwright em banco fresco do `baseline.sql` + `bootstrap-owner.ts`, com envs opcionais ausentes. F1 tem prova de conversa real, não `curl`. Receiver real não se aplica: não há efeito externo novo. | **PASS** |
@@ -174,13 +183,42 @@ Fonte: `.specify/memory/constitution.md` **v2.0.0** — a emenda do Princípio X
 | IX | Vender ou assistir | A feature declara **assistir** no cabeçalho da spec. O veto de F1 recusa e escala quando não há respaldo, e FR-020 garante que a exigência não alcança o discurso de conversão. | **PASS** |
 | X | Operadora é dado curado | Nada de operadora em `if`, prompt ou tabela de código. Operadora nova na própria instalação = carregar conteúdo. Rastreabilidade até o trecho **e** até a camada (FR-039). As sete travas: (1) escrita só `is_platform_admin` — F3; (2) sem dado pessoal nem de organização — FR-038, SC-020; (3) nenhuma tabela tenant-aware afrouxada — partição própria, research.md D1; (4) tenant desativa e sobrepõe — FR-008, FR-035; (5) origem diz a camada — FR-039; (6) semeadura só acrescenta versão — FR-037, SC-018; (7) nada de telemetria voltando — A-18. | **PASS sob v2.0.0** — ver Complexity Tracking |
 | XI | Teste que prova e vigia | F1: teste da cadeia confirmado por sabotagem (desarmar o gate tem de deixar vermelho). F2/F3: `pnpm test:db` com invariantes das travas 1, 2 e 3 e do não-vazamento entre operadoras. F4/F5: Playwright. A opção "Exigir citação da base" ganha **teste de efeito**, não de gravação — é o defeito que originou o Princípio XI. | **PASS** |
-| XII | Contexto antes de ação | A sessão que produziu este plano declarou ter lido a constituição (Version **1.2.0** na leitura de entrada, hoje **2.0.0** por emenda desta mesma sessão), o `CLAUDE.md` e o `README.md` antes de agir. Divergência com o Princípio X foi **reportada, não resolvida em silêncio**, e virou emenda em PR próprio. Aprofundamento lido para o tipo desta task: `supabase/baseline.sql` (schema/RLS), o registry de navegação, e a cadeia de `before-send`. | **PASS** |
+| XII | Contexto antes de ação | A sessão que produziu este plano declarou ter lido a constituição (Version **1.2.0** na leitura de entrada, hoje **2.0.0** por emenda desta mesma sessão), o `CLAUDE.md` e o `README.md` antes de agir. Divergência com o Princípio X foi **reportada, não resolvida em silêncio**, e virou emenda em PR próprio. Aprofundamento lido para o tipo desta task: `supabase/baseline.sql` (schema/RLS), o registry de navegação, a cadeia de `before-send`, e — na revisão de brechas — `docs/current-state.md` e `docs/harness-audit.md`, que produziram a seção "Riscos herdados" e uma segunda divergência documental reportada (contagem de migrations desatualizada). | **PASS** |
 
-**Não lido, e declarado**: `docs/current-state.md` e `docs/index.md` não foram lidos nesta sessão.
-A consequência é que as estimativas de jornada por fatia são derivadas do código medido, não do
-inventário de "pronto, incompleto e quebrado" — trate-as como ordem de grandeza, não como
-compromisso. `docs/harness-audit.md` também não foi lido; nenhum resultado de CI foi tratado como
-prova aqui.
+---
+
+## Riscos herdados do estado atual do repositório
+
+Lidos em `docs/current-state.md` e `docs/harness-audit.md`. Não são criados por esta feature —
+são o terreno em que ela cai, e cada um muda como uma fatia é executada ou provada.
+
+1. **A prova mais importante desta feature não é vigiada por gate nenhum.** O `e2e` **não é check
+   obrigatório** na branch protection, e `vps-fresh-onboarding.spec.ts` — a jornada de instalação
+   fresca, `[P0]` da doutrina de QA Visual — está entre as 4 specs que **não rodam no CI**
+   (`current-state.md` §4.1, issue #63). A prova de F2 ("a instalação nasce sabendo") é exatamente
+   dessa família. Consequência prática: ela é manual, e a evidência tem de ser registrada em
+   `.superpowers/evidence/`, porque nenhum job vai reprovar a regressão dela.
+2. **`inbound-turn.ts` tem 1789 linhas e é o hot path do produto** (`current-state.md` §5.5,
+   2,4× o segundo maior arquivo de lógica). F1 e F5 mexem nele. Toda mudança ali entra com teste
+   confirmado por sabotagem, e o que puder nascer em arquivo próprio (`assistance-grounding.ts`,
+   a classificação) nasce fora dele.
+3. **89 dos 169 handlers usam `createAdminClient`, sem enforcement automático** da regra "filtre
+   `organization_id` manualmente, nunca do body" (`current-state.md` §5.1). As rotas novas de F2/F3
+   entram nessa conta. Mitigação desta feature: `fn_buscar_lastro` **não aceita** o tenant do
+   chamador (research D2), o que tira o caminho mais perigoso das mãos do handler.
+4. **Rate limit existe em 2 pontos do sistema inteiro** (`current-state.md` §4.3, 🔴), e o fallback
+   sem Upstash é por processo. As rotas novas não podem assumir infra de rate limit pronta: onde o
+   Princípio VI o exige, ele é implementado junto, não herdado.
+5. **`pnpm gov:verify` não cobre `test:db` nem `test:e2e`** (`harness-audit.md` item de nível H5).
+   Nenhuma fatia com schema pode ser declarada pronta por `gov:verify` verde — o quickstart lista a
+   sequência completa de propósito.
+
+**Divergência documental encontrada e reportada** (Princípio XII, não resolvida em silêncio):
+`docs/current-state.md` afirma "81 migrations, até `0092`" e que o apêndice do `baseline.sql` cobre
+até a `0092`. O repositório tem migrations até **0115** — o documento tem `last_updated: 2026-07-29`
+e envelheceu. Não altera nenhuma decisão deste plano (a numeração 0116+ foi tirada de `ls
+supabase/migrations/`, não do documento), mas fica registrado como issue de alinhamento em vez de
+correção silenciosa.
 
 ---
 
@@ -202,12 +240,13 @@ specs/002-rag-por-operadora/
 
 ```text
 supabase/
-├── migrations/
-│   ├── <ts>_0116_catalogo_curado_particao.sql        # F2
-│   ├── <ts>_0117_operadoras_por_tenant_e_vinculo.sql # F2
-│   ├── <ts>_0118_busca_com_escopo_de_operadora.sql   # F2
-│   ├── <ts>_0119_acervo_multi_material.sql           # F4
-│   └── <ts>_0120_validade_e_lacunas.sql              # F5
+├── migrations/                                        # última aplicada hoje: 0115
+│   ├── <ts>_0116_aviso_de_assistencia_sem_lastro.sql # F1 — só vocabulário de inbox
+│   ├── <ts>_0117_catalogo_curado_particao.sql        # F2
+│   ├── <ts>_0118_escopos_por_tenant_e_vinculo.sql    # F2
+│   ├── <ts>_0119_busca_de_lastro.sql                 # F2
+│   ├── <ts>_0120_acervo_multi_material.sql           # F4
+│   └── <ts>_0121_rastreabilidade_validade_lacunas.sql # F5
 ├── baseline.sql                                      # apêndice idempotente por fatia
 └── migrations/MANIFEST.md                            # uma linha por migration
 
@@ -235,8 +274,11 @@ app/
 ├── admin/(protected)/catalogo/           # F3: curadoria de plataforma
 └── api/v1/…                              # rotas das duas superfícies
 
+docs/architecture/                        # F2: a peça nova entra no mapa vivo com ≥2 arestas
+docs/testing/user-journey-map.md          # F2: a jornada "instalação já responde" entra como [P0]
+
 tests/
-├── invariants/                           # travas 1/2/3, não-vazamento entre operadoras
+├── invariants/                           # travas 1/2/3, não-vazamento entre escopos
 ├── unit/                                 # cadeia de gates + sabotagem
 └── e2e/                                  # jornadas de F2, F4, F5
 ```
@@ -256,3 +298,69 @@ para as duas superfícies, `supabase/` para a tripla de schema. A única peça s
 | **Partição `catalog_*` sem `organization_id`** — a única tabela do sistema que não pertence a uma organização | O catálogo é compartilhado por todas as organizações da instalação por decisão registrada em Clarifications. | Rejeitado: `organization_id` nullable em `ai_chunks`. Relaxaria a RLS de uma tabela tenant-aware existente para acomodar linhas sem dono, que é literalmente o que a trava 3 do Princípio X proíbe. Uma partição própria mantém a policy de `ai_chunks` intocada e torna o vazamento testável em um lugar só. |
 | **Função de busca nova em vez de estender `retrieve_top_k_chunks`** | A atual recebe `p_organization_id` do chamador e é executável por `authenticated` — o Princípio XI cita isso como defeito que atravessou todos os gates verdes. Estendê-la propagaria o defeito para a camada nova. | Rejeitado: acrescentar parâmetros à existente. Manteria a assinatura que confia no chamador, e a feature que mais precisa de isolamento provado nasceria sobre a função que menos o garante. A nova deriva o tenant de `auth.uid()` e é revogada de `authenticated` — verificado que **nenhum chamador `authenticated` existe** hoje (MCP e worker usam admin client). |
 | **Embeddings pré-computados dentro do `baseline.sql`** (~1,2 MB para ~100 trechos) | Sem eles, a instalação fresca só responde depois que um worker rodar e gastar chave de IA — SC-017 e FR-030 falhariam no minuto zero, que é a primeira impressão. | Rejeitado: indexar no primeiro boot. Torna a primeira impressão dependente de worker + chave de IA válida, e faz cada clone gerar embeddings ligeiramente diferentes, o que impede reproduzir um bug de recuperação a partir do relato de um self-hoster. |
+
+---
+
+## Revisão de brechas — 2026-08-08
+
+Auditoria do próprio plano, depois de escrito. **12 brechas**, todas fechadas nesta revisão. Ficam
+registradas porque cada uma é uma classe de erro que volta.
+
+### Cobertura incompleta
+
+1. **Quatro requisitos sem fatia.** FR-015, FR-018, FR-031 e FR-033 não apareciam em nenhuma linha
+   "Cobre:" — a conferência foi mecânica, comparando o conjunto das cinco fatias com os 41 FR da
+   spec. FR-015 foi para F1 (é o `rag_must_hit` que existe na tela e nenhum runtime avalia);
+   FR-018, FR-031 e FR-033 para F2.
+2. **`docs/architecture/` e `user-journey-map.md` não eram tarefa de ninguém**, apesar de serem os
+   itens 13 e 12 do Definition of Done. Entraram na estrutura de F2.
+3. **SC-006 sem linha de base atribuída.** A medição com 1 escopo virou entrega explícita de F2 — é
+   a única execução em que ela pode ser feita honestamente.
+
+### Contradições internas
+
+4. **F1 dizia "sem depender de nenhuma tabela nova" e precisava de um `kind` novo em
+   `agent_inbox_items`.** Corrigido para o que é: a menor mudança de schema possível, uma linha de
+   vocabulário, migration 0116.
+5. **`message_groundings` estava em F1 no data-model, e F1 se dizia sem schema.** A tabela foi para
+   F5, onde a rastreabilidade histórica é requisito. F1 grava a âncora no `insert` da mensagem, em
+   `messages.metadata`, que já existe.
+6. **A numeração das migrations não incluía F1.** Renumerado 0116–0121, a partir da última que
+   existe hoje (0115, conferida em `ls supabase/migrations/`, não no doc desatualizado).
+
+### Defeitos de desenho
+
+7. **`fn_buscar_lastro` derivava o tenant de `auth.uid()` — que é NULL no chamador real.** O
+   agent-engine fala com o banco por Pool `pg` com credencial de serviço; não há sessão de usuário.
+   Como estava, a função devolveria vazio sempre. Corrigido: o tenant e o acervo ativo são
+   derivados de **`p_agent_id`**, resolvido server-side a partir da conversa. Continua atendendo
+   FR-019 — o chamador aponta um agente, não afirma um tenant. É a pior da lista: teria passado
+   como decisão elegante e falhado na primeira execução.
+8. **A precedência de camada não dizia sobre qual conjunto se aplica.** Material "vale para todas" e
+   material de um escopo específico servem a propósitos diferentes; suprimir um pelo outro apagaria
+   a política do corretor com o procedimento da operadora, ou o contrário. A supressão passou a
+   valer **dentro do mesmo balde**.
+9. **Faltava a rota do caminho "cadastro" de FR-017.** A spec dá precedência ao cadastro sobre a
+   conversa, e não havia como gravá-lo. Entrou em `contracts/rotas-http.md`.
+10. **O apêndice do `baseline.sql` não derrubava o índice único que o snapshot recria.** Num banco
+    novo o snapshot cria `ai_knowledge_sources_unique_per_agent` e o apêndice roda depois; sem o
+    `drop index if exists` lá, instalação fresca nasceria com o índice que impede a segunda
+    operadora, e clone atualizado não. Duas realidades diferentes a partir do mesmo arquivo.
+
+### Nome que cravava o nicho
+
+11. **`operadoras` como nome de tabela contraria FR-033 e FR-041.** A spec batiza a entidade
+    "Operadora (**Escopo de Conhecimento**)" justamente porque outro nicho usa o mesmo mecanismo com
+    outro nome. A estrutura passou a ser `knowledge_scopes` / `catalog_scopes`; "operadora" é rótulo
+    de vocabulário. Barato agora, caro depois do código escrito (research D11).
+
+### Terreno ignorado
+
+12. **O plano não olhava o estado real do repositório.** `docs/current-state.md` e
+    `docs/harness-audit.md` foram lidos e viraram a seção "Riscos herdados". O que mais muda a
+    execução: a prova de F2 é da mesma família da `vps-fresh-onboarding`, que **não roda no CI** e
+    cujo check nem é obrigatório. Nenhum gate protege a regressão dela.
+
+**O que esta revisão não fez**: nenhum código foi escrito, nenhum gate foi rodado, e as estimativas
+por fatia continuam sendo ordem de grandeza. As brechas 7, 8 e 10 só serão *provadas* fechadas
+quando F2 existir e o `pnpm test:db` as exercitar.
