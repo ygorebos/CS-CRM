@@ -76,33 +76,72 @@ Interpretações aplicadas ao ditado do dono do produto (registradas para confer
 Divergência documental declarada:
   VISION.md e docs/prd/00-prd-master.md posicionam o produto como multi-nicho com persona
   primária "Operador BPO" de e-commerce. Esta emenda define o **nicho de validação** como
-  corretor de plano de saúde. Multi-nicho segue como capacidade (via `vocabulary` por
-  pipeline) — muda a prioridade de validação, não a arquitetura.
-  TODO(VISION_PRD_ALIGNMENT): alinhar VISION.md e docs/prd/00-prd-master.md.
+  corretor de plano de saúde. Não é contradição de arquitetura (multi-nicho segue como
+  capacidade, via `vocabulary` por pipeline) — é mudança de prioridade de validação. Os dois
+  documentos ficaram desatualizados.
+  TODO(VISION_PRD_ALIGNMENT): alinhar VISION.md e docs/prd/00-prd-master.md ao nicho de
+  validação.
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/plan-template.md — tabela do Constitution Check estendida de 7 para
+                                           11 gates e fonte atualizada para v1.1.0
+  ⚠️ CLAUDE.md — a doutrina de testes do Princípio XI é mais estrita que a seção "Testes"
+                 atual. TODO(CLAUDE_MD_TESTES): refletir lá o teste-de-sabotagem e o
+                 teste-de-efeito-de-configuração.
 
 ==================================================================================
 EMENDA — 2026-08-07 (segunda do dia)
 
 Version change: 1.1.0 → 1.2.0
-Bump rationale: MINOR — um princípio novo, de processo de sessão. I–XI seguem íntegros.
+Bump rationale: MINOR — um princípio novo, de processo de sessão. Nenhum princípio existente
+foi removido ou redefinido; I–XI seguem íntegros, palavra por palavra.
 
 Princípio adicionado:
   - XII. Contexto Antes de Ação (NÃO NEGOCIÁVEL)
 
 Origem: pedido explícito do dono do produto — sessão que ainda não absorveu o planejamento
 geral do sistema, e que ainda não leu `CLAUDE.md` nem `README.md`, faz essa leitura ANTES de
-seguir com a ação pedida.
+seguir com a ação pedida. A emenda transforma isso em regra com ordem de leitura, gatilho de
+releitura e declaração verificável, para que "eu li" pare de ser afirmação implícita.
+
+Seções alteradas:
+  - "Governance" → subseção "Leitura de entrada" apontando para o Princípio XII, para que a
+    regra apareça também onde um agente procura procedimento (e não só onde procura doutrina).
+
+Seções removidas: nenhuma.
 
 Artefatos dependentes propagados:
-  ✅ .specify/templates/plan-template.md — Constitution Check estendido de 7 para 12 gates e
+  ✅ .specify/templates/plan-template.md — Constitution Check estendido de 11 para 12 gates e
                                            fonte atualizada para v1.2.0
 
-Nota de procedência: as duas emendas acima foram escritas por sessões distintas trabalhando na
-mesma árvore, e o arquivo foi restaurado ao estado 1.0.0 duas vezes por `git restore` no meio
-do trabalho. Esta versão reúne as duas e foi commitada justamente para não se perder de novo.
+Divergência corrigida nesta emenda:
+  O rodapé do arquivo dizia `Version: 1.0.0` enquanto o corpo já continha a emenda 1.1.0
+  (Princípios VIII–XI). Rodapé passa a 1.2.0.
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
+
+==================================================================================
+NOTA DE RECONCILIAÇÃO — 2026-08-07 (sem mudança de versão; segue 1.2.0)
+
+As duas emendas acima foram escritas por sessões distintas trabalhando na MESMA árvore de
+trabalho, e foram commitadas em `acdd63cd`, na branch `chore/spec-kit-constituicao`. Esse
+commit ficou de fora do PR #7, que foi aberto de `f41bbe6c` — um commit antes dele. Ao trocar
+para a `main` e puxar, o arquivo voltou ao estado 1.0.0, e outra sessão concluiu (errado) que a
+emenda tinha sido perdida e a reescreveu do zero. A reescrita entrou na `main` como `b1606351`.
+
+A reescrita ficou idêntica ao original no corpo inteiro — os 12 princípios, "Missão e Escopo",
+"Papéis, Ritmo e Método" e o Definition of Done batem byte a byte, e o `plan-template.md`
+também. O que ela perdeu foi metadado deste cabeçalho: os "Artefatos dependentes propagados" da
+v1.1.0 (com o aviso do TODO(CLAUDE_MD_TESTES)), "Seções alteradas", "Seções removidas" e
+"Divergência corrigida nesta emenda". Este commit restaura os quatro a partir de `acdd63cd`.
+
+A mensagem de `b1606351` afirma que o trabalho foi perdido por `git restore` antes de ser
+commitado. **É falso** — estava commitado em `acdd63cd` o tempo todo. Corrige-se aqui porque a
+mensagem de commit já publicada não pode ser reescrita.
+
+Lição registrada, porque custou retrabalho: arquivo rastreado que "voltou" ao conteúdo antigo
+quase sempre está commitado em outra ref. `git log --all -- <arquivo>` antes de reescrever.
 -->
 
 # DeskcommCRM Constitution
@@ -481,9 +520,10 @@ da Fase 0 e de novo após a Fase 1. Violação MUST ser registrada na tabela Com
 plano, com a alternativa mais simples que foi rejeitada e o porquê — violação não documentada
 reprova a revisão. Complexidade MUST ser justificada, nunca presumida.
 
-**Leitura de entrada**: antes da primeira ação de consequência, a sessão lê esta constituição, o
-`CLAUDE.md` e o `README.md`, nesta ordem, e declara que leu citando o `Version` — regra completa,
-com gatilhos de releitura e aprofundamento por tipo de task, no **Princípio XII**.
+**Leitura de entrada**: toda sessão começa lendo esta constituição, depois `CLAUDE.md`, depois
+`README.md`, e só então age — inclusive quando o pedido parece pequeno, e de novo quando o
+contexto foi compactado ou retomado. A regra completa, com a declaração exigida e o
+aprofundamento por tipo de task, está no Princípio XII.
 
 **Orientação de runtime**: `CLAUDE.md` (convenções detalhadas e Definition of Done),
 `AGENTS.md` (mesmo contrato em forma portável para outros agentes),
