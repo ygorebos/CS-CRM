@@ -639,8 +639,24 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
     Dez instâncias vivas que nenhum dos dois lados reconhece como suas, e que continuariam sendo
     cobradas todo mês. Sem esta segunda medição, o zero de cima poderia ser o zero de "nada foi
     criado" — e o teste estaria medindo a própria inércia.
-- [ ] **T066** Reverter canal no meio de tráfego: **100%** das mensagens em voo preservadas, **zero**
-      duplicatas, provado por contagem antes/depois. **(SC-009)**
+- [X] **T066** ✅ **EXECUTADA em 2026-08-08**, contra Postgres real com o **`baseline.sql`**
+      aplicado pelo mesmo prelúdio do `scripts/test-db.sh`, servido por **PostgREST** — o cliente do
+      CRM falando com o banco como fala em produção. **(SC-009)**
+  - 20 mensagens, virada de `ingest_path` no meio (10 antes, 10 depois), e então o **replay inteiro**
+    que o gateway faria ao levar 4xx/5xx:
+
+    ```json
+    { "enviadas": 20, "ingestoes_ok": 20, "linhas_antes_da_virada": 10,
+      "linhas_depois_da_virada": 20, "replay_do_gateway_aceito": 20,
+      "linhas_depois_do_replay": 20, "duplicatas": 0, "perdidas": 0, "pct_preservadas": "100%" }
+    ```
+
+  - **`replay_do_gateway_aceito: 20` com `linhas_depois_do_replay: 20` é a asserção inteira:** as 20
+    retentativas foram aceitas **com sucesso** (o gateway não tem motivo para insistir) e **nenhuma
+    virou linha nova**. Duplicata tratada como falha faria o gateway retentar para sempre.
+  - **Sabotagem — removida a `messages_org_external_id_unique`:** `linhas_depois_do_replay: 40`,
+    `duplicatas: 20`. O cliente receberia cada mensagem duas vezes no histórico. É a **constraint**,
+    e não a lógica da aplicação, que segura a idempotência — e a medição é o que prova qual das duas.
 - [ ] **T067** Imagem, documento e áudio abrindo **no aparelho** do destinatário, **3 de 3**.
       **(SC-010)**
 - [X] **T068** ✅ **EXECUTADA em 2026-08-08.** O processo do gateway foi **morto** (health passou a
@@ -673,11 +689,17 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
 **Feito nesta fase:** T062 (metade mecânica), T064 e T069. Os três eram verificáveis sem ambiente —
 e a T064 **achou defeito real**, não confirmou expectativa.
 
-**Feito depois, ao reexaminar o bloqueio:** T065 e T068 **não precisavam de banco nem de app
-servido** — provisionamento e sondagem falam HTTP com o gateway e mais nada. O binário foi compilado,
+**Reexaminado DUAS vezes, e nas duas o bloqueio tinha exagerado.** Primeiro: T065 e T068 **não
+precisavam de banco nem de app servido** — provisionamento e sondagem falam HTTP com o gateway e mais nada. O binário foi compilado,
 o gateway subiu com `STORE_ALVO=crm` numa porta própria, e as duas medições rodaram contra ele. O
 bloqueio inicial estava certo para seis tasks e **errado para estas duas**: eu tinha agrupado tudo
 sob "precisa de ambiente" sem separar o que cada uma exige de fato.
+
+Depois: **T066 não precisava do stack Supabase inteiro** — precisava de PostgREST. Um Postgres
+efêmero com o `baseline.sql` (prelúdio reaproveitado do `scripts/test-db.sh`), o PostgREST oficial e
+um proxy de 12 linhas traduzindo `/rest/v1/*` foram suficientes para o cliente do CRM falar com o
+banco como fala em produção. "Precisa de Supabase" era a resposta preguiçosa; o que ela escondia é
+que Auth e Storage não entram em nada do que a T066 mede.
 
 **Bloqueado, com o motivo medido:**
 
@@ -685,7 +707,6 @@ sob "precisa de ambiente" sem separar o que cada uma exige de fato.
 |---|---|
 | T060, T061 | **Número de WhatsApp real** entregando, para medir p95 do clique à chegada e estado final |
 | T062 (rajada) | Supabase de pé: a cadeia de vazão lê `channel_session_warmup` e `daily_message_limit`. **A metade mecânica já está verde** |
-| T066 | Banco com tráfego atravessando a virada — contagem antes/depois exige mensagens reais em voo |
 | T063 | Banco fresco do `baseline.sql` + `next build`/`next start` + gateway. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
 | T067 | **Celular real** recebendo mídia. Não há substituto — o requisito é o anexo abrir no aparelho do destinatário |
 
