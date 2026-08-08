@@ -71,21 +71,25 @@ Cobre: FR-009 a FR-015, FR-020, FR-024, A-02, A-03 · SC-001, SC-002, SC-011, SC
 
 ### F2 — A instalação nasce sabendo *(≈2 jornadas)*
 
-**Observável**: banco recém-aplicado do `baseline.sql`, corretor não carregou nada, cliente
-pergunta algo coberto pelo catálogo e recebe resposta ancorada; cliente de outra operadora
-pergunta o mesmo e é recusado.
+**Observável**: banco recém-aplicado do `baseline.sql`, corretor não carregou nada. Com o escopo do
+catálogo **desligado** — que é como ele nasce (A-20) — a pergunta é recusada e o aviso oferece
+ligá-lo; ligado em um clique, a mesma pergunta recebe resposta ancorada, e um cliente de outra
+operadora pergunta o mesmo e é recusado.
 
 Entrega: a partição curada (`catalog_*`), a tabela `knowledge_scopes` por tenant com ponteiro para o
-catálogo, o vínculo contato↔escopo pelas duas vias, a função de busca nova com escopo por operadora
-e sem tenant vindo do chamador, e a semeadura versionada com embeddings pré-computados. Tela do
-tenant: lista de operadoras em leitura, com a porta declarada no registry e o rótulo vindo do
-vocabulário configurável, não cravado.
+catálogo, **o eixo de escopo e validade no acervo que já existe** (`ai_knowledge_sources`,
+`ai_chunks`, com backfill e o fim do índice único), o vínculo contato↔escopo pelas duas vias, a
+função de busca nova com escopo por operadora e sem tenant vindo do chamador, e a semeadura
+versionada com embeddings pré-computados. Tela do tenant: lista de operadoras com o interruptor de
+ligar/desligar, a porta declarada no registry e o rótulo vindo do vocabulário configurável, não
+cravado. O aviso de FR-042 nasce aqui: recusar sem dizer que a resposta está no produto, a um
+clique, é o pior desfecho da feature.
 
-**Registra a linha de base de SC-006 aqui**, com 1 escopo carregado — é a única execução em que ela
-pode ser medida honestamente, e F4/F5 comparam contra ela.
+**Registra a linha de base de SC-006 aqui, ANTES da semeadura**, com 1 escopo carregado à mão —
+depois de semear o catálogo esse número deixa de existir, e medi-lo no fim da fatia seria inventá-lo.
 
-Cobre: FR-016, FR-017, FR-018, FR-019, FR-030, FR-031, FR-033, FR-038, FR-041 · SC-005, SC-007,
-SC-017, SC-020, SC-021.
+Cobre: FR-016, FR-017, FR-018, FR-019, FR-030, FR-031, FR-033, FR-038, FR-041, FR-042 · SC-005,
+SC-007, SC-017, SC-020, SC-021.
 
 ### F3 — Nós curamos, e atualizar não destrói *(≈2 jornadas)*
 
@@ -94,7 +98,14 @@ sem deploy; reaplicar o schema de atualização num clone com material editado l
 nem sobrescreve nada, e reaplicar duas vezes dá o mesmo estado que uma.
 
 Entrega: superfície de curadoria em `app/admin/(protected)/catalogo/`, a regra de semeadura que só
-acrescenta versão, e as invariantes das travas 1, 2 e 3 do Princípio X.
+acrescenta versão, o estado **adotado localmente** — material editado no clone trava as versões
+semeadas seguintes, que chegam inertes até serem aceitas — e as invariantes das travas 1, 2 e 3 do
+Princípio X.
+
+**Por que a adoção local existe** (decisão de 2026-08-08): "só acrescenta versão" mais "desempate
+por recência" significa que a versão nova, sempre mais recente, apagaria a correção local **no
+comportamento** enquanto o banco continuava intacto. SC-018 passaria contando linhas e o requisito
+falharia respondendo. Por isso SC-018 passou a medir a resposta.
 
 Cobre: FR-036, FR-037, FR-028 (lado plataforma) · SC-010, SC-018.
 
@@ -104,9 +115,11 @@ Cobre: FR-036, FR-037, FR-028 (lado plataforma) · SC-010, SC-018.
 contagem na tela; sobrepõe um assunto do catálogo e a resposta passa a ancorar no material dele;
 acrescenta uma operadora que não existe em lugar nenhum.
 
-Entrega: fim do índice único de 4 slots por agente, N materiais por operadora, estados de
-processamento visíveis, extração de PDF que persiste (hoje ela valida e descarta), precedência de
-camada, desativação de operadora do catálogo para o próprio tenant.
+Entrega: N materiais por operadora, estados de processamento visíveis, extração de PDF que persiste
+(hoje ela valida e descarta), precedência de camada **com a divergência registrada e visível ao
+corretor** — a segunda metade de FR-035, que não tinha tarefa nenhuma —, e desativação de operadora
+do catálogo para o próprio tenant. O fim do índice único de 4 slots por agente saiu daqui e foi
+para a F2: a função de busca precisa dele derrubado uma fatia antes.
 
 Cobre: FR-001 a FR-008, FR-035, FR-032 · SC-003, SC-004, SC-014, SC-016, SC-019.
 
@@ -166,9 +179,12 @@ limite de quantidade (FR-041). 5 fatias, ~10 jornadas no total.
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Fonte: `.specify/memory/constitution.md` **v2.0.0** — a emenda do Princípio X está commitada em
-`3c2a06b4`, na branch `docs/constituicao-principio-x-catalogo-curado`, **ainda não mergeada na
-`main`**. Ver a linha na Complexity Tracking: este plano é executável somente depois desse merge.
+Fonte: `.specify/memory/constitution.md` **v2.1.0** — duas emendas commitadas na branch
+`docs/constituicao-principio-x-catalogo-curado` e **nenhuma mergeada na `main`**: `3c2a06b4`
+(v2.0.0, Princípio X ganha duas camadas e sete travas) e `259a3e0f` (v2.1.0, cadência de commit por
+fase). Ver a linha na Complexity Tracking: este plano é executável somente depois do merge da
+primeira. A segunda não bloqueia nada — muda como se commita, e já está sendo seguida: **um commit
+por fase**, com migration saindo em commit próprio junto do apêndice e do MANIFEST.
 
 | # | Gate | Pergunta que o plano responde | Status |
 |---|---|---|---|
@@ -243,10 +259,11 @@ supabase/
 ├── migrations/                                        # última aplicada hoje: 0115
 │   ├── <ts>_0116_aviso_de_assistencia_sem_lastro.sql # F1 — só vocabulário de inbox
 │   ├── <ts>_0117_catalogo_curado_particao.sql        # F2
-│   ├── <ts>_0118_escopos_por_tenant_e_vinculo.sql    # F2
+│   ├── <ts>_0118_escopos_por_tenant_e_vinculo.sql    # F2 — inclui o eixo no acervo existente
 │   ├── <ts>_0119_busca_de_lastro.sql                 # F2
-│   ├── <ts>_0120_acervo_multi_material.sql           # F4
-│   └── <ts>_0121_rastreabilidade_validade_lacunas.sql # F5
+│   ├── <ts>_0120_adocao_local_do_catalogo.sql        # F3
+│   ├── <ts>_0121_divergencia_de_conteudo.sql         # F4
+│   └── <ts>_0122_rastreabilidade_validade_lacunas.sql # F5
 ├── baseline.sql                                      # apêndice idempotente por fatia
 └── migrations/MANIFEST.md                            # uma linha por migration
 
@@ -364,3 +381,47 @@ registradas porque cada uma é uma classe de erro que volta.
 **O que esta revisão não fez**: nenhum código foi escrito, nenhum gate foi rodado, e as estimativas
 por fatia continuam sendo ordem de grandeza. As brechas 7, 8 e 10 só serão *provadas* fechadas
 quando F2 existir e o `pnpm test:db` as exercitar.
+
+---
+
+## Revisão cruzada — 2026-08-08 (segunda passagem, com `tasks.md` pronto)
+
+A revisão acima olhou o plano sozinho. Esta olhou os três artefatos **juntos** e conferiu cada
+afirmação contra o repositório: **19 achados**, dos quais três derrubariam a execução.
+
+**Os três que quebrariam de verdade**
+
+1. **A `fn_buscar_lastro` lia colunas de duas migrations à frente.** Ela nasce na 0119 (F2) e filtra
+   o acervo do tenant por `scope_id` e por `valid_until` — colunas que a 0120 (F4) criava. A função
+   não criaria, ou criaria sem filtro nenhum do lado do tenant, e a F2 seria declarada pronta com
+   metade do isolamento que ela existe para provar. **As colunas foram para a 0118.**
+2. **A instalação fresca não recusaria nada.** O gate nasce desarmado, no padrão do
+   `internalVocabularyGate` — e nada armava o agente padrão. `app/actions/onboarding/createDefaultAgent.ts`
+   não grava guardrail algum hoje, e `rag_must_hit` só existe no schema Zod. FR-030, SC-001, SC-011 e
+   SC-017 seriam falsos com a suíte inteira verde. É a mesma classe de defeito que originou o
+   Princípio XI: configuração que existe e não tem efeito.
+3. **FR-035 tinha só metade das tarefas.** "E **DEVE** registrar a divergência para o corretor" não
+   aparecia em lugar nenhum — nem migration, nem runtime, nem tela. SC-016 era inatingível.
+
+**Os seis de execução**
+
+O teste de porta de navegação, escrito na Foundational, deixaria `pnpm test:unit` vermelho durante
+toda a F1 · o rate limit adiado ao Polish faria F2 e F4 serem entregues reprovando o item 6 do
+próprio Definition of Done · dois workers nasciam sem gatilho, e neste repositório cron é rota HTTP
+batida pelo `crond` do serviço `scheduler` · a linha de base de SC-006 era medida depois da
+semeadura, quando "1 escopo" já não existe · a âncora nasceria com dois formatos, `messages.metadata`
+na F1 e `message_groundings` na F5, sem ninguém reconciliando · e o caminho da tela cravava o nicho
+na URL, o mesmo erro que a brecha 11 tirou do schema.
+
+**O que as três respostas do dono do produto mudaram**
+
+- **Catálogo de exemplo** (A-19), com cada material dizendo no próprio corpo que é exemplo. Remove o
+  risco de implementar a semeadura contra conteúdo que ainda não existe.
+- **Adoção local** (FR-037): a edição no clone vence a versão que chega por release, que fica inerte
+  até ser aceita.
+- **Escopo do catálogo nasce desligado** (A-20) — contra a recomendação do desenvolvedor, que era
+  nascer ligado pela primeira impressão. A escolha é do dono do produto e é defensável: o agente não
+  fala de operadora que aquele corretor não vende. O custo — a instalação fresca só assiste depois de
+  um passo — foi absorvido em FR-030, SC-011 e SC-017, e **FR-042 nasceu** para que a recusa diga que
+  a resposta já está no produto. Sem FR-042, essa decisão entregaria uma instalação que parece burra
+  por configuração que ninguém mostrou.

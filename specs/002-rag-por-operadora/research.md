@@ -306,4 +306,55 @@ transferir o trabalho de digitação para quem tem 10 minutos.
    operadoras, a decisão de carregar embeddings prontos precisa ser reaberta — e o gatilho para
    reabri-la é o arquivo, não o número de operadoras.
 4. **SC-006 não tem linha de base.** A primeira execução com 1 operadora É a medição de referência.
-   Registrá-la é tarefa da fatia que a exercita, não suposição a herdar.
+   Registrá-la é tarefa da fatia que a exercita, não suposição a herdar — e **antes da semeadura**,
+   porque depois dela "1 escopo" já não existe (revisão cruzada de 2026-08-08).
+
+---
+
+## D12 — A edição local trava as versões que chegam depois
+
+**Decisão**: editar um material `seed` marca o `slug` como **adotado localmente** (`adopted_at`,
+`adopted_by`); toda versão semeada que chegar depois entra `inert = true` — fora da busca e fora do
+desempate por recência —, visível na curadoria para ser aceita.
+
+**Racional**: `on conflict do nothing` resolve *apagar*, não resolve *vencer*. Como a versão que
+chega por release é sempre a mais recente, o desempate de FR-035 a faria ganhar da correção local:
+a edição continuaria no banco e pararia de ser usada. SC-018 passaria contando linhas enquanto
+FR-037 falhava respondendo — a pior forma de defeito, a que tem teste verde. O gatilho para achar
+isto foi cruzar duas regras que tinham sido escritas em momentos diferentes.
+
+**Alternativa rejeitada**: chave global "esta instalação não aceita atualizações do catálogo".
+Congela o catálogo inteiro por causa de uma correção pontual, e transforma quem consertou uma frase
+em quem não recebe mais nada. O estado é por material (A-21).
+
+## D13 — Escopo do catálogo nasce desligado, e a recusa diz isso
+
+**Decisão**: `knowledge_scopes.is_active` nasce `false` para espelho do catálogo e `true` para
+escopo que o corretor criou. E a recusa por falta de lastro passa a dizer, quando é o caso, que
+existe escopo no catálogo cobrindo o assunto (FR-042).
+
+**Racional**: decisão do dono do produto, **contra** a recomendação do desenvolvedor — que era
+nascer ligado, porque a primeira impressão manda (Princípio VIII). O argumento vencedor é de
+negócio e é bom: o agente não deve falar de operadora que aquele corretor não vende. O custo é real
+e foi absorvido em vez de escondido — FR-030, SC-011 e SC-017 passaram a contar o passo de ativação.
+
+**O que torna a decisão segura**: FR-042. Sem ele, a instalação fresca recusa tudo e o corretor
+conclui que o produto não sabe nada, quando ele sabe e ninguém ligou. Uma decisão de produto que
+cria um estado silencioso precisa nascer com a superfície que o quebra.
+
+**Alternativa rejeitada**: ativar só os materiais "vale para todas". Cria duas categorias de
+comportamento que o corretor tem de deduzir sozinho, e o pior estado — "responde algumas coisas e
+não outras, sem dizer por quê" — é justamente o que FR-042 existe para evitar.
+
+## D14 — O primeiro catálogo é de exemplo, e diz isso de si mesmo
+
+**Decisão**: os materiais semeados na primeira entrega são de exemplo — poucos escopos,
+procedimentos genéricos, cada um identificado como exemplo no próprio corpo.
+
+**Racional**: a estrutura é o que a fatia prova; o conteúdo é editorial (A-16) e entra depois por
+release, sem tocar em schema. Implementar a semeadura contra conteúdo que ainda não existe é
+descobrir o formato errado com o schema já de pé.
+
+**Alternativa rejeitada**: esperar o conteúdo real das operadoras do Ceará antes de escrever a
+semeadura. Bloqueia F2 e F3 por uma dependência que não é técnica, e o formato do bloco semeado não
+muda por causa do texto que vai dentro dele.

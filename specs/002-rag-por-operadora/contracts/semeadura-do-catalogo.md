@@ -10,7 +10,7 @@ Como o conteúdo curado sai da nossa instalação e chega a todo clone, sem apag
 Apêndice no fim de `supabase/baseline.sql`, em bloco rotulado no padrão do arquivo:
 
 ```sql
--- ---- catálogo curado de operadoras (migration 0116) ----
+-- ---- catálogo curado de operadoras (migration 0117) ----
 ```
 
 O kit self-host aplica **só** o `baseline.sql`, tanto no `install.sh` (banco novo, `ON_ERROR_STOP=1`)
@@ -34,7 +34,18 @@ Um `do update` reaplicado apagaria a correção que o dono da instalação fez n
 exatamente o que a trava 6 proíbe, e o que SC-018 mede com "zero edições locais sobrescritas".
 
 Conteúdo corrigido por nós chega como `version + 1`. A anterior permanece, e o desempate de FR-035
-faz a mais recente valer.
+faz a mais recente valer — **exceto** no caso abaixo.
+
+**Não apagar não basta: também não pode vencer** *(regra acrescentada em 2026-08-08)*. `do nothing`
+garante que a semeadura não *sobrescreve*; não garante que ela não *ganha o desempate*. Como a versão
+que chega é sempre a mais recente, ela venceria a edição local por recência — a correção do dono da
+instalação continuaria no banco e pararia de ser usada. SC-018 passaria contando linhas e FR-037
+falharia respondendo.
+
+Por isso: editar um material `seed` marca aquele `slug` como **adotado localmente**
+(`adopted_at`, `adopted_by`), e toda versão semeada que chegar depois entra com `inert = true` —
+visível na curadoria para ser aceita, mas fora da busca e fora do desempate. É estado **por
+material** (A-21): adotar um `slug` não congela o catálogo inteiro.
 
 ### 2. Embeddings viajam prontos.
 

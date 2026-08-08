@@ -58,11 +58,15 @@ vazio em toda chamada de produção.
    trava 4, FR-008.
 5. **Material vencido não devolve nada** (`valid_until < current_date`) — FR-026. Sem validade
    declarada, ancora normalmente (FR-025).
-6. **Precedência de camada, dentro do mesmo balde.** Se algum trecho `tenant` do balde passa o
+6. **Versão inerte não entra** (`catalog_materials.inert = true`) — é a versão que chegou por
+   semeadura depois de o material ter sido adotado localmente. Não ancora e **não participa do
+   desempate por recência**, senão ela venceria a edição local por ser mais nova, que é exatamente o
+   que FR-037 proíbe.
+7. **Precedência de camada, dentro do mesmo balde.** Se algum trecho `tenant` do balde passa o
    limiar, os trechos `catalog` **daquele balde** saem do conjunto. Balde = ou o escopo específico,
    ou "vale para todos" — nunca os dois juntos (research D7). Sem essa separação, um texto do
    corretor sobre o horário de atendimento dele apagaria o procedimento de boleto da operadora.
-7. **Ordenação final** por similaridade decrescente, `limit greatest(p_k, 0)`.
+8. **Ordenação final** por similaridade decrescente, `limit greatest(p_k, 0)`.
 
 ### Grants
 

@@ -49,6 +49,16 @@ A unidade que quem cura reconhece e corrige. **Versionada e nunca reescrita** (t
 | `valid_until` | `date` | opcional (FR-025). Nulo = não vence |
 | `published_at` | `timestamptz not null default now()` | é a "recência" do desempate de FR-035 |
 | `origin` | `text not null check in ('seed','local')` | `seed` = veio da semeadura; `local` = escrito pelo administrador daquela instalação. Separar os dois é o que permite provar SC-018 |
+| `adopted_at` | `timestamptz` | **F3, migration 0120.** Preenchido quando o administrador da instalação edita um material `seed`: aquele `slug` passa a ser **adotado localmente** |
+| `adopted_by` | `uuid references auth.users(id)` | quem adotou — a curadoria é auditada (FR-036) |
+| `inert` | `boolean not null default false` | versão que chegou por semeadura **depois** de o `slug` ser adotado. Não ancora, não desempata, fica visível para ser aceita (FR-037) |
+
+**A regra que estas três colunas implementam** (decisão de 2026-08-08): a edição local vence a
+versão nova semeada. Sem elas, "a semeadura só acrescenta versão" + "o desempate é por recência"
+significa que a versão que chega por release, sempre mais recente, apaga a correção local **no
+comportamento** enquanto o banco fica intacto — SC-018 passaria contando linhas e o requisito
+falharia respondendo. É estado por material, nunca chave global de instalação (A-21): adotar um
+`slug` não congela o resto do catálogo.
 
 **RLS**: idêntica à `catalog_scopes`.
 
@@ -95,7 +105,7 @@ os que vieram do catálogo.
 | `catalog_scope_id` | `uuid references catalog_scopes(id)` | preenchido = espelho do catálogo; nulo = criado pelo corretor (FR-002) |
 | `display_name` | `text not null` | o corretor pode renomear sem tocar no catálogo |
 | `official_code` | `text` | herdado do catálogo quando espelho |
-| `is_active` | `boolean not null default true` | **é a desativação da trava 4**: desligar aqui torna o material daquele escopo inerte só para este tenant (FR-008) |
+| `is_active` | `boolean not null` | **é a chave da trava 4**: desligar torna o material daquele escopo inerte só para este tenant (FR-008). **Espelho do catálogo nasce `false`**; escopo criado pelo corretor nasce `true` — ele acabou de digitar o nome, ligar de novo seria burocracia (A-20) |
 | `created_at` / `updated_at` | `timestamptz` | |
 
 **Índices**: `unique (organization_id, catalog_scope_id) where catalog_scope_id is not null` — um
@@ -118,7 +128,12 @@ na atualização.
 
 Nulo em qualquer uma delas = escopo desconhecido, que é **estado tratado, não erro**.
 
-### `ai_knowledge_sources` — colunas novas e um índice a menos
+### `ai_knowledge_sources` — colunas novas e um índice a menos — **F2, migration 0118**
+
+> Estas colunas estavam na 0120 (F4) e **foram para a 0118**. A `fn_buscar_lastro` da 0119 as lê:
+> criá-las duas migrations depois faria a função não criar, ou criar sem filtro nenhum do lado do
+> tenant. Achado da revisão cruzada de 2026-08-08.
+
 
 | Mudança | Regra |
 |---|---|
@@ -139,7 +154,32 @@ partir do mesmo arquivo.
 ### `ai_chunks` — colunas novas
 
 `+ scope_id uuid` e `+ applies_to_all boolean`, denormalizados da fonte pela mesma razão de
-`catalog_chunks`. `organization_id` continua `not null`: **nada aqui muda de lado**.
+`catalog_chunks`. `organization_id` continua `not null`: **nada aqui muda de lado**. Também na
+**0118**, pelo mesmo motivo da tabela acima.
+
+### `content_divergences` (nova, tenant-aware) — **F4, migration 0121**
+
+A segunda metade de FR-035, que não tinha nem tabela nem tarefa até a revisão cruzada. O desempate
+existia; o registro dele, não — e um requisito que manda "registrar para o corretor" sem lugar onde
+registrar é requisito que ninguém cumpre.
+
+| Coluna | Tipo | Regra |
+|---|---|---|
+| `id` | `uuid pk` | |
+| `organization_id` | `uuid not null references organizations(id) on delete cascade` | Princípio I |
+| `scope_id` | `uuid references knowledge_scopes(id)` | qual operadora |
+| `winner_ref` / `loser_ref` | `jsonb not null` | camada, material e trecho de cada lado — cópia histórica, como em `message_groundings`, para sobreviver à reindexação |
+| `reason` | `text not null check in ('camada','recencia')` | qual das duas regras decidiu |
+| `first_seen_at` / `last_seen_at` | `timestamptz not null` | agrupa repetição em vez de gerar linha por resposta |
+| `resolved_at` | `timestamptz` | o corretor corrigiu um dos dois lados |
+
+**Índice**: `unique (organization_id, scope_id, md5(winner_ref::text || loser_ref::text))` — o mesmo
+par contraditório aparece uma vez, com contagem, não uma vez por conversa.
+
+**RLS**: `tenant_isolation_content_divergences_all` via `fn_user_org_ids()`.
+
+**Onde aparece**: a mesma lista de lacunas de FR-028 (`components/ai/EvolutionGaps.tsx`) — o corretor
+já vai lá para saber o que carregar; contradição é o mesmo tipo de dívida, não merece tela própria.
 
 ---
 

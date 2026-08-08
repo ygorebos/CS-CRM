@@ -76,10 +76,27 @@ conhecimento de três origens, com donos e responsabilidades editoriais diferent
   nasce com o catálogo preenchido.
 - Q: Quando o `update.sh` reaplica o `baseline.sql` num clone cujo admin editou localmente um
   material curado, o que acontece com a edição dele? → A: A semeadura só acrescenta versão nova e
-  nunca reescreve nem apaga material existente; vale a mais recente.
+  nunca reescreve nem apaga material existente. *(Qual das duas passa a valer ficou em aberto nesta
+  sessão e foi resolvido na sessão seguinte — ver abaixo.)*
 - Q: Como o sistema descobre de qual operadora é o plano do cliente que está escrevendo? → A: Pelas
   duas vias — cadastro do contato e resposta na conversa —, com o cadastro tendo precedência; a
   entrega começa pela conversa.
+
+### Session 2026-08-08 (segunda — dúvidas levantadas na análise cruzada)
+
+- Q: De onde vem o conteúdo do primeiro catálogo curado que vai ser semeado no `baseline.sql`? → A:
+  **Catálogo de exemplo escrito pelo desenvolvedor** — poucos escopos, procedimentos genéricos,
+  marcados como exemplo no próprio material. O conteúdo real das operadoras entra depois, por
+  release, sem mudança de estrutura (é editorial — A-16).
+- Q: Quando um clone editou um material curado localmente e chega um release com versão nova do
+  mesmo material, qual das duas o agente passa a usar? → A: **A edição local vence.** Editar um
+  material do catálogo marca aquele material como **adotado localmente**; versões novas semeadas
+  dele chegam **inertes**, e só passam a valer se quem administra a instalação as aceitar.
+- Q: Quando um corretor novo entra numa instalação, ele já enxerga todos os escopos do catálogo
+  ativos, ou escolhe quais ligar? → A: **Nascem inativos.** O corretor liga os que ele vende. O
+  agente não fala de operadora que o corretor não trabalha — e a instalação fresca, por
+  consequência, só responde assistência depois desse passo (ver FR-030, FR-042 e SC-017, reescritos
+  por causa desta resposta).
 
 ---
 
@@ -220,8 +237,9 @@ precedência entre elas, sem depender de nenhuma outra história.
 **Cenários de aceite**:
 
 1. **Dado** um tenant recém-instalado, **quando** o corretor abre a tela de operadoras, **então**
-   ele vê as operadoras do catálogo curado já disponíveis, cada uma identificada como conteúdo que
-   veio com o produto e não como material dele.
+   ele vê as operadoras do catálogo curado já disponíveis e **desligadas**, cada uma identificada
+   como conteúdo que veio com o produto e não como material dele, e liga as que vende em um passo
+   (A-20).
 2. **Dado** uma operadora que não está no catálogo, **quando** o corretor digita o nome dela e
    salva, **então** ela passa a existir para aquele tenant, sem nenhum deploy, migration, reinício
    ou edição de arquivo.
@@ -256,29 +274,34 @@ passa a conversa adiante.
 **Por que esta prioridade**: é o valor entregue ao cliente final e a razão do princípio IX. Uma
 resposta errada aqui é dano, não inconveniência.
 
-**Teste independente**: numa instalação fresca, **sem o corretor ter carregado nada**, duas
-perguntas sobre uma operadora do catálogo — uma coberta, outra não — provam os dois lados da regra
-na mesma sessão.
+**Teste independente**: numa instalação fresca, **sem o corretor ter carregado nada** e com o escopo
+do catálogo ligado num passo, duas perguntas sobre essa operadora — uma coberta, outra não — provam
+os dois lados da regra na mesma sessão.
 
 **Cenários de aceite**:
 
 1. **Dado** um cliente cuja operadora é conhecida e cujo material cobre a pergunta, **quando** ele
    pergunta sobre segunda via, **então** o agente responde com base no material e a resposta fica
    permanentemente associada aos trechos que a fundamentaram.
-2. **Dado** uma instalação recém-criada em que **nenhum** material foi carregado pelo corretor,
-   **quando** um cliente pergunta algo coberto pelo catálogo curado, **então** o agente responde
-   ancorado no catálogo — a assistência funciona antes de o corretor carregar a primeira coisa.
-3. **Dado** um cliente cuja operadora é conhecida e cujo material **não** cobre a pergunta em
+2. **Dado** uma instalação recém-criada em que **nenhum** material foi carregado pelo corretor, mas
+   em que ele **ligou** o escopo do catálogo correspondente à operadora que vende, **quando** um
+   cliente pergunta algo coberto por esse escopo, **então** o agente responde ancorado no catálogo —
+   a assistência funciona antes de o corretor carregar a primeira coisa.
+3. **Dado** a mesma instalação com o escopo **ainda desligado**, **quando** o cliente faz a mesma
+   pergunta, **então** o agente recusa e escala, **e** o aviso ao corretor diz que existe material
+   no catálogo cobrindo o assunto e oferece ligá-lo dali (FR-042) — a instalação nunca parece burra
+   por configuração que ninguém mostrou.
+4. **Dado** um cliente cuja operadora é conhecida e cujo material **não** cobre a pergunta em
    **nenhuma** das duas camadas, **quando** ele pergunta, **então** o agente **não responde a
    afirmação factual**: ele diz, em linguagem que o cliente entende e sem vocabulário interno do
    sistema, que vai confirmar, e a conversa é escalada para o corretor.
-4. **Dado** o cenário anterior, **quando** a escalação acontece, **então** o corretor recebe um
+5. **Dado** o cenário anterior, **quando** a escalação acontece, **então** o corretor recebe um
    aviso acionável contendo a pergunta original, a operadora envolvida e o motivo ("não há material
    sobre isto") — suficiente para ele responder e para saber o que carregar depois.
-5. **Dado** que a base de conhecimento está indisponível por falha técnica, **quando** o cliente
+6. **Dado** que a base de conhecimento está indisponível por falha técnica, **quando** o cliente
    faz uma pergunta de assistência, **então** o agente trata como ausência de lastro e escala —
    **nunca** responde "com o que já sabe".
-6. **Dado** um cliente que pergunta algo de assistência, **quando** a resposta é enviada,
+7. **Dado** um cliente que pergunta algo de assistência, **quando** a resposta é enviada,
    **então** é impossível que ela tenha sido enviada sem ao menos um trecho âncora registrado.
 
 ---
@@ -416,7 +439,8 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
    alcançar a superfície de curadoria por qualquer caminho, **então** é barrado.
 3. **Dado** um clone que já roda com o catálogo semeado e teve material editado localmente,
    **quando** o atualizador reaplica o schema, **então** nenhuma edição local é apagada e nenhum
-   material some: o que chega de novo entra como versão nova, e vale a mais recente.
+   material some: o que chega de novo entra como versão nova e **inerte**, e continua valendo a
+   **versão local** até que quem administra a instalação aceite a nova (FR-037).
 4. **Dado** o catálogo curado, **quando** se inspeciona o que ele contém, **então** não há nenhum
    dado pessoal de cliente nem nada pertencente a uma organização — só procedimento de operadora.
 5. **Dado** lacunas registradas por recusa **na própria instalação**, **quando** o administrador de
@@ -470,8 +494,10 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
 
 - **Dois materiais da mesma operadora se contradizem**: se estão em camadas diferentes, vence o do
   **corretor** sobre o do catálogo — ele conhece a regional dele, nós não. Se estão na mesma camada,
-  vence o **mais recente**. Em qualquer dos casos a contradição é registrada para o corretor, e o
-  agente **não** escolhe pelo que parece mais relevante nem apresenta as duas versões ao cliente.
+  vence o **mais recente** — **exceto** quando o mais recente é uma versão semeada de um material
+  **adotado localmente**: nesse caso ela está inerte e vence a versão local (FR-037). Em qualquer
+  dos casos a contradição é registrada para o corretor, e o agente **não** escolhe pelo que parece
+  mais relevante nem apresenta as duas versões ao cliente.
 - **Material do catálogo curado está errado**: o corretor não edita nem apaga o que veio com o
   produto. Ele sobrepõe com material próprio (que passa a vencer) ou desativa aquela operadora para
   o tenant dele. A correção do catálogo em si é responsabilidade de quem o cura.
@@ -614,8 +640,17 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
 - **FR-029**: O sistema **DEVE** distinguir, nessa apresentação, "não há nada sobre isto" de "há
   algo próximo, mas insuficiente" — são diagnósticos com ações opostas.
 - **FR-030**: Uma instalação nova **DEVE** nascer com um agente pré-configurado para o corretor de
-  plano de saúde, que já sabe conduzir a venda e já sabe recusar assistência sem lastro, **e** com o
-  catálogo curado já semeado e buscável — **sem** que o corretor tenha carregado nenhum material.
+  plano de saúde, que já sabe conduzir a venda e **já nasce com a exigência de lastro ligada** —
+  recusar assistência sem âncora é comportamento padrão, não opção que alguém precisa descobrir.
+  O catálogo curado **DEVE** vir semeado e indexado, com os escopos dele **inativos para o tenant**
+  (decisão de 2026-08-08): o corretor liga os que ele vende, e ligar um escopo **NÃO PODE** custar
+  mais que um passo na tela. Enquanto nenhum escopo estiver ligado, o agente vende normalmente e
+  recusa assistência — o que é o comportamento correto, desde que FR-042 seja cumprido.
+- **FR-042**: Quando uma pergunta de assistência é recusada e **existe** no catálogo um escopo que a
+  cobriria, mas ele está inativo para aquele tenant, o aviso ao corretor **DEVE** dizer isso
+  explicitamente e oferecer a ativação ali mesmo. Recusar sem informar que a resposta já está no
+  produto, a um clique, é o pior desfecho possível desta feature: o corretor conclui que o sistema
+  não sabe, quando ele sabe e ninguém o ligou.
 - **FR-031**: Nenhuma tela ou passo desta feature **PODE** ser pré-requisito para publicar o agente
   ou para atender a primeira conversa. Carregar operadora é caminho de aprofundamento, nunca de
   entrada.
@@ -631,8 +666,10 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
 - **FR-035**: Quando dois materiais **da mesma operadora** afirmam coisas incompatíveis sobre o
   mesmo assunto, o sistema **DEVE** desempatar nesta ordem: **(1) camada** — material do acervo do
   tenant vence material do catálogo curado; **(2) recência** — dentro da mesma camada, vence o mais
-  recente. E **DEVE** registrar a divergência para o corretor. Apresentar as duas versões ao cliente
-  é **proibido**.
+  recente, **salvo** versão semeada que chegou inerte sobre material adotado localmente, que não
+  disputa (FR-037). E **DEVE** registrar a divergência para o corretor: onde ela aparece é a mesma
+  lista de lacunas de FR-028, com o material perdedor identificado — divergência sem superfície é
+  requisito que ninguém cumpre. Apresentar as duas versões ao cliente é **proibido**.
 
 **Catálogo curado — quem cura, como chega, o que nunca acontece**
 
@@ -644,6 +681,12 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
   reaplicável quantas vezes for: ela **só acrescenta versão nova** e **NÃO PODE** reescrever, apagar
   nem desativar material já existente na instalação — inclusive material que o administrador local
   tenha editado. Perder edição local numa atualização é defeito, não efeito colateral aceitável.
+  **A edição local vence a versão nova semeada** (decisão de 2026-08-08): editar um material do
+  catálogo o marca como **adotado localmente**, e toda versão daquele material que chegar por
+  semeadura depois disso entra **inerte** — não ancora resposta e não substitui nada — até que quem
+  administra a instalação a aceite explicitamente. Sem essa regra, o desempate por recência de
+  FR-035 faria o release apagar a correção local em silêncio, que é exatamente o que este requisito
+  proíbe.
 - **FR-038**: O catálogo curado **NÃO PODE** conter dado pessoal de cliente nem dado pertencente a
   uma organização. Ele carrega procedimento de operadora e nada além disso.
 - **FR-039**: A origem exibida ao corretor (FR-022) **DEVE** identificar de qual camada o trecho
@@ -663,7 +706,8 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
 - **Operadora (Escopo de Conhecimento)** — a que um material se aplica, e o eixo pelo qual a busca
   de assistência é restringida. Nasce de duas origens: **do catálogo curado** (veio com o produto,
   vale para todas as organizações da instalação) ou **do tenant** (o corretor digitou o nome).
-  Atributos que importam: nome exibido, origem, se está ativa **para aquele tenant**, e um
+  Atributos que importam: nome exibido, origem, se está ativa **para aquele tenant** — e escopo
+  vindo do catálogo nasce **inativo**, ligado pelo corretor (A-20) —, e um
   identificador oficial opcional (o código de registro da operadora) que serve como chave estável
   para correlacionar as duas origens e para uma futura correlação com dados externos. Um material
   especial pode declarar-se aplicável a **todas** as operadoras.
@@ -678,8 +722,10 @@ prova a camada curada inteira, sem depender de o corretor carregar nada.
   catálogo por quem o cura.
 - **Catálogo Curado** — o conjunto de materiais que o fabricante mantém e que viaja com o produto.
   É semeado na instalação e reaplicado na atualização sem nunca sobrescrever o que já existe
-  (FR-037), não contém dado de ninguém (FR-038), e o tenant só pode lê-lo, desativá-lo para si ou
-  sobrepô-lo com material próprio.
+  (FR-037), não contém dado de ninguém (FR-038), e o tenant só pode lê-lo, ativá-lo ou desativá-lo
+  para si, ou sobrepô-lo com material próprio. Um material dele pode estar **adotado localmente** —
+  editado por quem administra aquela instalação —, e nesse estado as versões que chegarem por
+  semeadura ficam inertes até serem aceitas (FR-037).
 - **Trecho** — a menor unidade recuperável e citável, derivada de um material. É o que serve de
   **âncora**: quando um trecho fundamenta uma afirmação de assistência, ele é a prova de que
   aquela afirmação veio do acervo do corretor e não do modelo. Carrega consigo a operadora a que
@@ -753,7 +799,8 @@ Todos medidos pela tela, em ambiente fresco estilo VPS, com conta real — nunca
   decisão registrada em Clarifications — e isso é declarado, não medido como falha.
 - **SC-011 (o teto de 10 minutos é preservado)**: em instalação fresca **sem nenhum material
   carregado**, o percurso do login à primeira conversa atendida por agente continua ocorrendo em
-  **≤10 minutos**, e o agente responde a mensagens de conversão normalmente.
+  **≤10 minutos**, e o agente responde a mensagens de conversão normalmente. Ligar um escopo do
+  catálogo (FR-030) custa **um passo** e entra nessa medição, não fora dela.
 - **SC-012 (a configuração não mente)**: com a exigência de lastro **ligada** na tela, o
   comportamento do agente muda de forma observável na conversa; com ela **desligada** (se
   desligável), também. Nenhuma opção de segurança visível na tela pode ficar sem efeito.
@@ -771,12 +818,17 @@ Todos medidos pela tela, em ambiente fresco estilo VPS, com conta real — nunca
   coisas incompatíveis, **100%** das respostas ancoram no vencedor da regra de desempate de FR-035,
   **zero** apresentam as duas versões ao cliente, e a divergência aparece para o corretor.
 - **SC-017 (a instalação já sabe alguma coisa)**: em instalação fresca, **sem o corretor ter
-  carregado nada**, um lote de perguntas cobertas pelo catálogo curado resulta em **100%** de
-  respostas ancoradas, com a origem abrível na tela e identificada como conteúdo do catálogo.
+  carregado nada** e após **um único passo** de ligar o escopo que ele vende, um lote de perguntas
+  cobertas pelo catálogo curado resulta em **100%** de respostas ancoradas, com a origem abrível na
+  tela e identificada como conteúdo do catálogo. **Antes** desse passo, as mesmas perguntas resultam
+  em **100%** de recusas — e em **100%** delas o aviso ao corretor diz que existe escopo no catálogo
+  cobrindo o assunto e oferece a ativação (FR-042).
 - **SC-018 (atualizar não apaga)**: num clone que tem material curado editado localmente, reaplicar
   o schema de atualização resulta em **zero** materiais perdidos, **zero** edições locais
   sobrescritas e **zero** materiais duplicados visíveis ao usuário. Reaplicar duas vezes seguidas
-  produz o mesmo estado que reaplicar uma.
+  produz o mesmo estado que reaplicar uma. E, medido no comportamento e não só no banco: em
+  **100%** das perguntas cobertas por um material adotado localmente, a resposta ancora na **versão
+  local**, mesmo com uma versão semeada mais recente presente na instalação (FR-037).
 - **SC-019 (a camada de cima manda)**: com um assunto coberto ao mesmo tempo pelo catálogo curado e
   por material próprio do corretor, **100%** das respostas ancoram no material **do corretor**.
 - **SC-020 (o catálogo não carrega dado de ninguém)**: varrendo o catálogo curado inteiro,
@@ -858,6 +910,23 @@ dono do produto; nenhuma é resultado de medição, exceto onde indicado.
   o fabricante não tem acesso ao servidor de ninguém: a tela de curadoria existe em toda instalação
   e quem a opera lá é o dono dela, que passa a responder pelo que editar. Nenhuma lacuna, pergunta
   de cliente ou métrica de uso atravessa a fronteira de uma instalação de volta para o fabricante.
+- **A-19 — O primeiro catálogo é de exemplo, e diz isso de si mesmo (decidido em 2026-08-08).**
+  Poucos escopos, procedimentos genéricos, cada material identificado como exemplo no próprio
+  conteúdo. Serve para provar a estrutura, não para atender cliente real. Trocar por conteúdo de
+  operadora de verdade é acréscimo de linha semeada, sem mudança de estrutura nem de código — é o
+  que A-16 chama de decisão editorial. O risco que isso remove: implementar a semeadura contra
+  conteúdo que ainda não existe e descobrir o formato errado depois de o schema estar de pé.
+- **A-20 — Escopo do catálogo nasce inativo para o tenant (decidido em 2026-08-08).** É o oposto da
+  recomendação do desenvolvedor, que era nascerem ativos pela primeira impressão; o dono do produto
+  escolheu correção de negócio sobre velocidade de primeira resposta — o agente não fala de
+  operadora que aquele corretor não vende. A consequência foi absorvida em vez de escondida: FR-030
+  e SC-017 passaram a contar o passo de ativação, e **FR-042 nasceu** para que a recusa diga que a
+  resposta existe no produto e está a um clique. Sem FR-042, essa decisão produziria uma instalação
+  que parece burra por configuração ausente, que é o pior desfecho da feature.
+- **A-21 — "Adotado localmente" é estado do material, não preferência de instalação.** A regra de
+  FR-037 vale material a material: editar um trava aquele slug para as semeaduras seguintes e não
+  afeta os demais, que continuam recebendo versão nova normalmente. O contrário — uma chave global
+  "não aceitar atualizações" — congelaria o catálogo inteiro por causa de uma correção pontual.
 
 ---
 

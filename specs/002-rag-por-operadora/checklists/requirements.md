@@ -251,3 +251,39 @@ Duas rodadas, ambas em 2026-08-07, sobre a spec deste diretório.
 - **CHK029 pegou dois edge cases sem requisito**, os dois criados nesta rodada: desativar para o
   próprio tenant uma operadora que veio do catálogo (virou cláusula em FR-008) e o administrador de
   plataforma enxergar as lacunas da instalação dele (virou cláusula em FR-028).
+
+---
+
+## Rodada 4 — 2026-08-08, depois da análise cruzada e da clarificação
+
+Executada sobre a spec já com plano e tarefas escritos. A análise cruzada achou 19 defeitos nos
+três artefatos; três perguntas foram ao dono do produto. **Contagem inalterada: 46/48.** Os dois
+itens abertos continuam abertos pelo mesmo motivo — nenhuma das respostas os tocava.
+
+**O que mudou na spec, e o que isso fez com o checklist**
+
+- **FR-042 nasceu, e ele existe por causa de uma resposta.** O dono do produto escolheu que escopo
+  do catálogo **nasce inativo** — contra a recomendação do desenvolvedor, que era nascer ativo pela
+  primeira impressão. A escolha é defensável (o agente não fala de operadora que aquele corretor não
+  vende) e o custo dela é real: a instalação fresca só responde assistência depois de um passo.
+  FR-042 é o que impede esse custo de virar defeito — a recusa passa a dizer que a resposta existe
+  no produto e está a um clique. Sem ele, CHK004 e CHK013 teriam **regredido** nesta rodada.
+- **FR-030, SC-011 e SC-017 foram reescritos** para contar o passo de ativação em vez de escondê-lo.
+  SC-017 ganhou o lado negativo: antes de ligar, 100% de recusas **com** o aviso de FR-042.
+- **FR-037 ganhou "adotado localmente".** A clarificação anterior tinha deixado um buraco que
+  ninguém viu: "a semeadura só acrescenta versão" mais "o desempate é por recência" significa que a
+  versão nova, sempre mais recente, apagaria a correção local **no comportamento** enquanto o banco
+  continuava intacto. SC-018 passaria e o requisito falharia. SC-018 passou a medir a resposta, não
+  só as linhas.
+- **CHK027 continua verde por pouco**: FR-042 nasceu com medida no mesmo movimento (cláusula em
+  SC-017), em vez de virar o quinto requisito sem critério da spec.
+
+**Por que os dois itens seguem reprovados**
+
+1. **CHK028** — a emenda existe (v2.0.0, commit `3c2a06b4`) e ganhou uma segunda em cima
+   (v2.1.0, `259a3e0f`), mas **nenhuma foi mergeada**. Enquanto a `main` disser que conteúdo de
+   operadora é dado de tenant, A-10 a contradiz. O item vira verde no merge, sem tocar na spec.
+2. **CHK037** — o fatiamento em cinco (F1…F5) responde ao *ritmo*, mas o item pergunta pela **P1
+   como conjunto**, e ela continua sendo quatro histórias. O que mudou é que agora existe um MVP
+   nomeado que cabe: a US2 sozinha, sem tabela nova. Manter reprovado é mais honesto que redefinir
+   o item para caber na resposta.

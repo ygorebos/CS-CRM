@@ -72,22 +72,30 @@ pnpm test:unit -- before-send
 
 1. Login. Abra **Operadoras** pela navegação — não digitando a URL. A tela tem de estar alcançável
    pelo menu (Princípio II; `tests/unit/navegacao-completude.test.ts` reprova tela sem porta).
-2. **Esperado**: as operadoras do catálogo aparecem, marcadas como conteúdo que veio com o produto.
-3. Como cliente, pergunte algo coberto pelo catálogo. **Esperado**: resposta ancorada, com a origem
-   abrível na conversa (SC-017).
-4. Como cliente de **outra** operadora, faça a mesma pergunta. **Esperado**: recusa e escalação —
+2. **Esperado**: as operadoras do catálogo aparecem **desligadas**, marcadas como conteúdo que veio
+   com o produto (A-20).
+3. **Antes de ligar nada**, como cliente, pergunte algo coberto pelo catálogo. **Esperado**: recusa
+   e escalação — **e** o aviso ao corretor diz que existe material no catálogo cobrindo o assunto e
+   oferece ligá-lo dali (FR-042). Este passo prova o lado que a decisão de A-20 criou; sem ele a
+   instalação parece burra por configuração que ninguém mostrou.
+4. Ligue o escopo — **um** clique — e repita a pergunta. **Esperado**: resposta ancorada, com a
+   origem abrível na conversa (SC-017). Cronometre: este passo entra no teto de SC-011, não fora
+   dele.
+5. Como cliente de **outra** operadora, faça a mesma pergunta. **Esperado**: recusa e escalação —
    nunca a resposta da primeira (SC-005).
-5. Como cliente **sem operadora conhecida**: o agente pergunta **uma vez**, em linguagem natural.
+6. Como cliente **sem operadora conhecida**: o agente pergunta **uma vez**, em linguagem natural.
    Responda; a próxima pergunta já é atendida. Não responda; **esperado**: escala, e não adivinha
    nem quando só existe uma operadora carregada (FR-017).
-6. Registre a operadora na **ficha do contato** e confira que ela vence o que veio da conversa
+7. Registre a operadora na **ficha do contato** e confira que ela vence o que veio da conversa
    (FR-017, precedência do cadastro).
-7. Pergunta que cruza **duas** operadoras ("meu plano é o X e o da minha mãe é o Y"). **Esperado**:
+8. Pergunta que cruza **duas** operadoras ("meu plano é o X e o da minha mãe é o Y"). **Esperado**:
    resposta por operadora, cada parte com sua âncora; a parte sem lastro recusada **isoladamente**,
    sem derrubar a que tem (FR-018).
-8. **Linha de base de SC-006** — com **1** escopo carregado, rode a bateria de perguntas e registre
-   o p95 do tempo até a resposta. Este número é a referência de F4/F5; sem ele, o critério de
-   "não cresce mais que 25%" não tem contra o que comparar.
+
+**Linha de base de SC-006 — meça ANTES de semear o catálogo**, com **1** escopo carregado à mão:
+rode a bateria de perguntas e registre o p95 do tempo até a resposta. Depois da semeadura o catálogo
+já traz vários escopos e esse número deixa de existir; medi-lo no fim da fatia seria inventá-lo. É a
+referência de F4/F5 — sem ela, "não cresce mais que 25%" não tem contra o que comparar.
 
 ```bash
 pnpm test:db     # invariantes: travas 1/2/3 + não-vazamento entre escopos (SC-007, SC-020, SC-021)
@@ -119,6 +127,13 @@ psql -f supabase/baseline.sql                              # update de novo
 
 **Esperado**: zero materiais perdidos, zero edições locais sobrescritas, zero duplicatas visíveis, e
 o estado após duas reaplicações idêntico ao de uma (SC-018).
+
+**E o que o banco intacto não prova — meça a resposta.** Edite um material `seed` (o clone passa a
+tê-lo *adotado localmente*), semeie uma versão mais nova do mesmo `slug`, e pergunte ao agente algo
+que aquele material cobre. **Esperado**: a resposta ancora na **versão local**, e a versão semeada
+aparece na curadoria como pendente de aceite, inerte. Se ela vencer, SC-018 está passando contando
+linhas enquanto FR-037 falha respondendo — que é exatamente o defeito que a revisão cruzada de
+2026-08-08 encontrou no desenho anterior.
 
 4. **O install e o update têm de concordar sobre o índice.** Depois do install fresco, confira:
 
