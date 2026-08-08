@@ -841,3 +841,25 @@ e então investigar o login — hipóteses na ordem: (a) a senha do `.env.local`
 `tests/e2e/helpers/login-admin.ts` justamente por isso, e esta não usa); (c) o clique em "Entrar"
 não está encontrando o botão. A (b) é a mais provável — a doutrina exige MFA TOTP para `admin`, e o
 dono do bootstrap É admin.
+
+### Terceira tentativa da T063 — o login caiu, e a causa era minha
+
+**A hipótese (b) estava errada, e a causa era mais boba: o `#` na senha.**
+`OWNER_PASSWORD=QaF6!2026#Dono` no `.env.local` — o `dotenv` trata `#` como início de comentário, e
+o `bootstrap-owner` gravou `QaF6!2026`, enquanto o Playwright mandava a senha inteira. Senha trocada
+para uma sem `#`, e o login passou a funcionar.
+
+**Prova de que funcionou:** o caso de pré-condição **passou** — e ele exercita o `beforeEach`
+inteiro: login, navegação para `/app/connections` e a âncora `toHaveURL`. Ou seja, a sessão
+autentica, o app roteia e a tela certa abre.
+
+**Onde parou agora:** os 4 casos restantes não acham o controle de conectar. O rótulo real é
+**"Conectar novo WhatsApp"** (medido em `ConnectionsClient.tsx`) e o regex foi ajustado, mas os 4
+seguiram vermelhos — o que aponta para o controle não estar renderizado no estado vazio desta
+instalação (provavelmente atrás de alguma condição de configuração), e **isso não foi diagnosticado**.
+Acabou o contexto da sessão.
+
+**Não marcar como feita.** O que mudou nesta rodada: a T063 deixou de ter dois bloqueios (ambiente e
+login) e passou a ter um só, que é localizar o controle no estado vazio — trabalho de minutos com a
+tela aberta na frente. Ambiente derrubado de novo; zero containers `f6004`; app da outra sessão em
+307.

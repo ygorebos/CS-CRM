@@ -159,7 +159,7 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
     // ele volta. Testar só com banco povoado esconde exatamente este defeito.
     // Afirmar que a tela é a certa ANTES de afirmar o que ela não diz: foi
     // exatamente isso que faltou na primeira versão.
-    await expect(page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /conectar (novo )?(whatsapp|n[úu]mero)/i })).toBeVisible();
     const corpo = await page.locator("body").innerText();
     expect(corpo).not.toMatch(/\b(WAHA|uazapi|Baileys|NOWEB|WEBJS)\b/i);
     expect(corpo).not.toMatch(/docker\s+compose/i);
@@ -170,7 +170,7 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
     const t0 = Date.now();
 
     const cliques = await contarCliquesAte(page, async () => {
-      await page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i }).click();
+      await page.getByRole("button", { name: /conectar (novo )?(whatsapp|n[úu]mero)/i }).click();
       // O diálogo abre e o material vem da rota de pareamento — não há
       // formulário no meio, e é isso que "sem passo a mais" quer dizer.
       await expect(page.getByRole("img", { name: /QR/i })).toBeVisible({
@@ -200,7 +200,7 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
       if (r.url().includes("/pairing")) pedidos.push(Date.now());
     });
 
-    await page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i }).click();
+    await page.getByRole("button", { name: /conectar (novo )?(whatsapp|n[úu]mero)/i }).click();
     await expect(page.getByRole("img", { name: /QR/i })).toBeVisible({ timeout: TETO_DO_QR_MS });
     await page.waitForTimeout(20_000);
 
@@ -217,7 +217,7 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
   test("estado desconhecido não vira tela vazia (FR-032)", async ({ page }) => {
     // O desfecho proibido é a tela em branco: o corretor sem saber se está
     // conectado, se precisa escanear, ou se o produto quebrou.
-    await page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i }).click();
+    await page.getByRole("button", { name: /conectar (novo )?(whatsapp|n[úu]mero)/i }).click();
     const dialogo = page.getByRole("dialog");
     await expect(dialogo).toBeVisible();
     const texto = (await dialogo.innerText()).trim();
