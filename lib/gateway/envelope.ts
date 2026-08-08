@@ -178,8 +178,39 @@ export interface EnvelopeNormalizado {
 }
 
 export type ResultadoParse =
-  | { ok: true; envelope: EnvelopeNormalizado; avisos: string[] }
+  | {
+      ok: true;
+      envelope: EnvelopeNormalizado;
+      avisos: string[];
+      /**
+       * Chaves do corpo que TENTARAM decidir a organização (FR-017a / T042).
+       *
+       * O corpo nunca decide tenant — quem decide é a linha de
+       * `channel_sessions` achada pelo token do caminho. Estas chaves são
+       * ignoradas para todo efeito, e o valor sobrevive apenas como
+       * `metadata.extra_*`, que é dado inerte.
+       *
+       * Ignorar em SILÊNCIO, porém, seria perder o único sinal de que alguém
+       * está tentando escrever no CRM de outra pessoa. Quem chama registra.
+       */
+      tenantForcado: string[];
+    }
   | { ok: false; motivo: string; detalhe?: string };
+
+/**
+ * Chaves que só existiriam num corpo tentando escolher o dono da mensagem.
+ *
+ * O gateway legítimo não emite nenhuma delas: a organização do CRM não é
+ * conceito que ele conheça.
+ */
+const CHAVES_QUE_DECIDIRIAM_TENANT = new Set([
+  "organization_id",
+  "organizationId",
+  "org_id",
+  "tenant_id",
+  "channel_session_id",
+  "webhook_path_token",
+]);
 
 /**
  * Motivos de recusa. São poucos de propósito: cada um significa "não dá para
@@ -235,10 +266,17 @@ export function parseEnvelope(bruto: unknown): ResultadoParse {
   // Tudo que veio no topo e não conhecemos é recolhido, com prefixo para não
   // colidir com chave que o próprio gateway já pôs em `metadata`.
   const metadata: Record<string, unknown> = { ...(e.metadata ?? {}) };
+  const tenantForcado: string[] = [];
   for (const [k, v] of Object.entries(e)) {
     if (!CHAVES_CONHECIDAS.has(k)) {
       metadata[`extra_${k}`] = v;
       avisos.push(`campo desconhecido preservado: ${k}`);
+      if (CHAVES_QUE_DECIDIRIAM_TENANT.has(k)) {
+        // Preservado como dado inerte, como qualquer campo desconhecido — e
+        // NUNCA lido para decidir dono. O que muda é que este caso vira sinal:
+        // é a assinatura de uma tentativa de escrever no CRM de outra pessoa.
+        tenantForcado.push(k);
+      }
     }
   }
 
@@ -266,6 +304,7 @@ export function parseEnvelope(bruto: unknown): ResultadoParse {
   return {
     ok: true,
     avisos,
+    tenantForcado,
     envelope: {
       envelopeVersion: e.envelope_version,
       eventId: e.event_id,

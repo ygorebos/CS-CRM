@@ -178,13 +178,13 @@ Nenhuma camada nova, nenhum projeto novo, nenhuma dependência nova no CRM.
 | 2 · Foundational | ✅ **concluída** | `6366d5ce` (schema, tripla + vocabulário TS), `d0f9d5b6` (envelope + autenticidade), `41806231` (rota, teto por conexão, segredo por conexão), `0117` + aviso na Central quando a conexão não tem chave de verificação — recusa com código próprio `gateway_secret_not_provisioned` e **503**, não 401, para o gateway retentar e o histórico do período quebrado entrar sozinho. Modo relay no `gateway_go` (`00f9078` naquele repo): `GATEWAY_MODE=relay` dispensa as variáveis de Supabase, o modo padrão continua exigindo-as, e um typo (`relai`) **não** vira relay |
 | 3 · US1 — a costura | 🟡 **quase** | ingest único, dreno periódico, agendamento no `scheduler`, invariantes de banco (T020/T021) e a identidade canônica (T027a/T027b — a mesma pessoa com as duas grafias do número vira UM contato, regra extraída para `lib/channels/identidade-canonica.ts` com a busca injetada, para o invariante exercitar a MESMA função que o ingest). Do lado do gateway (`c3d44fd`): o encaminhamento cru virou **envelope normalizado e assinado** — `internal/envelope` (mapeador, `event_id` determinístico) e `internal/entrega` (HMAC sobre timestamp+corpo), ligados nos quatro canais, com **virada por destino** para não quebrar quem já consome o formato antigo. **Falta**: a prova pela tela (T022) e a ponta a ponta com mensagem real (T030) |
 | 4 · US2 — durabilidade | ⬜ não iniciada | depende da fila em disco do gateway (Go) |
-| 5 · US3 — autenticidade provada | ⬜ não iniciada | os invariantes de banco (T040, T041) |
+| 5 · US3 — autenticidade provada | ✅ **concluída** | as sete requisições do quickstart §3 viraram invariante de banco (`gateway-inbound-autenticidade.test.ts`), somadas ao isolamento entre duas organizações (`gateway-inbound-isolamento.test.ts`). O corpo nunca decide tenant, e a tentativa vira auditoria em vez de silêncio; recusa passou a gravar linha com motivo e `valid_signature` verdadeiro (era `true` fixo — a coluna mentia justamente para quem fosse auditar). Sabotagens do T045 confirmadas vermelhas |
 | 6–8 · mídia, estado, canal novo | ⬜ não iniciadas | |
 
-**Placar de tarefas**: 40 de 82 concluídas.
+**Placar de tarefas**: 46 de 82 concluídas.
 
 **Portões no último commit**: `typecheck` 0 · `lint` 0 erros · `lint:channels` ok ·
-`test:unit` 292 arquivos / 2995 testes verde · `test:db` 72 arquivos / 485 testes verde ·
+`test:unit` 294 arquivos / 3006 testes verde · `test:db` 75 arquivos / 503 testes verde (1 skip) ·
 `go test ./...` verde nos 14 pacotes do `gateway_go` (rodado em contêiner: a máquina não tem Go).
 
 ## Estratégia de entrega — 5 fatias, cada uma utilizável sozinha

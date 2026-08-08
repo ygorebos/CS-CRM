@@ -130,6 +130,19 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       organizationId,
       metadata: { reason: "ingest_path_legacy", channel_session_id: sessao.id },
     });
+    // T043/SC-012: a recusa vira LINHA, não só auditoria. Quem for reconstruir
+    // o caso precisa conseguir fazê-lo pelo banco — um incidente investigado
+    // pelo log de aplicação depende de o log ainda existir, e num self-host ele
+    // não sobrevive a um `docker compose up`.
+    await registrarRecebimento(admin, {
+      organizationId,
+      channelSessionId: sessao.id as string,
+      token,
+      corpoCru,
+      status: "error",
+      motivo: "connection_not_migrated",
+      assinaturaValida: false,
+    });
     return fail("invalid_request", "connection_not_migrated", 409, {
       requestId,
       headers: teto.cabecalhos,
@@ -159,6 +172,21 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         channel_session_id: sessao.id,
         delivery_id: req.headers.get("x-gateway-delivery-id"),
       },
+    });
+
+    // A recusa vira LINHA com o motivo, e `valid_signature: false`. É o que
+    // permite responder "quantas entregas forjadas chegaram nesta conexão, e
+    // quando" sem depender de log de aplicação (SC-012). O caminho legado
+    // gravava `true` em evento não verificado, o que fazia a coluna mentir
+    // exatamente no momento em que alguém iria auditá-la.
+    await registrarRecebimento(admin, {
+      organizationId,
+      channelSessionId: sessao.id as string,
+      token,
+      corpoCru,
+      status: "error",
+      motivo: auth.motivo,
+      assinaturaValida: false,
     });
 
     // Segredo não provisionado tem RAMO PRÓPRIO, e não o 401 genérico.
@@ -212,6 +240,8 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
       status: "error",
       motivo: parse.motivo,
       detalhe: parse.detalhe ?? null,
+      // A assinatura passou; o que reprovou foi o formato do envelope.
+      assinaturaValida: true,
     });
     return fail("invalid_request", parse.motivo, 400, {
       requestId,
@@ -221,6 +251,31 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
 
   const envelope = parse.envelope;
 
+  // T042 — o corpo NUNCA decide organização, e a tentativa não some.
+  //
+  // A organização já veio da linha de `channel_sessions` achada pelo token, e o
+  // que o corpo trouxe é dado inerte em `metadata.extra_*`. Mas ignorar em
+  // silêncio perderia o único sinal de que alguém está tentando escrever no CRM
+  // de outra pessoa — e é exatamente esse ataque que a versão fail-open da rota
+  // antiga permitiu. Registrado como auditoria porque é evento de SEGURANÇA, não
+  // erro de formato: a entrega segue, com o campo ignorado.
+  if (parse.tenantForcado.length > 0) {
+    logger.warn("[gateway.webhook] corpo tentou decidir organização", {
+      requestId,
+      chaves: parse.tenantForcado,
+    });
+    await audit({
+      action: "webhook.gateway_rejected",
+      organizationId,
+      metadata: {
+        reason: "tenant_no_corpo_ignorado",
+        channel_session_id: sessao.id,
+        chaves: parse.tenantForcado,
+        delivery_id: req.headers.get("x-gateway-delivery-id"),
+      },
+    });
+  }
+
   // A partir daqui a entrega é DURÁVEL. A linha é o ACK: se o processo cair no
   // próximo milissegundo, o dreno recolhe.
   const { data: linha, error: logErr } = await registrarRecebimento(admin, {
@@ -229,6 +284,7 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
     token,
     corpoCru,
     status: "received",
+    assinaturaValida: true,
     eventType: envelope.eventKind,
     externalId: envelope.message?.externalId ?? null,
     payload: bruto as Record<string, unknown>,
@@ -317,6 +373,13 @@ async function registrarRecebimento(
     payload?: Record<string, unknown>;
     motivo?: string;
     detalhe?: string | null;
+    /**
+     * Só é `true` depois de a assinatura ter sido conferida e passado. O caminho
+     * legado gravava `true` em evento NÃO verificado, o que transformava a
+     * coluna num campo decorativo — quem fosse auditar um incidente leria
+     * "assinatura válida" em toda linha, inclusive nas forjadas.
+     */
+    assinaturaValida: boolean;
   },
 ) {
   return admin
@@ -329,10 +392,7 @@ async function registrarRecebimento(
       http_method: "POST",
       raw_body: e.corpoCru,
       payload_parsed: e.payload ?? null,
-      // A assinatura já foi verificada antes de chegar aqui — se não tivesse
-      // sido, não haveria linha. Registrar `true` é a verdade, ao contrário do
-      // que o caminho legado fazia com evento não verificado.
-      valid_signature: true,
+      valid_signature: e.assinaturaValida,
       event_type: e.eventType ?? e.motivo ?? "unknown",
       external_id: e.externalId ?? null,
       status: e.status,

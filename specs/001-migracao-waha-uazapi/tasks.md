@@ -210,7 +210,21 @@ reavaliado antes de qualquer investimento adicional.
 
 **Independent Test**: emissor HTTP real dispara as sete requisições da tabela do `quickstart.md` §3.
 
-- [ ] T040 [TEST] [P] [US3] `tests/invariants/gateway-inbound-autenticidade.test.ts` — as sete requisições da tabela do quickstart §3, cada uma provando que **nada** foi gravado quando recusada
+- [x] T040 [TEST] [P] [US3] `tests/invariants/gateway-inbound-autenticidade.test.ts` — as sete requisições da tabela do quickstart §3, cada uma provando que **nada** foi gravado quando recusada
+
+  > **Dois desvios declarados.** (1) O emissor não é HTTP: o harness de invariantes sobe Postgres
+  > cru, sem PostgREST nem servidor Next, então a rota é chamada direto com o client de serviço
+  > **traduzido para SQL** (mesmo padrão de `webhooks-trigger-events.test.ts`) — o que pousa no
+  > banco é linha de verdade, com constraints e triggers reais. O emissor HTTP de fato fica na
+  > ponta a ponta (T030). (2) O caso 6 responde **503**, não o 401 da tabela: é a decisão do
+  > T017e — o defeito é deste lado e é curável, e o contrato manda o gateway retentar 5xx, então
+  > as entregas do período quebrado entram sozinhas quando a chave existir.
+  >
+  > **O dublê da ingestão grava linha real** (sentinela). Um no-op faria "zero linhas em
+  > `messages`" ser verdade por construção mesmo que a rota chamasse a ingestão numa entrega
+  > forjada — o pior falso verde possível aqui. Com o sentinela, "nada foi gravado" passa a
+  > incluir "a ingestão nem foi chamada", e o caso 7 cobra o sentinela PRESENTE, senão os seis
+  > casos de recusa passariam com a rota recusando tudo.
 - [x] T041 [TEST] [P] [US3] `tests/invariants/gateway-inbound-isolamento.test.ts` — duas organizações recebendo ao mesmo tempo; usuário da org A enxerga **zero** linhas da org B em `messages`, `conversations` e `contacts`, **com caso de controle** provando antes que as linhas da org B existem
 
   > **A leitura é feita com claims de JWT, nunca pelo service role** — o service role bypassa RLS,
@@ -218,10 +232,33 @@ reavaliado antes de qualquer investimento adicional.
   > "vê zero" tem o par "vê as próprias": zero sozinho passaria também com a RLS negando tudo, que
   > é bug de produto com cara de teste verde. Sabotagem confirmada: abrir `messages_select` para
   > `using (true)` no baseline deixa 3 dos 5 casos vermelhos.
-- [ ] T042 [US3] Garantir no ingest que o `organization_id` vem sempre da linha de `channel_sessions` resolvida pelo token, e que qualquer `organization_id` presente no corpo é **ignorado** e a tentativa registrada
-- [ ] T043 [US3] Fazer `webhook_events_log` registrar recusa com motivo suficiente para reconstruir o caso sem log de aplicação (SC-012)
-- [ ] T044 [US3] Rodar `pnpm test:db` inteiro e confirmar que os invariantes novos entram no job `invariants` (obrigatório na branch protection)
-- [ ] T045 [US3] **Sabotagem**: trocar `timingSafeEqual` por `===` e confirmar T040 vermelho; mover a origem do `organization_id` do token para o corpo e confirmar T041 vermelho; restaurar as duas
+- [x] T042 [US3] Garantir no ingest que o `organization_id` vem sempre da linha de `channel_sessions` resolvida pelo token, e que qualquer `organization_id` presente no corpo é **ignorado** e a tentativa registrada
+
+  > A chave do corpo é **ignorada para autorização e registrada como auditoria**
+  > (`reason: "tenant_no_corpo_ignorado"`), não recusada: recusar daria ao atacante um oráculo
+  > — ele descobriria por tentativa quais chaves o CRM lê. O parser devolve `tenantForcado`, a
+  > rota registra, e o valor sobrevive só como `metadata.extra_*`, que é dado inerte.
+- [x] T043 [US3] Fazer `webhook_events_log` registrar recusa com motivo suficiente para reconstruir o caso sem log de aplicação (SC-012)
+
+  > `registrarRecebimento` passou a exigir `assinaturaValida: boolean` — antes era `true` fixo, e
+  > a coluna mentia justamente para quem fosse auditar um incidente. Os ramos 401 e 409 passaram
+  > a gravar linha `error` com motivo e corpo cru. O invariante separa **recusa de autenticidade**
+  > de **falha depois do ACK**: a segunda também termina em `error`, e ali `valid_signature = true`
+  > é a verdade — ler as duas juntas transformaria a coluna em "deu erro".
+- [x] T044 [US3] Rodar `pnpm test:db` inteiro e confirmar que os invariantes novos entram no job `invariants` (obrigatório na branch protection)
+
+  > `pnpm test:db` verde: **75 arquivos / 503 testes** (1 skip). Os dois arquivos novos entram por
+  > `include: tests/invariants/**` do `vitest.db.config.ts`, que é o mesmo caminho do job
+  > `invariants`. `vitest.db.config.ts` ganhou `GATEWAY_INBOUND_ENABLED`/`GATEWAY_BASE_URL`: sem
+  > elas a rota responde 404 e o arquivo mediria o interruptor, não a autenticidade.
+- [x] T045 [US3] **Sabotagem**: trocar `timingSafeEqual` por `===` e confirmar T040 vermelho; mover a origem do `organization_id` do token para o corpo e confirmar T041 vermelho; restaurar as duas
+
+  > **A sabotagem literal não vale, e isto importa.** Trocar `timingSafeEqual` por `===` mantém a
+  > comparação CORRETA — só perde a resistência a timing, que teste funcional não mede. Um verde
+  > ali seria lido como "o teste vigia a assinatura", que é falso. A sabotagem executada foi a que
+  > afrouxa de fato a verificação (aceitar assinatura divergente, a válvula do caminho legado):
+  > **4 de 14 casos vermelhos**. A segunda, `organization_id` vindo do corpo: **1 vermelho**.
+  > As duas restauradas e a suíte reconferida verde.
 
 **Checkpoint**: o buraco que a versão fail-open do WAHA abriu não é reaberto pela porta nova.
 
