@@ -8,13 +8,14 @@
 - [`docs/index.md`](docs/index.md) — índice dos 123 docs, com regra de precedência quando dois docs discordam. Use antes de sair varrendo `docs/`.
 - [`docs/current-state.md`](docs/current-state.md) — o que está pronto, incompleto e quebrado. **Leia antes de estimar ou prometer qualquer coisa.**
 - [`docs/harness-audit.md`](docs/harness-audit.md) — onde a verificação tem buraco. Importante: `pnpm gov:verify` **não** cobre `test:db` nem `test:e2e` — verde ali não é prova para mudança de schema ou de UI.
-- [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real do self-host.
+- [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real da instância.
+- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.0.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
 
 ---
 
 ## Visão (1 parágrafo)
 
-DeskcommCRM é um sistema operacional de vendas open source com agentes de IA nativos — multi-nicho (e-commerce, clínicas, imobiliárias, infoprodutos, serviços), com WhatsApp como canal primário (via WAHA). Agentes com RAG por tenant atendem, qualificam e movem o funil junto com humanos; CRM inteiro exposto via MCP. Monetização = self-host em VPS (parceria HostGator), não assinatura. Arquitetura multi-tenant com RLS desde o dia 1; LGPD nativa. Posicionamento completo: `VISION.md`.
+DeskcommCRM é um sistema operacional de vendas com agentes de IA nativos — nicho de validação: **corretor de plano de saúde**; multi-nicho segue como capacidade (`vocabulary` por pipeline), não como prioridade. WhatsApp é o canal primário, e todo tráfego de entrada chega pelo `gateway_go`. Agentes com RAG por tenant atendem, qualificam e movem o funil junto com humanos; CRM inteiro exposto via MCP. **Entrega: SaaS de instância única, operada por nós** — o usuário se cadastra, usa e testa; ninguém instala nada. **Cobrança não mora aqui**: assinatura é gerenciada no Cotador Simplificado (Princípio XIII). Multi-tenant com RLS desde o dia 1 — e agora todas as organizações dividem o MESMO banco, então isolamento furado vaza entre clientes distintos. LGPD nativa. Posicionamento completo: `VISION.md`.
 
 ---
 
@@ -80,7 +81,20 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - SLA: data_request entregue D+7; redact executado D+15
 - Action audit obrigatória: `lgpd.data_request_received`, `lgpd.export_generated`, `lgpd.redact_executed`, `lgpd.consent_changed`
 
-### WAHA
+### Gateway (`gateway_go`) — porta de entrada de TODO tráfego
+- É o **receptor geral**: mensagens de todos os canais (WhatsApp oficial e não-oficial, Instagram Direct, o que vier) e demais webhooks. Recebe, autentica a origem, **normaliza para um envelope único** e entrega ao CRM
+- **Código novo do CRM NÃO lê payload cru de provedor** — nem WAHA, nem uazapi, nem Meta. Só envelope
+- **O gateway NUNCA escreve no banco do CRM.** Quem persiste é o CRM, com `organization_id` resolvido de fonte confiável (path token / segredo), nunca do corpo
+- **Instância única, compartilhada, sem réplica, deploy separado.** Sem `localhost`, sem nome de serviço de compose — endereço é configuração. Não entra no `docker-compose.prod.yml` do CRM
+- **Sem réplica = SPOF declarado:** mensagem tem de sobreviver ao gateway reiniciar — retentativa durável + fila em disco do lado dele, dreno periódico do lado do CRM. Queda vira alerta pra nós **e** aviso na Central pro usuário; silêncio é proibido
+- Teto de taxa **por conexão**, nunca global nem por IP (todas as entregas vêm do mesmo endereço)
+
+### Cobrança — não mora aqui
+- Assinatura, plano, preço, checkout, pagamento, cartão, nota fiscal, dunning: **nada disso existe neste repo**. Dono é o **Cotador Simplificado**
+- "Esta org está paga?" vem por contrato HTTP explícito, tratado como dado externo com validade — nunca coluna que alguém daqui edita
+- Consulta de cobrança que falha **degrada de forma legível e não corta atendimento em andamento**
+
+### WAHA (canal, atrás do gateway)
 - Plus obrigatório (Core não suporta multi-tenant, sem retry, sem S3)
 - Engine NOWEB default; WEBJS apenas se precisar stickers animados / botões
 - Auth: env do WAHA recebe **hash SHA512 hex** da api key; cliente envia plaintext em `X-Api-Key`
@@ -103,9 +117,10 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 - `position_in_stage numeric` (fractional indexing via `midpoint()`) — **NUNCA `int`**
 - `external_id` nullable (mensagem outbound `sending` ainda não tem ID WAHA)
 - `type` é `text` + `check constraint`, **não enum** (enum é difícil de estender)
-  - **Exceção deliberada — colunas de vocabulário ABERTO:** onde um clone pode ter linhas com valor
-    legado (ex.: `crm_lead_activities.type`), o CHECK **não** entra: a constraint faria o `update.sh`
-    do clone quebrar, e a doutrina de migrations proíbe. Nesses casos o vocabulário vive só no
+  - **Exceção deliberada — colunas de vocabulário ABERTO:** onde o banco pode ter linhas com valor
+    legado (ex.: `crm_lead_activities.type`), o CHECK **não** entra: a constraint quebraria a
+    re-aplicação do `baseline.sql` em modo update — que é o que o job `invariants` roda e o que a
+    nossa instância recebe a cada deploy —, e a doutrina de migrations proíbe. Nesses casos o vocabulário vive só no
     TypeScript, o emissor usa **constante compartilhada, nunca string literal**, e a coluna fica
     **fora** do invariante `tests/invariants/vocabulario-banco-x-typescript.test.ts` — que cobre
     apenas colunas que JÁ têm CHECK. Ver o cabeçalho desse arquivo antes de "completar" o schema.
@@ -131,6 +146,10 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 12. API key em query string
 13. Bearer plaintext armazenado no DB (deve ser hash SHA256)
 14. `console.log` deixado em código merged (use logger estruturado ou Sentry breadcrumb)
+15. Código novo do CRM lendo **payload cru de provedor** (WAHA/uazapi/Meta) em vez do envelope do gateway
+16. Supor o gateway na mesma máquina/rede/deploy (`localhost`, nome de serviço de compose, "sobe junto")
+17. Dado de cobrança (plano, assinatura, pagamento, cartão) modelado neste repo — o dono é o Cotador
+18. Mudança destrutiva de schema sem caminho de volta (renomear coluna, dropar coluna em uso) — instância única não tem versão de escape
 
 ---
 
@@ -151,14 +170,25 @@ DeskcommCRM é um sistema operacional de vendas open source com agentes de IA na
 | `lib/supabase/{browser,server,admin}.ts` | Clients canônicos |
 | `app/api/v1/health/route.ts` | Health check (Supabase + Redis + WAHA) |
 | `supabase/migrations/` | Schema versionado |
-| `docs/runbooks/deploy.md` | **Deploy em produção — leia ANTES de mexer na VPS** |
+| `docs/runbooks/deploy.md` | **Deploy em produção — leia ANTES de mexer na instância** |
+| `/root/PROJETOS/gateway_go` | Gateway multicanal (repo irmão, deploy separado) |
+| `specs/001-migracao-waha-uazapi/` | Spec viva: ingestão unificada pelo gateway |
 
 ---
 
 ## Deploy em produção (NÃO NEGOCIÁVEL)
 
-**Numa VPS que já tem proxy reverso próprio (Hostinger, Coolify, Dokploy…), todo
-`up -d` leva os DOIS arquivos de compose:**
+**O alvo do deploy é a NOSSA instalação — uma só.** Não existe VPS de cliente, não
+existe clone rodando versão anterior. Duas consequências que mandam no dia a dia:
+bug em produção é bug de todo mundo ao mesmo tempo (e o fix também), e **não há
+versão de escape** — mudança destrutiva de schema roda no único banco que existe.
+
+**O gateway NÃO entra neste deploy** (Princípio XIV): `gateway_go` é serviço único,
+compartilhado, sem réplica, com ciclo próprio. Nada de `localhost` nem nome de
+serviço de compose para alcançá-lo — o endereço é configuração.
+
+**Na máquina de produção (proxy reverso próprio), todo `up -d` leva os DOIS arquivos
+de compose:**
 
 ```bash
 docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml --env-file .env up -d app
@@ -173,10 +203,15 @@ Depois de qualquer deploy, confirme que o domínio responde **307** (redireciona
 pro login) e não 404. Verificações e o caso de build local em
 `docs/runbooks/deploy.md`.
 
-O caminho normal **não constrói nada na VPS**: commit → push → PR → merge na
-`main` → o CI publica no GHCR → a VPS puxa. Imagem construída na VPS é exceção
-de emergência e é dívida: existe só naquele disco e qualquer `up -d` sem
+O caminho normal **não constrói nada na máquina de produção**: commit → push → PR →
+merge na `main` → o CI publica no GHCR → a máquina puxa. Imagem construída lá é
+exceção de emergência e é dívida: existe só naquele disco e qualquer `up -d` sem
 `APP_PULL_POLICY=never` a substitui em silêncio.
+
+**Expand/contract é obrigatório em mudança destrutiva.** Coluna nova em vez de
+renomeada, leitura tolerante aos dois formatos, remoção só depois de a escrita nova
+estar em produção. Com instância única, `ALTER` direto "que já está testado" é uma
+janela em que produção fica pela metade e não tem para onde voltar.
 
 ---
 
@@ -216,21 +251,22 @@ Check **não-obrigatório** (roda, mas não segura merge):
 
 - **`e2e`** (`e2e.yml`) — sobe Supabase local, aplica o `baseline.sql` e roda **28 das 32 specs** Playwright. As 4 de fora: `followup-journey` e `webhooks` (precisam de WAHA), `vps-fresh-onboarding` (WAHA + Redis + Resend + Nuvemshop — é a P0 da doutrina de QA Visual) e `capacidades-do-agente`, que está fora porque **reprova de verdade**: ligar o pacote "Atender" enche o teto de 20 capacidades e a UI desabilita o checkbox da capacidade crítica que o próprio desenho manda marcar à mão. O `e2e` **ainda não é obrigatório** — o conjunto de specs mudou em 2026-08-05, então as execuções verdes anteriores eram de outro conjunto e não servem de prova de estabilidade deste (issue #63).
 
-Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webhooks ou automações: rode `pnpm test:db` **localmente** antes de abrir PR. É o único caminho que exercita o `baseline.sql` que o self-hoster realmente aplica.
+Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webhooks ou automações: rode `pnpm test:db` **localmente** antes de abrir PR. É o único caminho que exercita o `baseline.sql` — que é o que sobe ambiente do zero e o que a nossa instância recebe re-aplicado a cada deploy.
 
 ---
 
-## QA Visual com Recursos Reais — DOUTRINA (produto self-host)
+## QA Visual com Recursos Reais — DOUTRINA (SaaS de instância única)
 
-**O DeskcommCRM é distribuído open-source: a experiência de quem instala numa VPS É o produto.** Toda feature nova (ou fix de comportamento visível) DEVE ser provada como um **usuário leigo a usaria de verdade** — pelo frontend, num ambiente que imita a instalação fresca — antes de "pronto". Não é opcional; é critério de aceite de toda sessão que toca UI ou fluxo de usuário.
+**O produto é a experiência de quem se cadastra.** Toda feature nova (ou fix de comportamento visível) DEVE ser provada como um **usuário leigo a usaria de verdade** — pelo frontend, numa **conta recém-criada** — antes de "pronto". Não é opcional; é critério de aceite de toda sessão que toca UI ou fluxo de usuário.
 
 **O que "recurso real" significa (e o que NÃO conta):**
 - **Conta.** Prova pela tela, dirigindo o browser (Playwright), logando com conta de teste real. `curl`/chamada de API **não** provam UX — validam o backend, mas não o que o usuário vê, clica e entende. Use curl só como diagnóstico.
-- **Banco fresco estilo VPS.** Postgres limpo aplicado do `supabase/baseline.sql` (não das `migrations/` — a cadeia fresh não sobe) + `scripts/bootstrap-owner.ts` (o que o `install.sh` faz). O ambiente do teste = o que o clone recém-instalado tem: sem os seus dados, sem os seus envs opcionais.
-- **Dependências como na VPS.** WAHA local, Redis local (`redis` + `serverless-redis-http`), cron drain via endpoint. E **teste com os envs opcionais AUSENTES** (ex.: sem `RESEND_API_KEY`) — é o estado real de um primeiro deploy, e é onde moram os piores bugs de primeira impressão.
+- **Banco fresco.** Postgres limpo aplicado do `supabase/baseline.sql` (não das `migrations/` — a cadeia fresh não sobe) + `scripts/bootstrap-owner.ts`. O ambiente do teste = o que uma organização recém-criada tem: sem os seus dados, sem os seus atalhos.
+- **"Fresco" = CONTA nova, não INSTALAÇÃO nova.** Os envs agora são nossos e conhecidos; o que falta no teste é o que o **usuário** ainda não fez: canal não conectado, base de conhecimento vazia, agente sem capacidade marcada, nenhum lead, nenhum convite aceito. **Prove o estado vazio** — ele não é caso de borda, é o estado inicial de 100% dos usuários, e é a tela que decide se ele volta. Testar só com banco povoado esconde exatamente esses defeitos.
+- **Dependências de verdade.** WAHA/gateway local, Redis local (`redis` + `serverless-redis-http`), cron drain via endpoint.
 - **Efeito colateral externo provado com receiver real.** Webhook outbound, envio — suba um receiver HTTP de verdade e prove o que chegou (ou que foi barrado). Mock não estressa o egress real (anti-SSRF, projeção de payload, https em prod).
 
-**Prioridade: primeira impressão acima de tudo.** Onboarding e as primeiras ações (criar conta, conectar canal, primeiro lead, primeiro convite) são a primeira impressão do usuário — bug ali é abandono. Teste esses caminhos primeiro e com o maior rigor.
+**Prioridade: primeira impressão acima de tudo.** Onboarding e as primeiras ações (cadastro, conectar canal, primeiro lead, primeiro convite) são a primeira impressão do usuário — bug ali é abandono, e em SaaS o abandono acontece antes de qualquer assinatura. Teste esses caminhos primeiro e com o maior rigor.
 
 **Registro obrigatório (senão o progresso é invisível):**
 - Mapa de jornadas vivo em `docs/testing/user-journey-map.md` — casos por jornada, prioridade (`[P0]` primeira impressão), e achados. Atualize quando adicionar cobertura ou achar bug.
@@ -255,19 +291,21 @@ Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webh
 
 ---
 
-## Migrations & Banco — DOUTRINA (projeto open-source)
+## Migrations & Banco — DOUTRINA (instância única)
 
-**Este projeto é open-source. Toda mudança de schema DEVE sair como migration versionada** — quem clonou uma versão antiga do banco precisa conseguir atualizar aplicando as migrations em ordem. **Nunca** aplique `ALTER`/`CREATE` solto no banco sem o arquivo correspondente. Isto é critério de aceite de TODA sessão, não opcional.
+**Toda mudança de schema DEVE sair como migration versionada.** **Nunca** aplique `ALTER`/`CREATE` solto no banco sem o arquivo correspondente. Isto é critério de aceite de TODA sessão, não opcional.
+
+Até a v1.3.0 da constituição o motivo era o clone. Não há mais clone — e os três artefatos (migration + apêndice no baseline + MANIFEST) continuam obrigatórios por motivos que o SaaS **agrava**: (1) **não há versão de escape** — existe UM banco de produção, e `ALTER` solto não tem clone antigo de rede nem histórico para reconstruir o que rodou; (2) o `baseline.sql` é o que **sobe ambiente do zero** e o que `scripts/test-db.sh` aplica no job `invariants`, obrigatório na branch protection; (3) migration idempotente é o que torna re-deploy seguro — numa instância única, migration que só roda uma vez é uma janela com produção pela metade. Mudança destrutiva exige **caminho de volta declarado** (expand/contract).
 
 Processo padrão (siga sempre):
 
 1. **Arquivo versionado** em `supabase/migrations/` com o padrão do repo: `<timestamp>_<NNNN>_<slug>.sql` (ex.: `20260706210000_0027_whatsapp_conversation_unification.sql`). `NNNN` é o próximo número sequencial (veja o último em `ls supabase/migrations/`).
 2. **Idempotente sempre que possível**: `add column if not exists`, `create ... if not exists`, `create or replace function`. Uma migration deve poder ser re-aplicada sem quebrar nem duplicar efeito.
-3. **Portável em `psql` puro** (clones podem não usar o MCP/CLI Supabase): **sem** `create temporary table ... on commit drop` fora de transação explícita; **sem** `BEGIN`/`COMMIT` explícito (o runner já envolve em transação, como as demais migrations). Prefira CTEs, subqueries de janela e colunas-mapa (ex.: `is_merged_into`) a temp tables.
-4. **Data migrations genéricas**: se a migration corrige/deduplica dados, escreva pensando em QUALQUER banco de clone (não hardcode IDs do seu tenant). Repointe FKs conferindo o catálogo (`information_schema` FK map) para não perder histórico.
+3. **Portável em `psql` puro** (o `baseline.sql` é aplicado por `psql` no CI e no ambiente fresco, sem MCP/CLI Supabase): **sem** `create temporary table ... on commit drop` fora de transação explícita; **sem** `BEGIN`/`COMMIT` explícito (o runner já envolve em transação, como as demais migrations). Prefira CTEs, subqueries de janela e colunas-mapa (ex.: `is_merged_into`) a temp tables.
+4. **Data migrations genéricas**: se a migration corrige/deduplica dados, escreva pensando em QUALQUER estado do banco — **nunca hardcode IDs de organização** (o banco é compartilhado por todos os tenants; ID fixo conserta um e ignora os outros). Repointe FKs conferindo o catálogo (`information_schema` FK map) para não perder histórico.
 5. **Registre no MANIFEST**: adicione uma linha em `supabase/migrations/MANIFEST.md` (tabela "Applied") descrevendo versão, nome e o QUÊ/PORQUÊ.
-6. **Reflita no `supabase/baseline.sql` (OBRIGATÓRIO — é o que o kit self-host aplica).** O baseline é um dump `--schema-only` + um **apêndice idempotente** no fim do arquivo (blocos rotulados `-- ---- <coisa> (migration NNNN) ----`). O kit HostGator aplica **só o baseline.sql**, tanto no `install.sh` (banco novo, `ON_ERROR_STOP=1`) quanto no `update.sh` (re-aplica em banco existente, **sem** `ON_ERROR_STOP`). Então toda mudança de schema pós-snapshot DEVE ser acrescentada ao apêndice, **idempotente e auto-curativa**: `add column if not exists`, `create ... if not exists`, `create or replace function`, e — se a mudança adiciona constraint — **deduplicar/corrigir os dados ANTES** de criar a constraint (senão o `update.sh` de um clone bugado quebra). Sem isto, clones não recebem a mudança (ou quebram ao atualizar). Migração adicionada só em `migrations/` mas não no baseline **não chega aos self-hosters**.
-7. **Aplique e prove**: aplique via `mcp__plugin_supabase_supabase__apply_migration` (ou `supabase db push`), capture o estado ANTES/DEPOIS e prove invariantes (ex.: contagem de linhas que não pode mudar). Se mexeu em contrato, regenere `lib/database.types.ts`. Para mudanças de schema no kit, valide o baseline num Postgres descartável (`pgvector/pgvector:pg17` + extensões) aplicando `install` (fresh, `ON_ERROR_STOP=1`) e `update` (re-aplicar, sem a flag) — ambos têm que passar.
+6. **Reflita no `supabase/baseline.sql` (OBRIGATÓRIO — é o que sobe ambiente do zero e o que o gate `invariants` aplica).** O baseline é um dump `--schema-only` + um **apêndice idempotente** no fim do arquivo (blocos rotulados `-- ---- <coisa> (migration NNNN) ----`). `scripts/test-db.sh` aplica **só o baseline.sql**, em modo install (banco novo, `ON_ERROR_STOP=1`) **e** update (re-aplica em banco existente, **sem** `ON_ERROR_STOP`) — os dois têm que passar. Então toda mudança de schema pós-snapshot DEVE ser acrescentada ao apêndice, **idempotente e auto-curativa**: `add column if not exists`, `create ... if not exists`, `create or replace function`, e — se a mudança adiciona constraint — **deduplicar/corrigir os dados ANTES** de criar a constraint (senão a re-aplicação num banco com dado sujo quebra). Sem isto, o ambiente fresco não recebe a mudança e o gate reprova.
+7. **Aplique e prove**: aplique via `supabase db push` (⚠️ **não** pelo MCP autenticado do Supabase — ele aponta para o banco de produção do **Cotador**, não para o do CRM), capture o estado ANTES/DEPOIS e prove invariantes (ex.: contagem de linhas que não pode mudar). Se mexeu em contrato, regenere `lib/database.types.ts`. Valide o baseline num Postgres descartável (`pgvector/pgvector:pg17` + extensões) aplicando `install` (fresh, `ON_ERROR_STOP=1`) e `update` (re-aplicar, sem a flag) — ambos têm que passar. É o que `pnpm test:db` faz.
 8. **Backfill de dados quebrados existentes**: constraint nova falha se os dados atuais a violam — a migration (e o apêndice do baseline) deve deduplicar/corrigir ANTES de criar a constraint.
 9. **Função nova em `public` nasce EXPOSTA — revogue as DUAS origens.** Toda `create function` no schema `public` termina com:
 
@@ -278,7 +316,7 @@ Processo padrão (siga sempre):
 
    São duas origens distintas de `EXECUTE`, e tratar só uma deixa a função exposta com o gate verde: **(A)** o grant direto a `anon` do `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO anon` do baseline, que vale para toda função criada depois dele — isto é, para todo apêndice novo — e que `revoke from public` **não** remove; **(B)** o grant a `PUBLIC` que o Postgres dá a qualquer função ao criá-la, que `revoke from anon` **não** remove. Sem os dois, o PostgREST expõe a função como RPC alcançável pela anon key, que vai para o browser. Vigiado por `tests/invariants/hardening-definer-varredura.test.ts`, que varre todas as `security definer` de `public` (issue #128 — a versão anterior checava uma lista fixa de 6, e 8 de 25 estavam expostas).
 
-**Resumo do fluxo de uma mudança de schema:** arquivo em `migrations/` (fonte da verdade p/ Supabase CLI) **+** apêndice idempotente no `baseline.sql` (p/ o kit self-host) **+** linha no MANIFEST. Os dois artefatos de schema andam juntos. Nunca edite migrations já aplicadas — corrija com uma "forward-fix" nova (e mais um apêndice no baseline).
+**Resumo do fluxo de uma mudança de schema:** arquivo em `migrations/` (fonte da verdade p/ Supabase CLI) **+** apêndice idempotente no `baseline.sql` (p/ ambiente fresco e p/ o gate `invariants`) **+** linha no MANIFEST. Os dois artefatos de schema andam juntos. Nunca edite migrations já aplicadas — corrija com uma "forward-fix" nova (e mais um apêndice no baseline).
 
 ---
 
@@ -311,8 +349,8 @@ Antes de declarar uma task pronta:
 8. Sem `console.log` esquecido
 9. Env vars novas adicionadas em `.env.example` + `lib/env.ts`
 10. Doc atualizada se mudou contrato (PRD/spec)
-11. **Mudança de schema saiu como migration versionada + linha no MANIFEST** (ver Doutrina de Migrations) — clones conseguem atualizar
-12. **Se tocou UI/fluxo de usuário: provado pela tela como um leigo faria**, em ambiente fresco estilo VPS, com evidência visual (ver Doutrina de QA Visual com Recursos Reais) — curl não conta
+11. **Mudança de schema saiu como migration versionada + apêndice no `baseline.sql` + linha no MANIFEST** (ver Doutrina de Migrations), e **destrutiva tem caminho de volta declarado** (expand/contract) — instância única não tem versão de escape
+12. **Se tocou UI/fluxo de usuário: provado pela tela como um leigo faria**, numa **conta nova** e **no estado vazio** (sem canal, sem conhecimento, sem lead), com evidência visual (ver Doutrina de QA Visual com Recursos Reais) — curl não conta
 13. **Living System Checklist respondido** (ver `docs/doctrine/sistema-vivo.md`) — a feature não é ilha: tem entrada + saída, emite atividade/log, aparece na tela, tem mecanismo anti-morte, e o mapa vivo (`docs/architecture/`) reflete peça nova com ≥2 arestas
 14. **Tela nova tem porta** — declarada em `lib/navigation/registry.ts` com seu grupo, ou na allowlist de `tests/unit/navegacao-completude.test.ts` **com justificativa escrita**. Ter tela e ser alcançável são coisas diferentes: o CI reprova tela que existe mas em que só se chega digitando a URL
 

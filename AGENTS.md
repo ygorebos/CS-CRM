@@ -9,13 +9,17 @@
 
 ## Objetivo do projeto
 
-Sistema operacional de vendas open source com agentes de IA nativos, multi-nicho,
-WhatsApp como canal primário (via WAHA). Multi-tenant com RLS desde o dia 1, LGPD
-nativa. Monetização = self-host em VPS, não assinatura. Posicionamento: [`VISION.md`](VISION.md).
+Sistema operacional de vendas com agentes de IA nativos; nicho de validação = corretor
+de plano de saúde (multi-nicho é capacidade, não prioridade). WhatsApp como canal
+primário, com **todo tráfego de entrada chegando pelo `gateway_go`**. Multi-tenant com
+RLS desde o dia 1, LGPD nativa. **Entrega: SaaS de instância única, operada por nós** —
+ninguém instala nada. **Cobrança é gerenciada no Cotador Simplificado, não aqui.**
+Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.0.0).
 
-**Consequência que muda como você trabalha:** o produto é distribuído como código.
-Quem instala numa VPS **é** o usuário. Uma mudança que funciona na máquina do dev e
-quebra no clone fresco é um bug de produto, não um detalhe de ambiente.
+**Consequência que muda como você trabalha:** existe **uma** instância e **um** banco.
+Bug em produção atinge todos os tenants ao mesmo tempo, e **não há versão de escape** —
+mudança destrutiva de schema exige caminho de volta pensado antes (expand/contract).
+Isolamento de tenant furado vaza entre clientes distintos, não entre pastas do mesmo dono.
 
 ## Stack (CONFIRMADO em `package.json`)
 
@@ -25,7 +29,7 @@ Vercel AI Gateway (`@ai-sdk/anthropic|openai|google`) · WAHA Plus (engine NOWEB
 Zod 4 · Vitest 4 · Playwright 1.62 · Sentry 10.
 Runtime: **Node ≥22** (`.nvmrc` = 22; o job `ci` roda 22, mas o `perf` ainda builda em 20 —
 divergência com `engines`, registrada como bug). Gerenciador: **pnpm 9.15.9** (`packageManager`).
-Versão do produto: **1.0.0** (`CHANGELOG.md`, SemVer — mudança que afeta quem roda VPS entra lá).
+Versão do produto: **1.0.0** (`CHANGELOG.md`, SemVer — mudança visível ao usuário entra lá).
 
 ## Estrutura que importa
 
@@ -40,7 +44,7 @@ Versão do produto: **1.0.0** (`CHANGELOG.md`, SemVer — mudança que afeta que
 | `lib/auth/require-role.ts` | `requireRole()` — guard canônico de RBAC |
 | `lib/supabase/{browser,server,admin}.ts` | clients canônicos |
 | `workers/` | workers de `event_log` + crons |
-| `supabase/migrations/` | schema versionado · `supabase/baseline.sql` = o que o self-host aplica |
+| `supabase/migrations/` | schema versionado · `supabase/baseline.sql` = o que sobe ambiente do zero e o que o gate `invariants` aplica |
 | `proxy.ts` | middleware do Next 16 (auth de borda, `X-Request-Id`) |
 
 ## Comandos (CONFIRMADO em `package.json`)
@@ -67,7 +71,7 @@ efêmero pg17). `.github/workflows/perf.yml`: `build-and-size` = `pnpm build`.
 **Os três são checks obrigatórios** na branch protection da `main`.
 
 `.github/workflows/e2e.yml` roda **28 das 32 specs** Playwright contra um Supabase local de
-verdade com o `baseline.sql` aplicado — o mesmo banco que o self-hoster tem. **Não é
+verdade com o `baseline.sql` aplicado — o mesmo schema que a instância roda. **Não é
 obrigatório ainda** (o conjunto de specs acabou de mudar, então execuções verdes anteriores
 eram de outro conjunto e não provam a estabilidade deste). As 4 de fora: `followup-journey` e
 `webhooks` (precisam de WAHA), `vps-fresh-onboarding` (WAHA + Redis + Resend + Nuvemshop; é a
@@ -86,9 +90,10 @@ o summary do job. Se você mexeu em UI fora desse subconjunto, a prova é sua.
 
 ## Diretórios e arquivos SENSÍVEIS
 
-- **`supabase/baseline.sql`** — é o que o `install.sh`/`update.sh` do self-host aplicam.
-  Toda mudança de schema tem que aparecer aqui **como apêndice idempotente**, senão
-  não chega em quem instalou. Ver doutrina de Migrations em `CLAUDE.md`.
+- **`supabase/baseline.sql`** — é o que sobe ambiente do zero e o que `scripts/test-db.sh`
+  aplica no job `invariants` (obrigatório), em modo install **e** update. Toda mudança de
+  schema tem que aparecer aqui **como apêndice idempotente**, senão o gate reprova e o
+  ambiente fresco nasce sem a mudança. Ver doutrina de Migrations em `CLAUDE.md`.
 - **`supabase/migrations/*.sql` já aplicadas** — nunca edite. Corrija com migration nova.
 - **`lib/supabase/admin.ts`** — service role **bypassa RLS**. 89 rotas o usam; toda
   query precisa filtrar `organization_id` manualmente, resolvido de fonte confiável
@@ -96,8 +101,8 @@ o summary do job. Se você mexeu em UI fora desse subconjunto, a prova é sua.
 - **`lib/auth/public-paths.ts`** — adicionar path aqui remove a checagem de auth de borda.
   Só com guard próprio dentro da rota.
 - **`.env*`** — não abra, não copie valor, não logue. Só `.env.example` é template.
-- **`docker-compose.traefik.yml`** — numa VPS que já tem proxy reverso próprio
-  (Hostinger, Coolify, Dokploy…), é o único lugar que dá ao contêiner `app` as labels
+- **`docker-compose.traefik.yml`** — na máquina de produção (proxy reverso próprio),
+  é o único lugar que dá ao contêiner `app` as labels
   de roteamento. Todo `up -d` leva os **dois** arquivos de compose:
   `docker compose -f docker-compose.prod.yml -f docker-compose.traefik.yml --env-file .env up -d app`.
   Esquecer o segundo `-f` recria o contêiner sem labels: o proxy deixa de enxergá-lo e o

@@ -1,7 +1,9 @@
 # 🧭 Visão — DeskcommCRM
 
-> **O sistema operacional de vendas com agentes de IA, open source, nativo no WhatsApp.**
+> **O sistema operacional de vendas com agentes de IA, nativo no WhatsApp.**
 > Este documento é a fonte da verdade do posicionamento do projeto. Tudo que for público (README, site, docs, descrições) deriva daqui.
+>
+> **Alinhado à constituição v2.0.0 (2026-08-08).** O produto deixou de ser distribuído para instalação em máquina de terceiro e passou a ser **SaaS de instância única**. Em caso de conflito, `.specify/memory/constitution.md` manda.
 
 ---
 
@@ -14,11 +16,13 @@ O "CRM" no nome é a categoria de entrada, não o teto. O DeskcommCRM é **mais 
 
 ## De onde viemos, pra onde vamos
 
-O projeto nasceu em 2026 como um CRM operacional para **e-commerce brasileiro** — WhatsApp via WAHA, integração Nuvemshop, LGPD nativa. Quando abrimos o código, a comunidade decidiu outra coisa: a maioria dos adopters passou a rodar o Deskcomm em **clínicas, infoprodutos, imobiliárias, agências e prestadores de serviço** — qualquer negócio que vende conversando.
+O projeto nasceu em 2026 como um CRM operacional para **e-commerce brasileiro** — WhatsApp via WAHA, integração Nuvemshop, LGPD nativa —, desenhado para ser instalado por quem quisesse, na VPS que quisesse.
 
-Os pedidos de feature dessa comunidade empurraram o produto na direção que hoje é a nossa identidade: **agentes de IA cada vez mais capazes, integrados ao sistema via MCP, operando o CRM de verdade**. O e-commerce continua sendo um caso de uso de primeira classe (foi nosso berço e a integração Nuvemshop prova isso) — mas ele é **um** vertical, não **o** produto.
+Duas coisas mudaram o rumo. A primeira: o que nos define não é o vertical, é o **agente de IA que opera o CRM de verdade**, integrado via MCP. E-commerce virou **um** caso de uso, não **o** produto. A segunda, decidida em **2026-08-08**: **paramos de distribuir instalação**. O Deskcomm passa a rodar como **SaaS de instância única, operada por nós** — o usuário se cadastra, usa, testa, e só depois assina. Ninguém instala nada.
 
-**A transição, em uma frase:** de "CRM de e-commerce com IA" para **"sistema operacional de vendas com agentes de IA, para qualquer negócio que vende pelo WhatsApp"**.
+**O nicho de validação é o corretor de plano de saúde.** Ele não é desenvolvedor, não é administrador de TI e não vai ler documentação — se ele opera sozinho, o produto está pronto. Multi-nicho continua sendo **capacidade arquitetural** (`vocabulary` por pipeline), não prioridade de validação.
+
+**A transição, em uma frase:** de "CRM de e-commerce self-hosted" para **"SaaS de vendas com agentes de IA, onde o WhatsApp e o CRM se integram de forma inteligente e autônoma"**.
 
 ## O que acreditamos sobre agentes de IA
 
@@ -37,43 +41,54 @@ Os pedidos de feature dessa comunidade empurraram o produto na direção que hoj
 | **Agentes de IA nativos** | RAG por tenant, análise de sentimento, handoff IA→humano auditado, IA como assignee, budget por org |
 | **CRM automatizado pela IA** | O agente move leads, aplica tags, dispara automações QUANDO/SE/ENTÃO — o funil anda sozinho |
 | **Ferramentas de apoio ao comercial** | Inbox em tempo real, kanban com fractional indexing, customer 360, métricas por atendente, roteamento automático |
-| **WhatsApp-native** | WAHA multi-número, anti-banimento, mídia, STOP detection — o canal onde o Brasil vende |
-| **Multi-nicho por design** | `vocabulary` configurável por pipeline (lead = Cliente/Paciente/Comprador; won = Pago/Agendado/Fechado) — o mesmo core serve e-commerce, clínica, imobiliária, infoproduto |
-| **Self-hosted de verdade** | Seus dados na sua VPS, kit de instalação com 1 comando, `baseline.sql` auto-curativo, atualização com 1 script |
+| **WhatsApp-native** | Multi-número, anti-banimento, mídia, STOP detection — o canal onde o Brasil vende |
+| **Entrada unificada** | Todo tráfego chega pelo `gateway_go` — WhatsApp oficial e não-oficial, Instagram Direct, webhooks — normalizado num envelope único. Canal novo não vira código novo de ingestão |
+| **Multi-nicho por design** | `vocabulary` configurável por pipeline (lead = Cliente/Paciente/Comprador; won = Pago/Agendado/Fechado) — o mesmo core serve corretor, clínica, e-commerce, imobiliária, infoproduto |
+| **Pronto em minutos, não em deploy** | Cadastrou, está usando: estrutura pré-pronta, sem instalar, sem configurar arquivo, sem VPS. Teto declarado: **10 minutos** do cadastro ao primeiro atendimento |
 | **Compliance nativo** | Multi-tenant com RLS testada em CI, LGPD by-design (redact, data_request, anonimização), audit append-only |
 
 ## Posicionamento
 
-**Categoria de entrada (âncora):** a alternativa **open source e self-hosted** às plataformas fechadas de atendimento e vendas por WhatsApp (Kommo, Octadesk, Intercom, Zendesk).
+**Categoria de entrada (âncora):** a alternativa às plataformas fechadas de atendimento e vendas por WhatsApp (Kommo, Octadesk, Intercom, Zendesk) — com o agente de IA operando o CRM, não um bot pendurado no chat.
 
-**Categoria própria (bandeira):** **sistema operacional de vendas com agentes de IA** — *AI Sales OS*. É pra onde a âncora nos leva: os incumbentes vendem assinatura de chat com bot acoplado; nós entregamos um sistema onde o agente de IA é operador nativo e o código é seu.
+**Categoria própria (bandeira):** **sistema operacional de vendas com agentes de IA** — *AI Sales OS*. Os incumbentes vendem assinatura de chat com bot acoplado; nós entregamos um sistema onde o agente de IA é **operador nativo**: atende, qualifica e move o funil junto com o humano.
 
 **Uma frase (pt-br):**
-> DeskcommCRM é o sistema operacional de vendas open source com agentes de IA nativos e WhatsApp — self-hosted, multi-tenant, para qualquer negócio que vende conversando.
+> DeskcommCRM é o sistema operacional de vendas com agentes de IA nativos e WhatsApp — automação e integração inteligente e autônoma entre a conversa e o funil, para quem vende conversando.
 
 **One-liner (en):**
-> Open-source AI sales OS: a self-hosted CRM where AI agents natively operate sales and support over WhatsApp — an open alternative to Kommo, Octadesk and Intercom.
+> AI sales OS: a CRM where AI agents natively operate sales and support over WhatsApp — an alternative to Kommo, Octadesk and Intercom.
 
-**Público:** negócios brasileiros (e além) que vendem pelo WhatsApp — e-commerce, clínicas, imobiliárias, infoprodutores, agências, serviços — e a comunidade dev/self-hosted que instala pra si ou pra clientes.
+**Público:** negócios brasileiros que vendem pelo WhatsApp. **Ponta de lança: corretor de plano de saúde.** Depois — clínicas, imobiliárias, infoprodutores, agências, e-commerce, serviços.
 
 ## Modelo do projeto (sem letra miúda)
 
-- **O software é 100% open source (MIT), completo, sem versão paga.** Não vendemos assinatura. Não existe feature travada.
-- **A monetização é por infraestrutura:** o projeto é desenvolvido em parceria com a **HostGator** — o caminho recomendado de produção é a VPS deles (datacenter em São Paulo), instalada pelo `hostgator-setup-kit` com 1 comando. Assinar pelo link de parceiro apoia o projeto e sai mais barato pra quem assina.
-- **O caminho genérico nunca é sabotado:** `docker compose` e o kit self-host funcionam em qualquer VPS. A parceria é o caminho recomendado, nunca o único. (Regra de ouro do open source sustentável: percepção de pegadinha mata a marca.)
+- **Entrega: SaaS de instância única.** Uma instalação, operada por nós, compartilhada por todos os tenants. O usuário **se cadastra, usa e testa**; a assinatura vem depois. Não há VPS do cliente, não há kit de instalação, não há clone com banco próprio.
+- **A cobrança é gerenciada no Cotador Simplificado, não aqui.** Este repositório não implementa assinatura, plano, preço, checkout, pagamento ou dado de cartão — e nem armazena. A ponte com o Cotador é contrato HTTP explícito. Corte de acesso é decisão de lá, comunicada, nunca inferida aqui.
+- **Consequência que assumimos por escrito:** com uma instância só, bug em produção é bug de todo mundo ao mesmo tempo — e o conserto também. Em troca, **não existe versão de escape**: mudança de schema roda no único banco que existe, e por isso exige caminho de volta pensado antes.
+- **Multi-tenant não é detalhe, é a fronteira.** Todas as organizações dividem o mesmo banco. Isolamento por RLS, testado em CI a cada merge.
+- **O código segue aberto** (MIT) — como transparência e como convite a contribuição, não como forma de distribuição. Ninguém precisa instalar para usar.
+
+## O que fica de fora, e não é "por enquanto"
+
+- **Cobrança** — mora no Cotador Simplificado.
+- **Acoplamento ao Cotador em nível de banco** — sem schema compartilhado, sem FK cruzando fronteira de produto. Só contrato HTTP.
+- **Distribuição para instalação alheia** — kit de self-host, `install.sh` de usuário e documentação de VPS deixam de ser produto.
 
 ## Princípios de comunicação
 
-1. **Keyword primeiro, jargão depois.** Em todo título público: "open source", "AI agents", "WhatsApp", "CRM", "self-hosted" antes de qualquer nome interno de subsistema.
+1. **Keyword primeiro, jargão depois.** Em todo título público: "agentes de IA", "WhatsApp", "CRM", "automação" antes de qualquer nome interno de subsistema.
 2. **Mostrar, não descrever.** Screenshot/GIF do produto no primeiro scroll de qualquer página.
-3. **Âncora explícita.** "Alternativa open source a X" aparece no About do GitHub, no README e no site — é assim que a demanda dos incumbentes nos encontra (busca e LLMs).
-4. **E-commerce é exemplo, não definição.** Ao citar casos de uso, sempre em lista multi-nicho ("e-commerce, clínicas, imobiliárias...").
-5. **Transparência de modelo.** Parceria HostGator e telemetria declaradas em linguagem humana no README, nunca escondidas.
+3. **Âncora explícita.** "Alternativa a X" aparece no About do GitHub, no README e no site — é assim que a demanda dos incumbentes nos encontra (busca e LLMs).
+4. **Corretor é a ponta, não o teto.** Ao citar casos de uso, comece pelo nicho de validação e mostre a lista multi-nicho em seguida.
+5. **Transparência de modelo.** Que a assinatura é gerenciada no Cotador, e que telemetria existe, declarados em linguagem humana — nunca escondidos.
+6. **Não prometer instalação.** Nada de "self-hosted", "sua VPS" ou "1 comando" em material público: não é mais verdade, e promessa que não se cumpre custa mais que o clique que ganha.
 
 ## Norte de 3 anos
 
-Ser a resposta padrão — do Google, do ChatGPT, do Reddit e do dev brasileiro — para a pergunta **"qual o melhor CRM open source com agentes de IA e WhatsApp?"**; com milhares de instâncias self-hosted rodando, um ecossistema de agentes plugados via MCP público, e um flywheel de auto-aprimoramento que faça cada instância vender melhor a cada mês de operação.
+Ser a resposta padrão — do Google, do ChatGPT, do Reddit e do vendedor brasileiro — para **"qual o melhor CRM com agente de IA no WhatsApp?"**; com o Cotador Simplificado migrado para cá e o CRM interno dele aposentado, um ecossistema de agentes plugados via MCP público, e um flywheel de auto-aprimoramento que faça cada tenant vender melhor a cada mês de operação.
 
 ---
 
-*Última revisão: 2026-07-19 — reposicionamento e-commerce → multi-nicho / AI Sales OS.*
+*Última revisão: 2026-08-08 — alinhamento à constituição v2.0.0: self-host → SaaS de instância única; cobrança no Cotador; nicho de validação = corretor de plano de saúde.*
+*Revisão anterior: 2026-07-19 — reposicionamento e-commerce → multi-nicho / AI Sales OS.*
