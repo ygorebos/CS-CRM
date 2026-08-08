@@ -305,8 +305,26 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       instância órfã no provedor. **O CRM é o dono da compensação** (T003): recebe o `connection_id` do gateway, grava sua linha, e se a gravação falhar chama `DELETE` no gateway. Prova compartilhada com T029. **(FR-033, FR-012)**
 - [ ] **T044** Convergir as duas portas (onboarding e Central de Conexões) para o mesmo caminho de
       criação — hoje divergem em rota e em formato de nome de sessão. **(FR-034)**
-- [ ] **T045** Exigir papel `admin` nas **duas** portas. Hoje a do onboarding não exige papel nenhum
+- [X] **T045** ✅ Exigir papel `admin` nas **duas** portas. A do onboarding não exigia papel nenhum
       — furo pré-existente que migrar sem corrigir carregaria para o caminho novo. **(FR-035)**
+  - **O furo, medido:** `/api/v1/onboarding/whatsapp/session` só checava `loadAuthUser` +
+    `resolveActiveOrg`. Um `viewer` podia iniciar o pareamento de um número da organização e — pior
+    — **ressuscitar** um canal que o admin tinha excluído: a rota reativa a linha arquivada quando o
+    nome bate, e o nome é derivado do id da org, então bate **sempre**. Excluir um número é decisão
+    de admin; desfazê-la não podia ser de qualquer um. A porta gêmea já exigia `admin` desde sempre,
+    então isto não é regra nova — é a mesma regra chegando na porta que ficou para trás.
+  - **Por que agora e não depois:** migrar o pareamento para o gateway sem corrigir levaria o furo
+    para o caminho novo, onde ele passaria a valer também para o provisionamento de instância no
+    provedor — que custa dinheiro por instância criada.
+  - **O `GET` continua aberto** a qualquer membro, de propósito: ele só LÊ o estado, e negá-lo
+    transformaria a tela num erro para quem não pode parear, sem impedir nada.
+  - **Achado ao escrever o teste:** com `admin`, a rota estourava exceção crua — `ensureChannelSession`
+    lança em três situações reais (cifra indisponível, insert recusado, reativação falha) e nada
+    capturava. O corretor levaria **500 com pilha na primeira tela do produto**, onde a primeira
+    impressão se decide. Agora vira `internal_error` legível com o motivo em `details`.
+  - **Prova:** 6 casos novos em `tests/unit/rbac-matrix.test.ts` — o par das duas portas existe
+    porque o defeito ERA a divergência; cobrir só a consertada deixaria a outra livre para divergir
+    de novo. Sabotagem (`requireRole("viewer")`): 2 reprovam.
 - [ ] **T046** Desconectar e reconectar pela tela no canal migrado, com os mesmos desfechos de hoje.
       **(FR-036)**
 - [ ] **T047** Cada canal continua com segredo de recebimento próprio — a migração não pode
