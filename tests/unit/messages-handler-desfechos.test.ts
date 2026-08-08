@@ -33,7 +33,20 @@ const signedUrl = vi.fn<() => Promise<{ data: { signedUrl: string } | null; erro
   async () => ({ data: { signedUrl: 'https://signed.example/a.jpg' }, error: null }),
 );
 vi.mock('@/lib/supabase/admin', () => ({
-  createAdminClient: () => ({ storage: { from: () => ({ createSignedUrl: signedUrl }) } }),
+  createAdminClient: () => ({
+    storage: { from: () => ({ createSignedUrl: signedUrl }) },
+    // O adapter da Meta procura a credencial DA SESSÃO antes de cair no env
+    // (`resolveMetaCreds`). Antes de 2026-08-08 a linha falsa não trazia
+    // `meta_phone_number_id`, a busca era pulada por ref vazio, e o dublê nunca
+    // precisava de `.from` — um caminho de produção inteiro ficava sem exercício.
+    // Sem token na sessão o retorno é `null`, e o adapter cai no env: é o
+    // fallback que as instalações de número único usam de verdade.
+    from: () => ({
+      select: () => ({
+        eq: () => ({ maybeSingle: async () => ({ data: null, error: null }) }),
+      }),
+    }),
+  }),
 }));
 // Audit é fire-and-forget e escreve em outra tabela; fora do escopo dos desfechos.
 vi.mock('@/lib/audit', () => ({ audit: vi.fn(async () => {}) }));
@@ -52,7 +65,42 @@ interface ConversationShape {
   archivedAt?: string | null;
 }
 
+/**
+ * Referência da sessão POR PROVIDER, espelhando o CHECK
+ * `channel_sessions_provider_ref_check` do banco: a coluna do canal da vez é NOT
+ * NULL, as outras são NULL.
+ *
+ * Até 2026-08-08 a linha falsa gravava `waha_session_name: 'default'` para
+ * QUALQUER provider — uma linha que o banco recusaria. Uma sessão `meta_cloud`
+ * assim chegava ao adapter com `sessionRef: undefined` e o teste passava, porque
+ * o adapter da Meta se endereça por env. Fixture que modela linha impossível não
+ * prova o caminho de produção — prova o dublê.
+ */
+function refDoProvider(provider: string): Row {
+  const vazio = {
+    waha_session_name: null,
+    meta_phone_number_id: null,
+    gateway_connection_id: null,
+  };
+  switch (provider) {
+    case 'waha':
+      return { ...vazio, waha_session_name: 'default' };
+    case 'meta_cloud':
+      return { ...vazio, meta_phone_number_id: '1103328999528818' };
+    case 'whatsapp_uazapi':
+    case 'whatsapp_cloud':
+    case 'instagram':
+    case 'messenger':
+      return { ...vazio, gateway_connection_id: 'conn-do-gateway' };
+    default:
+      // Provider fora do vocabulário: o caso 7 exige que o handler falhe fechado
+      // ANTES de olhar a referência, então a linha vai sem nenhuma.
+      return vazio;
+  }
+}
+
 function conversationRow(shape: ConversationShape = {}): Row {
+  const provider = shape.provider ?? 'waha';
   return {
     id: CONV,
     organization_id: ORG,
@@ -71,8 +119,8 @@ function conversationRow(shape: ConversationShape = {}): Row {
         : {
             // `provider` sai do banco desde a migration 0087 — o handler não
             // supõe mais o canal, então a linha falsa também não pode supor.
-            provider: shape.provider ?? 'waha',
-            waha_session_name: 'default',
+            provider,
+            ...refDoProvider(provider),
             status: shape.sessionStatus ?? 'WORKING',
             archived_at: shape.archivedAt ?? null,
           },

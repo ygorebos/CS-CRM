@@ -195,9 +195,34 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
 - [X] **T032** ✅ no mesmo commit — `sessionRef` = `gateway_connection_id` do canal; corpo nunca escolhe conexão; teste varre `organization` fora do JSON.
 - [X] **T033** ✅ — credencial só em cabeçalho (teste afirma que a URL não contém o token).
 - [X] **T034** ✅ — `message_id` da resposta vira `external_id`; ausente → null, nunca inventado.
-- [ ] **T035** Passar o envio migrado pelas mesmas travas de vazão e janela do envio atual, e
-      **corrigir `app/api/v1/cron/recover-stuck-messages`**, que hoje monta chamada crua ao WAHA e
-      ignora o seam — num canal migrado ela envia para o lugar errado, em silêncio. **(FR-020)**
+- [X] **T035** ✅ Passar o envio migrado pelas mesmas travas de vazão e janela do envio atual, e
+      corrigir a rotina de recuperação que monta chamada crua ao WAHA e ignora o seam — num canal
+      migrado ela envia para o lugar errado, em silêncio. **(FR-020)**
+  - **Correção do alvo:** a task nomeava `app/api/v1/cron/recover-stuck-messages`. Medido: essa
+    rota **não envia nada** — só marca `failed` e abre aviso na Central. Quem monta a chamada crua é
+    o **redrive do watchdog** (`lib/agent-engine/edge/crm/session-reconciler.ts:139`), que fazia
+    `POST /api/sendText` com `waha_session_name` — NULO numa sessão do gateway. O defeito descrito
+    existia; o arquivo era outro.
+  - **Buraco anterior, achado no caminho:** `resolveSessionRef` só conhecia `waha` e `meta_cloud`.
+    O `switch` é exaustivo no TypeScript, então uma sessão `whatsapp_uazapi` **não reprovava o
+    typecheck** e devolvia `undefined` em runtime — e `JSON.stringify` apaga chave undefined. Todo
+    envio de canal migrado sairia sem `connection_id`. Consertado com `gateway_connection_id` na
+    união, na `CHANNEL_SESSION_REF_COLUMNS` e com `throw` no lugar do `undefined`.
+  - **Travas de vazão: nada a mudar, e isso foi medido.** `lib/automation/actions/send-whatsapp.ts`
+    aplica janela 7h-22h, limite diário por `channel_session_id` e espaçamento+jitter **antes** de
+    chamar `sendMessageHandler`, e nenhum desses passos pergunta o provider — o arquivo nem está na
+    `KNOWN_DEBT` do `lint-channels`, que já proíbe nomear provider fora de `lib/channels/`. O envio
+    migrado herda a cadeia inteira por construção.
+  - **Provas:** `tests/unit/endereco-da-conexao-no-envio.test.ts` (3, vermelho antes: 3/3) e o bloco
+    novo de `tests/invariants/agent-watchdog.test.ts` (2) — canal do gateway sem credencial fica
+    `queued` e o WAHA **não** recebe nada; com o gateway no ar sai por ele, endereçado pela conexão
+    da sessão. Sabotagem (`getAdapter('waha')` fixo): os 2 reprovam.
+  - **Fixture que modelava linha impossível:** `conversationRow` de
+    `tests/unit/messages-handler-desfechos.test.ts` gravava `waha_session_name` para QUALQUER
+    provider — linha que o `channel_sessions_provider_ref_check` recusa. Agora espelha o CHECK, e o
+    caso `meta_cloud` passou a exercitar `resolveMetaCreds` de verdade (o dublê do admin ganhou
+    `.from`).
+  - Verde: `pnpm test:unit` 3096/3096, `pnpm test:db` 555/555, typecheck e `lint-channels` zerados.
 - [ ] **T036** Tratar a resposta do gateway como **aceite provisório**: estado definitivo só pela
       confirmação assíncrona. **(FR-021)**
 - [ ] **T037** Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário

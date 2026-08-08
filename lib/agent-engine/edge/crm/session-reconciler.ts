@@ -7,18 +7,37 @@
  *
  * Dois deveres, um tick:
  *   1. RECONCILIADOR: lê o status REAL das sessões na API do WAHA e corrige o
- *      espelho quando divergir (a fonte da verdade do status é o WAHA);
+ *      espelho quando divergir (a fonte da verdade do status é o WAHA) — só das
+ *      sessões DESSE canal, ver abaixo;
  *   2. REDRIVE: mensagens `sent_via='ai'` presas em `queued` cuja sessão está
- *      WORKING são reenviadas pelo WAHA (com espaçamento anti-rajada) e marcadas
- *      `sent` — nunca dropadas, nunca duplicadas (só linhas ainda `queued`).
+ *      WORKING são reenviadas **pelo canal da própria sessão** (com espaçamento
+ *      anti-rajada) e marcadas `sent` — nunca dropadas, nunca duplicadas (só
+ *      linhas ainda `queued`).
  *
  * Regra dura nº 4 respeitada: message-plane nunca fala com o WAHA — este módulo
- * é o WATCHDOG (admin-plane), o único lugar do engine autorizado a falar com o
- * WAHA diretamente (o envio normal segue via sendMessageHandler).
+ * é o WATCHDOG (admin-plane), o único lugar do engine autorizado a falar com a
+ * API de SESSÃO do WAHA diretamente (o envio normal segue via sendMessageHandler).
+ *
+ * ─── O redrive falava um dialeto só (spec 004, FR-020 / T035) ────────────────
+ *
+ * Até 2026-08-08 o redrive montava `POST /api/sendText` do WAHA na mão, com
+ * `waha_session_name` e um `chatId` construído aqui. Num canal migrado para o
+ * gateway essas duas coisas são NULAS — a sessão se identifica por
+ * `gateway_connection_id` —, então o watchdog mandava para o WAHA um envio com
+ * `session: null` e marcava a mensagem `sent`. Lugar errado, ou lugar nenhum, e
+ * em silêncio: exatamente a falha que o watchdog existe para consertar,
+ * recriada por ele.
+ *
+ * Agora o redrive pede o adapter do provider da sessão (`lib/channels/`) — o
+ * MESMO seam do envio normal. Provider sem adapter, canal não configurado ou
+ * sessão sem endereço: a mensagem **fica `queued`** e o tick reclama. Nunca
+ * `sent` sem ter saído — é o que separa "ainda vai" de "já foi" na tela.
  */
 import type pg from 'pg';
 
-import { parseWahaMessageId } from '@/lib/waha/message-id';
+import { getAdapter } from '@/lib/channels';
+import { resolveSessionRef, type ChannelSessionRef } from '@/lib/channels/session-ref';
+import type { ChannelProvider } from '@/lib/channels/types';
 
 import type { Logger } from '../../obs/logger';
 
@@ -67,10 +86,13 @@ export async function reconcileSessions(
   }
   let fixed = 0;
   for (const s of sessions) {
+    // `provider = 'waha'` no WHERE, e não só o nome: `waha_session_name` é
+    // apagado na migração de canal, mas uma linha que ficasse com o nome antigo
+    // preenchido teria o status ditado por um canal que já não é o dela.
     const { rows } = await pool.query<{ id: string; status: string }>(
       `update channel_sessions
        set status = $2, updated_at = now()
-       where waha_session_name = $1 and status is distinct from $2
+       where waha_session_name = $1 and provider = 'waha' and status is distinct from $2
        returning id, status`,
       [s.name, s.status],
     );
@@ -90,30 +112,28 @@ interface QueuedRow {
   id: string;
   organization_id: string;
   body: string | null;
-  waha_session_name: string;
+  provider: ChannelProvider;
+  waha_session_name: string | null;
+  meta_phone_number_id: string | null;
+  gateway_connection_id: string | null;
   wa_identity: string | null;
   phone_number: string | null;
   is_group: boolean;
   group_chat_id: string | null;
 }
 
-/** chatId do WAHA a partir da identidade do contato (mesma regra do lib/waha/send). */
-function chatIdOf(m: QueuedRow): string | null {
-  if (m.is_group && m.group_chat_id) return m.group_chat_id;
-  if (m.wa_identity?.startsWith('lid:')) return `${m.wa_identity.slice(4)}@lid`;
-  if (m.wa_identity?.startsWith('phone:+')) return `${m.wa_identity.slice(7)}@c.us`;
-  if (m.phone_number) return `${m.phone_number.replace('+', '')}@c.us`;
-  return null;
-}
-
-/** Reenvia mensagens AI presas em queued com sessão WORKING. */
+/** Reenvia mensagens AI presas em queued com sessão WORKING, pelo canal DELA. */
 export async function redriveQueued(
   pool: pg.Pool,
   cfg: WatchdogConfig,
   log: Logger,
 ): Promise<number> {
+  // As três colunas de referência viajam juntas porque quem decide qual delas
+  // vale é `resolveSessionRef` — perguntar aqui seria o `if (provider === ...)`
+  // que a doutrina de restrição de canal proíbe.
   const { rows } = await pool.query<QueuedRow>(
-    `select m.id, m.organization_id, m.body, s.waha_session_name,
+    `select m.id, m.organization_id, m.body,
+            s.provider, s.waha_session_name, s.meta_phone_number_id, s.gateway_connection_id,
             c.wa_identity, c.phone_number, v.is_group, v.group_chat_id
      from messages m
      join channel_sessions s on s.id = m.channel_session_id
@@ -130,27 +150,53 @@ export async function redriveQueued(
 
   let sent = 0;
   for (const m of rows) {
-    const chatId = chatIdOf(m);
+    // `getAdapter` é fail-closed e LANÇA para provider sem envio. Aqui isso não
+    // pode derrubar o tick nem, pior, cair no WAHA por default: a mensagem fica
+    // queued e o aviso nomeia o canal.
+    let adapter;
+    try {
+      adapter = getAdapter(m.provider);
+    } catch {
+      log.warn('watchdog: canal sem envio — queued mantida (nunca redirecionada a outro canal)', {
+        message_id: m.id,
+        provider: m.provider,
+      });
+      continue;
+    }
+
+    const chatId = adapter.resolveRecipient({
+      isGroup: m.is_group,
+      groupChatId: m.group_chat_id,
+      phoneNumber: m.phone_number,
+      waIdentity: m.wa_identity,
+    });
     if (chatId === null || m.body === null) {
       log.warn('watchdog: queued sem destino/corpo — pulada', { message_id: m.id });
       continue;
     }
-    try {
-      const res = await fetch(`${cfg.wahaBaseUrl}/api/sendText`, {
-        method: 'POST',
-        headers: { 'X-Api-Key': cfg.wahaApiKey, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ session: m.waha_session_name, chatId, text: m.body }),
-        signal: AbortSignal.timeout(15_000),
+    if (!adapter.isConfigured()) {
+      // NOOP de canal não configurado devolve `externalId: null` sem ter
+      // enviado nada — marcar `sent` aqui trocaria "ainda vai" por "já foi" na
+      // tela, que é a mentira mais cara deste módulo.
+      log.warn('watchdog: canal não configurado — queued mantida para o próximo tick', {
+        message_id: m.id,
+        provider: m.provider,
       });
-      if (!res.ok) {
-        log.warn('watchdog: redrive falhou no WAHA — mantida queued para o próximo tick', {
-          message_id: m.id,
-          status_code: res.status,
-        });
-        continue;
-      }
-      const data = (await res.json().catch(() => null)) as unknown;
-      const externalId = parseWahaMessageId(data);
+      continue;
+    }
+
+    try {
+      const { externalId } = await adapter.send({
+        sessionRef: resolveSessionRef({
+          provider: m.provider,
+          waha_session_name: m.waha_session_name,
+          meta_phone_number_id: m.meta_phone_number_id,
+          gateway_connection_id: m.gateway_connection_id,
+        } as unknown as ChannelSessionRef),
+        to: chatId,
+        kind: 'text',
+        body: m.body,
+      });
       await pool.query(
         `update messages
          set status = 'sent', ack = 0,
