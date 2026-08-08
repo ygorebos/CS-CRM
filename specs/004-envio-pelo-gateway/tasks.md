@@ -886,3 +886,31 @@ uma conta de verdade, numa instalação de verdade, clicando de verdade.
 ⚠️ **A correção não foi re-executada contra a spec** — o ambiente já estava derrubado quando ela foi
 diagnosticada. `pnpm test:unit` segue 3157/3157 e o `lint-channels` zerado, mas a prova de tela é a
 primeira coisa a rodar na próxima sessão.
+
+### Quarta rodada — a página respondeu, e a resposta era 2FA
+
+Rodei de novo depois da correção do botão. **Mesmos 4 vermelhos.** Em vez de supor de novo, li o
+`error-context.md` que o próprio Playwright grava — a captura da página no instante da falha:
+
+```yaml
+- heading "Configure a verificação em duas etapas"
+- paragraph: Sua conta exige 2FA. Use um aplicativo autenticador...
+- button "Iniciar configuração"
+```
+
+**O login funciona; o app exige MFA e a spec nunca sai dessa tela.** A hipótese (b) que eu tinha
+deixado na segunda rodada estava certa — e o `#` na senha era um **segundo** bug, independente, que
+escondia este. Consertar o primeiro foi o que permitiu chegar até aqui.
+
+**A doutrina exige MFA TOTP para `admin`** (`CLAUDE.md`, seção Auth & RBAC) e o dono do bootstrap é
+admin. As specs irmãs tratam isso com `tests/e2e/helpers/login-admin.ts` + `tests/e2e/utils/totp.ts`
+— enrolam o fator e geram o código de 6 dígitos, com o cuidado de não reusar código dentro da mesma
+janela de 30 s. **Esta spec não usa nenhum dos dois.**
+
+**Não é mais hipótese: é a captura da tela.** O que falta na T063 é uma coisa só e está nomeada —
+adotar o caminho de MFA das specs irmãs. Ambiente derrubado pela quarta vez; zero containers
+`f6004`; app da outra sessão em 307.
+
+**E o defeito de produto que estas quatro rodadas acharam continua valendo**: o botão de conectar
+morto na instalação migrada (corrigido, `podeConectar`). Ele não seria encontrado por nenhum teste
+unitário — e é a resposta para "por que a Fase 6 existe".
