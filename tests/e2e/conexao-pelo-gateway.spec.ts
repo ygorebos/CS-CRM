@@ -35,6 +35,8 @@ import * as path from "node:path";
 
 import { test, expect, type Page } from "@playwright/test";
 
+import { generateTotp, msUntilNextTotpWindow } from "./utils/totp";
+
 const EVIDENCE_DIR = path.join(process.cwd(), ".superpowers/evidence/conexao-gateway");
 
 /**
@@ -99,7 +101,73 @@ async function entrar(page: Page): Promise<void> {
   // 2026-08-08, e é o comportamento certo (a `vps-fresh-onboarding` o congela
   // no caso J1.1). Esperar só por `/app` fazia todo caso desta spec morrer no
   // login, dizendo "navegação não aconteceu" em vez de "foi para outro lugar".
-  await page.waitForURL(/\/(app|onboarding)/, { timeout: 30_000 });
+  // `/login/mfa` entra na espera porque, a partir do SEGUNDO login, é para lá
+  // que o app manda: o fator já existe e ele cobra o código. Esperar só por
+  // `/app|/onboarding` fazia o teste morrer na tela de desafio dizendo
+  // "navegação não aconteceu".
+  await page.waitForURL(/\/(app|onboarding|login\/mfa)/, { timeout: 30_000 });
+  await passarPeloMfa(page);
+}
+
+/** Segredo TOTP capturado no enrolamento — reusado pelos logins seguintes. */
+let segredoTotp: string | null = null;
+
+/** Digita o código de 6 dígitos, com retry na virada da janela de 30 s. */
+async function digitarCodigo(page: Page, alvo: ReturnType<Page["getByRole"]>): Promise<void> {
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    if (msUntilNextTotpWindow() < 4_000) await page.waitForTimeout(msUntilNextTotpWindow() + 300);
+    await page.locator('input[aria-label="Dígito 1"]').click();
+    await page.keyboard.type(generateTotp(segredoTotp!), { delay: 40 });
+    try {
+      await expect(alvo).toBeVisible({ timeout: 8_000 });
+      return;
+    } catch {
+      if (tentativa === 2) throw new Error("código TOTP recusado três vezes");
+      await page.locator('input[aria-label="Dígito 1"]').click();
+      for (let i = 0; i < 6; i++) await page.keyboard.press("Backspace");
+    }
+  }
+}
+
+/**
+ * O portão que faltava — e ele não é acidente de ambiente, é DOUTRINA.
+ *
+ * `CLAUDE.md` (Auth & RBAC) exige MFA TOTP para `admin`, e o dono criado pelo
+ * `bootstrap-owner` É admin. Então a primeira coisa que ele vê depois do login é
+ * um gate não-dismissível de 2FA — e nenhuma tela do app abre antes dele.
+ *
+ * Descoberto lendo o `error-context.md` que o próprio Playwright grava: a captura
+ * da página no instante da falha dizia, com todas as letras, "Sua conta exige
+ * 2FA". Antes disso eu tinha suposto duas causas erradas seguidas; a captura
+ * encerrou o assunto em um minuto.
+ *
+ * O enrolamento segue o mesmo caminho da `vps-fresh-onboarding` — inclusive o
+ * retry na virada da janela TOTP, que existe porque o código vale 30 s e o
+ * servidor aceita cada um UMA vez.
+ */
+async function passarPeloMfa(page: Page): Promise<void> {
+  const gate = page.getByRole("heading", { name: /verificação em duas etapas/i });
+  if (!(await gate.isVisible().catch(() => false))) return;
+
+  // DESAFIO (2º login em diante): o fator já existe e o app só cobra o código.
+  // Distinguir do ENROLAMENTO pelo botão — sem isso, o segundo login tentaria
+  // enrolar um fator que já existe.
+  const iniciar = page.getByRole("button", { name: /iniciar configuração/i });
+  if (!(await iniciar.isVisible().catch(() => false))) {
+    if (!segredoTotp) throw new Error("desafio de MFA sem segredo — o enrolamento não rodou antes");
+    await digitarCodigo(page, page.getByRole("heading", { name: /verificação em duas etapas/i }).first());
+    await page.waitForURL(/\/(app|onboarding)/, { timeout: 20_000 });
+    return;
+  }
+
+  await iniciar.click();
+  await page.getByText(/não consegue escanear/i).click();
+  segredoTotp = (await page.locator("code").innerText()).trim();
+  await digitarCodigo(page, page.getByRole("heading", { name: /códigos de recuperação/i }));
+
+  await page.getByText(/salvei meus códigos/i).click();
+  await page.getByRole("button", { name: /^concluir$/i }).click();
+  await expect(gate).toHaveCount(0, { timeout: 20_000 });
 }
 
 /**

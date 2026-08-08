@@ -914,3 +914,30 @@ adotar o caminho de MFA das specs irmãs. Ambiente derrubado pela quarta vez; ze
 **E o defeito de produto que estas quatro rodadas acharam continua valendo**: o botão de conectar
 morto na instalação migrada (corrigido, `podeConectar`). Ele não seria encontrado por nenhum teste
 unitário — e é a resposta para "por que a Fase 6 existe".
+
+### Quinta e sexta rodadas — MFA tratado, e onde a spec parou de fato
+
+**Quinta:** implementado o enrolamento de MFA no padrão da `vps-fresh-onboarding` (captura do
+segredo pela via "não consigo escanear" + código de 6 dígitos com retry na virada da janela de 30 s).
+**Funcionou:** o primeiro caso passou atravessando o gate inteiro. Mas expôs o passo seguinte — do
+**segundo login em diante** o fator já existe e o app cobra o código em `/login/mfa`, tela diferente
+da de enrolamento.
+
+**Sexta:** a spec passou a distinguir ENROLAMENTO de DESAFIO (pelo botão "Iniciar configuração") e a
+reusar o segredo. **Piorou: 5 vermelhos.** Não diagnosticado — acabou o contexto da sessão, e o
+padrão que se repetiu quatro vezes hoje é claro: cada suposição minha sobre a causa custou uma
+rodada, e cada leitura da captura do Playwright resolveu em um minuto.
+
+**O que fica registrado, e vale mais que o número da task:**
+
+1. **Um defeito de produto encontrado e corrigido** — o botão de conectar morto na instalação
+   migrada (`podeConectar`). Nenhum teste unitário o pegaria.
+2. **Dois bugs do próprio harness** — o `#` na senha comido pelo `dotenv`, e o `waitForURL`
+   esperando só por `/app` quando conta nova cai no wizard.
+3. **O ambiente virou script** e subiu limpo **seis vezes**, sempre derrubado ao fim, com o app da
+   outra sessão intacto em 307 todas as vezes.
+4. **A ferramenta de diagnóstico está nomeada:** `test-results/**/error-context.md` — a captura da
+   página no instante da falha. Quem retomar deve começar por ela, não por hipótese.
+
+**A T063 continua ABERTA**, e o que falta é fazer o desafio de MFA funcionar entre casos. É trabalho
+de harness de teste, não de produto — todo o produto que esta jornada exercita já foi corrigido.
