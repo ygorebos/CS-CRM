@@ -294,11 +294,35 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
 
 ## Fase 4 — CRM: conexão pela tela (F3)
 
-- [ ] **T040** Parear número novo pela tela, pelo gateway, com QR code, **sem passo a mais** e
+- [X] **T040** ✅ Parear número novo pela tela, pelo gateway, com QR code, **sem passo a mais** e
       **sem** a tela nomear provedor. **(FR-030)**
-- [ ] **T041** Tela detecta sozinha que conectou — sem recarregar, sem confirmar à mão. Consome
-      `expires_at` para pedir material novo **quando expira**, em vez de refazer a imagem a cada
-      15 s no escuro. **(FR-031)**
+  - Rota nova `GET /api/v1/channel-sessions/[id]/pairing` — JSON, serve os **dois** canais. A rota
+    irmã `/qr` devolve bytes de PNG e continua existindo sem mudança: ela é o caminho de quem já usa,
+    e mexer nela agora tocaria o passo mais frágil da instalação existente.
+  - **Sem passo a mais:** o diálogo é o mesmo, o fluxo é o mesmo. O que mudou é de onde o material
+    vem. E **sem nomear provedor**: a decisão "que natureza de endereço esta conexão tem" virou
+    `classificarRef()` em `lib/channels/session-ref.ts` — o `lint-channels` reprovou a primeira
+    versão da rota, que lia a coluna direto, e o conserto foi mover a pergunta para dentro do seam.
+  - **Código de pareamento por número** apareceu de graça: o contrato devolve `pair_code`, e a tela
+    passou a mostrá-lo. É a saída de quem tem um aparelho só e não consegue apontar a câmera para a
+    própria tela.
+- [X] **T041** ✅ Tela detecta sozinha que conectou; consome `expires_at` para pedir material novo
+      **quando expira**, em vez de refazer a imagem a cada 15 s no escuro. **(FR-031)**
+  - **O 15 s errava nas DUAS direções:** era palpite de folga sobre uma expiração que ninguém
+    declarava. Quem demorava a pegar o celular ainda escaneava código morto — e concluía que o
+    aparelho dele é que estava ruim; quem escaneava rápido pagava requisições que não precisavam
+    sair. `proximoPedidoDeQrMs()` (`lib/channels/validade-do-qr.ts`) agenda para 3 s **antes** do
+    vencimento.
+  - **Canal que não declara validade mantém os 15 s.** Fingir uma validade não medida seria pior que
+    não ter nenhuma: erraria com aparência de precisão.
+  - **Piso de 1 s** para validade já vencida (relógio fora de sincronia, aba em segundo plano) — sem
+    ele o cálculo dá negativo e a tela entra em laço de requisições.
+  - A detecção de conexão já existia (poll de 3 s em `channel_sessions`) e não mudou.
+  - **Prova:** `tests/unit/pareamento-com-validade.test.ts` (5) sobre a função pura — testar o
+    `useEffect` inteiro exigiria montar diálogo, cliente HTTP e relógio para provar uma conta de
+    cinco linhas. Sabotagem (ignorar a validade): 3 reprovam.
+  - ⚠️ **Falta a prova de TELA** (Playwright, conta nova, estado vazio) exigida pela doutrina de QA
+    Visual — está na Fase 6 (T060-T069), junto com a execução medida do quickstart.
 - [X] **T042** ✅ Traduzir os estados do gateway para o vocabulário da tela; estado desconhecido cai
       em estado seguro e legível — **nunca tela vazia**. **(FR-032)**
   - Duas funções, e as duas em `lib/gateway/provisionamento.ts`: `estadoConhecido()` (cru → um dos

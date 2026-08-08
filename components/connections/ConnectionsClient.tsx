@@ -5,6 +5,7 @@ import { toast } from "sonner";
 
 import type { ChannelDeletionImpact } from "@/app/api/v1/channel-sessions/[id]/route";
 import { apiClient } from "@/lib/api/client";
+import { proximoPedidoDeQrMs } from "@/lib/channels/validade-do-qr";
 import { ApiError } from "@/lib/api/types";
 import {
   channelLabel,
@@ -551,6 +552,21 @@ function QrDialog({
   const [tick, setTick] = useState(0);
   const [pairing, setPairing] = useState(false);
   const done = useRef(false);
+  /**
+   * Material de pareamento vindo do CANAL (spec 004, T040/T041 — FR-030/FR-031).
+   *
+   * `imagem` fica com o endereço da rota de bytes (canal antigo) OU com o
+   * `data:` URL que o canal novo devolve — o `<img>` aceita os dois, então a tela
+   * não precisa saber qual é qual.
+   *
+   * `validade` é a novidade que importa: com ela, o refresh acontece QUANDO
+   * expira, e não a cada 15 s no escuro.
+   */
+  const [material, setMaterial] = useState<{
+    imagem: string | null;
+    codigo: string | null;
+    validade: string | null;
+  } | null>(null);
 
   useEffect(() => {
     if (!wahaConfigured) return;
@@ -579,19 +595,62 @@ function QrDialog({
     };
   }, [sessionId, wahaConfigured, onConnected]);
 
-  // O QR do WhatsApp EXPIRA — medido no WAHA, a imagem muda a cada ~20s. Carregar
-  // uma vez só (o que esta tela fazia) deixava um código morto na tela: quem
-  // demorasse a pegar o celular escaneava algo que o WhatsApp já tinha
-  // invalidado. Recarregamos a cada 15s enquanto estivermos em SCAN_QR_CODE,
-  // com folga sobre a expiração.
-  // A primeira imagem não precisa de tick novo: o <img> só é montado quando o
-  // status vira SCAN_QR_CODE, e essa montagem já busca o QR do momento. O
-  // intervalo cuida só das renovações seguintes.
+  /**
+   * O QR EXPIRA, e é ISSO que decide o ritmo.
+   *
+   * Antes: recarregava a cada 15 s, sempre, por cache-buster — um número
+   * escolhido para ter folga sobre uma expiração que ninguém declarava. Quem
+   * demorasse a pegar o celular ainda podia pegar um código morto, e quem
+   * escaneasse rápido pagava requisições que não precisavam sair.
+   *
+   * Agora a rota de pareamento devolve `expires_at` quando o canal a declara, e
+   * o refresh é agendado para 3 s ANTES dela — margem para a viagem de rede e
+   * para o corretor não ver o código piscar no meio de um escaneamento. Canal
+   * que não declara validade mantém os 15 s: fingir uma validade não medida
+   * seria pior que não ter nenhuma.
+   */
   useEffect(() => {
     if (status !== "SCAN_QR_CODE") return;
-    const iv = setInterval(() => setTick((t) => t + 1), 15_000);
-    return () => clearInterval(iv);
-  }, [status]);
+    let cancelado = false;
+
+    const buscar = async () => {
+      try {
+        const res = await apiClient.get<{
+          data: {
+            qr_code: string | null;
+            pair_code: string | null;
+            expires_at: string | null;
+            image_url: string | null;
+          };
+        }>(`/api/v1/channel-sessions/${sessionId}/pairing`);
+        if (cancelado) return;
+        const d = res.data;
+        setMaterial({
+          // O canal antigo devolve endereço da rota de bytes; o novo, um `data:`
+          // URL. O cache-buster só faz sentido no primeiro.
+          imagem: d.qr_code ?? (d.image_url ? `${d.image_url}?t=${Date.now()}` : null),
+          codigo: d.pair_code,
+          validade: d.expires_at,
+        });
+      } catch {
+        // Transitório: o próximo agendamento tenta de novo. Apagar o código da
+        // tela por um erro de rede tiraria do corretor um QR que ainda vale.
+      }
+    };
+
+    void buscar();
+    return () => {
+      cancelado = true;
+    };
+  }, [status, sessionId, tick]);
+
+  useEffect(() => {
+    if (status !== "SCAN_QR_CODE") return;
+    // A conta mora em `lib/channels/validade-do-qr.ts` para ser exercitável sem
+    // montar diálogo, cliente HTTP e relógio.
+    const t = setTimeout(() => setTick((n) => n + 1), proximoPedidoDeQrMs(material?.validade));
+    return () => clearTimeout(t);
+  }, [status, material]);
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -607,12 +666,34 @@ function QrDialog({
             // Sem `key={tick}`: trocar só o src reaproveita o mesmo <img>, e o
             // browser segura o frame anterior até decodificar o novo. Remontar o
             // elemento a cada refresh é o que causaria o flash branco.
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={`/api/v1/channel-sessions/${sessionId}/qr?t=${tick}`}
-              alt="QR Code para conectar WhatsApp"
-              className="h-64 w-64 rounded-md border bg-white p-2"
-            />
+            <div className="flex flex-col items-center gap-3">
+              {material?.imagem ? (
+                // Sem `key`: trocar só o src reaproveita o mesmo <img>, e o
+                // browser segura o frame anterior até decodificar o novo.
+                // Remontar o elemento a cada refresh é o que causaria o flash
+                // branco no meio do escaneamento.
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={material.imagem}
+                  alt="QR Code para conectar WhatsApp"
+                  className="h-64 w-64 rounded-md border bg-white p-2"
+                />
+              ) : (
+                <div className="flex h-64 w-64 flex-col items-center justify-center gap-2 rounded-md border text-sm text-muted-foreground">
+                  <CircleNotch size={28} className="animate-spin" aria-hidden />
+                  Preparando o código…
+                </div>
+              )}
+              {material?.codigo ? (
+                // Código de pareamento por número: alternativa para quem não
+                // consegue apontar a câmera para outra tela — caso real de quem
+                // usa um aparelho só.
+                <p className="text-sm text-muted-foreground">
+                  Ou digite este código no celular:{" "}
+                  <span className="font-mono font-semibold text-foreground">{material.codigo}</span>
+                </p>
+              ) : null}
+            </div>
           ) : status === "WORKING" ? (
             <div className="flex flex-col items-center gap-2 text-sm font-medium text-success-fg">
               <CheckCircle size={28} weight="fill" aria-hidden />

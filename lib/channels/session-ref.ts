@@ -69,3 +69,33 @@ export function resolveSessionRef(session: ChannelSessionRef): string {
       );
   }
 }
+
+/**
+ * O ref da sessão E de que NATUREZA ele é — sem que quem pergunta precise
+ * nomear provider (invariante 1 da doutrina de restrição de canal).
+ *
+ * Existe porque há decisões que dependem do TIPO de endereço e não do valor: a
+ * tela de pareamento, por exemplo, busca imagem no transporte antigo e material
+ * completo no gateway. Perguntar isso fora daqui viraria o
+ * `if (provider === ...)` que o invariante proíbe; perguntar "tem
+ * `gateway_connection_id`?" seria o mesmo `if` escrito com outra palavra.
+ *
+ * `null` quando a linha não tem referência nenhuma — estado que o CHECK do banco
+ * proíbe, mas que aparece quando alguém esquece a coluna no `select`.
+ */
+export type NaturezaDoRef =
+  | { via: "gateway"; ref: string }
+  | { via: "transporte"; ref: string }
+  | null;
+
+export function classificarRef(session: Partial<ChannelSessionRef> | null): NaturezaDoRef {
+  if (!session) return null;
+  const s = session as {
+    gateway_connection_id?: string | null;
+    waha_session_name?: string | null;
+    meta_phone_number_id?: string | null;
+  };
+  if (s.gateway_connection_id) return { via: "gateway", ref: s.gateway_connection_id };
+  const transporte = s.waha_session_name ?? s.meta_phone_number_id ?? null;
+  return transporte ? { via: "transporte", ref: transporte } : null;
+}
