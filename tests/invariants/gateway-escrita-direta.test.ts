@@ -53,12 +53,18 @@ function semear(): void {
   }
 }
 
-type OpcoesIngestao = { direction?: string; eco?: boolean; status?: string; phone?: string };
+type OpcoesIngestao = {
+  direction?: string;
+  eco?: boolean;
+  status?: string;
+  phone?: string;
+  grupo?: boolean;
+};
 
 function ingerir(conn: string, externalId: string, o: OpcoesIngestao = {}): string {
   const status = o.status ? `, p_status => '${o.status}'` : "";
   return sql(`
-    select message_id::text || '|' || duplicada::text
+    select coalesce(message_id::text, 'nulo') || '|' || duplicada::text || '|' || coalesce(motivo, '-')
       from public.fn_gateway_ingest_message(
         p_gateway_connection_id => '${conn}',
         p_external_id           => '${externalId}',
@@ -67,6 +73,7 @@ function ingerir(conn: string, externalId: string, o: OpcoesIngestao = {}): stri
         p_contact_kind          => 'phone',
         p_contact_phone         => '${o.phone ?? "+5585999990000"}',
         p_body                  => 'ola',
+        p_eh_grupo              => ${o.grupo ? "true" : "false"},
         p_eh_eco                => ${o.eco ? "true" : "false"}${status});
   `);
 }
@@ -175,8 +182,8 @@ describe("idempotência — com a constraint DEFERRABLE real no caminho", () => 
     const idPrimeira = (primeira.split("|")[0] ?? "").trim();
     const idSegunda = (segunda.split("|")[0] ?? "").trim();
     expect(idSegunda).toBe(idPrimeira);
-    expect(primeira).toContain("|f");
-    expect(segunda).toContain("|t");
+    expect(primeira).toContain("|false|");
+    expect(segunda).toContain("|true|");
   });
 
   it("a redelivery não cria segunda linha em messages", () => {
@@ -227,6 +234,27 @@ describe("cadeia viva — insert e dispatch na MESMA transação", () => {
       contar(`select count(*) from public.event_log
                where event_type = 'ai_agent.dispatch_requested' and entity_id = '${id}';`),
     ).toBe(0);
+  });
+
+  it("GRUPO é ignorado por doutrina, com motivo — não vira contato nem conversa", () => {
+    // Sem esta guarda, trocar o escritor mudaria o comportamento EM SILÊNCIO:
+    // `lib/gateway/ingest.ts:99-107` descarta grupo, e a função tem de descartar
+    // igual. Grupo entrando criaria conversa e o agente responderia em grupo.
+    const antes = contar(`select count(*) from public.messages where organization_id = '${ORG_A}';`);
+    const out = ingerir(CONN_A, "grupo-1", { grupo: true, phone: "+5585900000007" });
+    expect(out).toContain("grupo_nao_vinculado");
+    expect(out).toContain("nulo");
+    expect(contar(`select count(*) from public.messages where organization_id = '${ORG_A}';`)).toBe(antes);
+  });
+
+  it("mensagem RECEBIDA não é marcada como enviada pelo CRM", () => {
+    // `sent_via='crm'` numa mensagem do cliente faria a conversa exibi-la como se
+    // o sistema a tivesse mandado. Espelha `lib/gateway/ingest.ts:157`.
+    ingerir(CONN_A, "sentvia-in", { phone: "+5585900000008" });
+    const out = sql(`select sent_via from public.messages
+                      where organization_id = '${ORG_A}' and external_id = 'sentvia-in' limit 1;`);
+    expect(out).not.toContain("crm");
+    expect(out).toContain("external_device");
   });
 
   it("o eco marca sent_via='external_device' — saiu pelo celular, não pelo CRM", () => {

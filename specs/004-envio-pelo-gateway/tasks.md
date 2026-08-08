@@ -102,6 +102,23 @@ opcionais nem agrupáveis no fim.
 
       Gate completo depois de restaurar: **82 arquivos, 551 passed, 1 skipped**. **(SC-012)**
 
+- [X] **T019a** ✅ **Análise pós-Fase 1 (2026-08-08): dois desvios contra o caminho de referência,
+      achados comparando a função com `lib/gateway/ingest.ts` linha a linha, e corrigidos.**
+      Nenhum dos dois teria sido pego pelos testes que eu mesmo escrevi — foram achados por leitura
+      do comportamento que já existe, que é o que "não regredir" quer dizer aqui:
+
+      **(1) Grupo entrava.** `ingest.ts:99-107` descarta conversa de grupo por doutrina
+      (`CLAUDE.md`, seção WAHA). A função não tinha a guarda: trocar o escritor faria grupos
+      criarem contato e conversa, e o agente responderia em grupo. Mudança de comportamento **em
+      silêncio**, que é a pior classe de regressão numa migração. Entrou `p_eh_grupo` e o retorno
+      ganhou `motivo` — ignorar vira decisão declarada, não descarte mudo.
+
+      **(2) Mensagem recebida era marcada `sent_via='crm'`.** Bug meu. `ingest.ts:157` marca
+      recebida como `external_device`; só o envio que passou pela nossa API é `crm`. Do jeito que
+      estava, a conversa exibiria mensagem do cliente como se o sistema a tivesse mandado.
+
+      Os dois ganharam teste próprio. Gate: **82 arquivos, 553 passed, 1 skipped**.
+
 ---
 
 ## Fase 2 — O fork do gateway (`/root/PROJETOS/gateway_go`)

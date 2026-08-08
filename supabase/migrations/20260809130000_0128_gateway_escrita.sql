@@ -47,6 +47,7 @@ create or replace function public.fn_gateway_ingest_message(
   p_direction             text,
   p_type                  text,
   p_contact_kind          text,
+  p_eh_grupo              boolean default false,
   p_contact_phone         text    default null,
   p_contact_lid           text    default null,
   p_contact_chat_id       text    default null,
@@ -62,7 +63,7 @@ create or replace function public.fn_gateway_ingest_message(
   p_media_storage_path    text    default null,
   p_metadata              jsonb   default '{}'::jsonb
 )
-returns table (message_id uuid, duplicada boolean)
+returns table (message_id uuid, duplicada boolean, motivo text)
 language plpgsql
 security definer
 set search_path = public, pg_temp
@@ -103,6 +104,17 @@ begin
     raise exception 'gateway: external_id obrigatorio' using errcode = 'GW003';
   end if;
 
+  -- ── Grupo: doutrina vigente, e a razão de ela existir aqui também ──
+  -- Conversa de grupo não vira vínculo no CRM (`CLAUDE.md`, seção WAHA). O
+  -- caminho por HTTP já descarta em `lib/gateway/ingest.ts:99-107`; sem esta
+  -- guarda, trocar o escritor **mudaria o comportamento em silêncio** — grupos
+  -- passariam a criar contato e conversa, e o agente responderia em grupo.
+  -- Ignorar é decisão, não descarte mudo: o motivo volta para quem chamou.
+  if coalesce(p_eh_grupo, false) then
+    return query select null::uuid, false, 'grupo_nao_vinculado'::text;
+    return;
+  end if;
+
   -- ── 2. A linha sem a qual nada abaixo funciona. Ver o cabeçalho. ──
   set constraints public.messages_org_external_id_unique immediate;
 
@@ -112,8 +124,16 @@ begin
   v_conv := public.fn_upsert_wa_conversation(v_org, v_contact, v_session);
 
   v_status   := coalesce(p_status, case when p_direction = 'inbound' then 'received' else 'sent' end);
-  -- Eco = a mensagem saiu pelo celular, não pelo CRM (T054 da spec 001).
-  v_sent_via := coalesce(p_sent_via, case when p_eh_eco then 'external_device' else 'crm' end);
+  -- `sent_via` responde "quem colocou esta mensagem aqui", e a resposta NÃO é
+  -- 'crm' fora do envio feito por nós. Mensagem RECEBIDA veio do aparelho do
+  -- cliente; eco veio do aparelho do corretor. Só o envio que passou pela nossa
+  -- API é 'crm' — marcar recebida como 'crm' faria a conversa exibir mensagem do
+  -- cliente como se o sistema a tivesse mandado. Espelha
+  -- `lib/gateway/ingest.ts:157`.
+  v_sent_via := coalesce(
+    p_sent_via,
+    case when p_direction = 'outbound' and not coalesce(p_eh_eco, false) then 'crm'
+         else 'external_device' end);
 
   -- ── 4. A mensagem. Duplicata é SUCESSO, não erro (FR-006). ──
   begin
@@ -134,7 +154,7 @@ begin
      limit 1;
     -- Sai cedo de propósito: reprocessar contato/conversa/dispatch numa
     -- redelivery acordaria o agente duas vezes para a mesma mensagem.
-    return query select v_id, true;
+    return query select v_id, true, null::text;
     return;
   end;
 
@@ -159,7 +179,7 @@ begin
 
   perform public.fn_mark_conversation_message(v_conv, p_direction, left(coalesce(p_body, ''), 200), p_sent_at);
 
-  return query select v_id, false;
+  return query select v_id, false, null::text;
 end $$;
 
 -- ══════════════════════════════════════════════════════════════════════════════
@@ -258,10 +278,10 @@ end $$;
 -- Tratar só uma das duas deixa a função exposta como RPC alcançável pela anon
 -- key — que vai para o browser — com o gate verde. Vigiado por
 -- `tests/invariants/hardening-definer-varredura.test.ts`.
-revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from public;
-revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from anon;
-revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from authenticated;
-grant  execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) to gateway_writer, service_role;
+revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,boolean,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from public;
+revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,boolean,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from anon;
+revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,boolean,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from authenticated;
+grant  execute on function public.fn_gateway_ingest_message(text,text,text,text,text,boolean,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) to gateway_writer, service_role;
 
 revoke execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) from public;
 revoke execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) from anon;
