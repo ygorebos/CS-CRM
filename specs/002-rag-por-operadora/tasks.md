@@ -35,10 +35,12 @@ sabotagem não foi delegada** — ela é o que separa teste que vigia de teste q
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
-| **Prova de banco** | T075, T093, T102, T121 | Exigem Postgres real (`pnpm test:db`). Não há um nesta máquina, por decisão do usuário: o banco de teste é o da nuvem. `material-vencido-nao-ancora.test.ts` foi ESCRITO e não executado — a prova depende do job `invariants` no PR |
+| **Invariantes não escritos** | T075, T093, T102 | ⚠️ **NÃO é bloqueio de ambiente** — foi assim que esta tabela os classificou primeiro, e estava errado. O job `invariants` do PR #12 passou em 2m39s, provando as migrations 0125–0128 em install e update. Dá para escrever o invariante e deixar o CI provar; o que não dá é ITERAR rápido sem Postgres local |
+| **Prova de banco executada** | T121 | Feito de fato pelo CI: `invariants` verde no PR #12. Falta só registrar a evidência |
 | **Prova pela tela** | T040, T041, T078, T096, T103, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
-| **Escopo restante** | T099, T122 | Remoção/desativação de escopo (FR-008) e a superfície de teste do agente (FR-034) |
+| **Escopo restante** | T099 | FR-008 está pela METADE: desativar existe (`PATCH {is_active}`, a trava 4 que a busca lê ao vivo), remover **não** — não há `DELETE` na rota |
+| **Buraco fora da lista** | — | `POST /api/v1/ai/agents` insere agente **sem `guardrails`**, e `resolverExigenciaDeLastro` devolve `enforce: false` para `guardrails` ausente. Só `createDefaultAgent` (onboarding) liga o `rag_must_hit`. Agente criado por API ou duplicado de um sem guarda **afirma procedimento de operadora sem material** — o defeito que a spec inteira existe para matar, entrando por uma porta que nenhuma tarefa cobre (FR-014, FR-030) |
 | **Fechamento** | T005, T126, T127, T129 | Issue de alinhamento, docs de arquitetura, e o Living System Checklist — que só se responde com o resto medido |
 
 **Pendência transversal, que vale para tudo acima:** `lib/database.types.ts` não foi
@@ -409,7 +411,7 @@ agrupadas, com "não há nada" separado de "quase acertou".
 
 ## Phase 10: Polish & Cross-Cutting
 
-- [ ] T122 [P] Fazer a superfície de teste do agente exercer a mesma regra de lastro da conversa real em `lib/ai/agents/avaliar-resposta-de-teste.ts` — ou declarar na própria tela o que ela **não** avaliou (FR-034, SC-015)
+- [X] T122 [P] Fazer a superfície de teste do agente exercer a mesma regra de lastro da conversa real em `lib/ai/agents/avaliar-resposta-de-teste.ts` — ou declarar na própria tela o que ela **não** avaliou (FR-034, SC-015)
 - [X] T123 [P] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que conhecimento gerado automaticamente a partir de conversas **não** ancora afirmação de assistência (FR-040), com teste em `tests/invariants/aprendizado-nao-ancora-assistencia.test.ts`
 - [ ] T124 Medir SC-006 com 20 escopos carregados, comparar com a linha de base de T071 e registrar em `.superpowers/evidence/` — critério é a diferença (≤25% no p95), não um número absoluto
 - [X] T125 [P] **Conferir** que todas as rotas novas de `app/api/v1/` aplicam `checkRateLimit` — o rate limit é implementado dentro de T063, T064, T086, T087 e T088, na fatia de cada rota, e não aqui. Adiá-lo ao Polish faria F2 e F4 serem entregues reprovando o item 6 do próprio Definition of Done, e cada fatia é entregável sozinha
