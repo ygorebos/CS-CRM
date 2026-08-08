@@ -82,6 +82,10 @@ export type AuditAction =
   | "lgpd.consent_changed"
   | "lgpd.manually_approved"
   | "webhook.hmac_invalid"
+  // Entrega do gateway recusada. Motivo próprio no metadata (assinatura,
+  // janela, segredo não provisionado, conexão não migrada) — 401 genérico
+  // mandaria o operador caçar do lado errado.
+  | "webhook.gateway_rejected"
   | "lgpd.sla_alarm_triggered"
   | "lgpd.sla_watcher_run"
   | "platform_admin.inbox_listed"

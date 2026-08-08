@@ -29,6 +29,12 @@ export default defineConfig({
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key",
       SUPABASE_SERVICE_ROLE_KEY:
         "test-service-role-key-not-a-placeholder-1234567890-1234567890",
+      // gateway-inbound-autenticidade.test.ts chama a rota do gateway direto, e
+      // ela responde 404 quando a porta está desligada — o teste inteiro passaria
+      // a medir o interruptor em vez da autenticidade. `GATEWAY_BASE_URL` é
+      // exigida junto por `lib/env` (é a única origem de URL de mídia).
+      GATEWAY_INBOUND_ENABLED: "true",
+      GATEWAY_BASE_URL: "http://127.0.0.1:1",
     },
   },
   resolve: { alias: { "@": path.resolve(__dirname, ".") } },

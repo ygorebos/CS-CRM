@@ -11,6 +11,7 @@
  * reprocessar).
  */
 import type { EventRow, HandlerResult } from "@/lib/event-log/dispatcher";
+import { fetchGatewayMedia } from "@/lib/messaging/media/gateway-source";
 import { storagePathFor } from "@/lib/messaging/media/types";
 import { fetchWahaMedia } from "@/lib/messaging/media/waha-source";
 import { logger } from "@/lib/logger";
@@ -49,8 +50,15 @@ export async function persistMessageMedia(row: EventRow): Promise<HandlerResult>
   if (error) return { consumer_key, status: "error", detail: error.message };
 
   const msg = data as MessageMediaRow | null;
-  if (!msg?.media_url) return { consumer_key, status: "skipped", detail: "no media_url" };
+  if (!msg) return { consumer_key, status: "skipped", detail: "message not found" };
   if (msg.media_storage_path) return { consumer_key, status: "skipped", detail: "already stored" };
+
+  // De onde baixar. As duas origens são DISTINTAS de propósito — credencial,
+  // base e vocabulário de erro próprios. `media_url` é do caminho WAHA legado;
+  // `metadata.media_ref` é do envelope do gateway, que carrega REFERÊNCIA e
+  // nunca host confiável (o host que vier lá é descartado na origem).
+  const origem = origemDaMidia(msg);
+  if (!origem) return { consumer_key, status: "skipped", detail: "no media_url" };
 
   const markStatus = async (media_status: "stored" | "failed", patch: Record<string, unknown> = {}) => {
     const { error: updErr } = await admin
@@ -65,7 +73,10 @@ export async function persistMessageMedia(row: EventRow): Promise<HandlerResult>
 
   let media;
   try {
-    media = await fetchWahaMedia(msg.media_url, msg.media_mime);
+    media =
+      origem.tipo === "gateway"
+        ? await fetchGatewayMedia(origem.ref, msg.media_mime)
+        : await fetchWahaMedia(origem.ref, msg.media_mime);
   } catch (err) {
     const detail = err instanceof Error ? err.message : String(err);
     if (isLastAttempt) {
@@ -109,4 +120,24 @@ export async function persistMessageMedia(row: EventRow): Promise<HandlerResult>
   if (emitErr) logger.warn("[media-persist] emit_event failed (non-blocking)", { message_id: msg.id, detail: emitErr.message });
 
   return { consumer_key, status: "ok" };
+}
+
+type OrigemDaMidia = { tipo: "waha" | "gateway"; ref: string };
+
+/**
+ * Decide de onde baixar, SEM inventar terceira via.
+ *
+ * `media_url` primeiro porque é a coluna do caminho legado e continua valendo
+ * enquanto as duas ingestões coexistem. `metadata.media_ref` é do envelope: o
+ * ingest do gateway grava `media_url: null` de propósito — guardar ali um
+ * endereço vindo do payload plantaria, na própria coluna, a URL não confiável
+ * que a construção anti-SSRF existe para não usar.
+ */
+function origemDaMidia(msg: MessageMediaRow): OrigemDaMidia | null {
+  if (msg.media_url) return { tipo: "waha", ref: msg.media_url };
+
+  const ref = msg.metadata?.media_ref;
+  if (typeof ref === "string" && ref.trim()) return { tipo: "gateway", ref };
+
+  return null;
 }

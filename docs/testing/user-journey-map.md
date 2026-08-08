@@ -54,6 +54,10 @@ MFA obrigatório pra admin logo após o wizard (`MfaEnrollGate`).
 | J2.5 | WAHA derrubado (docker stop) | banner claro, botões desabilitados, 503 amigável |
 | J2.6 | Atendente (role agent) não vê botão de conectar | gate admin respeitado na UI |
 | J2.7 | AntiBanSheet: editar ritmo/janela/teto | salva, persiste em `channel_knobs`, validação de janela |
+| J2.8 `[P0]` | Conexão nova nasce no caminho da instalação (spec 001 T058a) | com o recebimento ligado, `ingest_path='gateway'`; desligado, `'legacy'` — nunca a combinação muda |
+| J2.9 `[P0]` | Mensagem real entra pelo gateway e aparece no inbox (T022) | conversa com contato e corpo certos, ≤5s; reentrega não duplica |
+| J2.10 `[P1]` | Anexo recebido abre pela tela (T047) | imagem/áudio/documento abrem por URL assinada; anexo que falha vira "indisponível" **sem** derrubar a mensagem |
+| J2.11 `[P1]` | Conversa de canal não-WhatsApp mostra o selo de origem (T057) | selo "Instagram" na lista e no cabeçalho; conversa de WhatsApp **não** ganha selo |
 
 ## J3 — Agentes de IA `[P0]` (criação) / `[P1]` (rotina)
 
@@ -481,3 +485,34 @@ edição de invariante é congelada por hook; usei a válvula
 `DESKCOMM_GOV_INVARIANTS_EDIT=1` **declarando o uso no commit** (`685d6e7`) em vez
 de contornar em silêncio. CI verde em `2c045c4` (invariants, verify, e2e,
 build-and-size, build-and-push).
+
+## Recebimento pelo gateway — cobertura e o que ainda depende de ambiente (spec 001, 2026-08-08)
+
+**O que já é vigiado por teste automático** (roda no gate `invariants`, obrigatório na `main`):
+
+| Promessa | Onde | O que a sabotagem provou |
+|---|---|---|
+| Forjado não entra, tenant não vaza | `gateway-inbound-autenticidade.test.ts` · `gateway-inbound-isolamento.test.ts` | aceitar assinatura divergente ⇒ 4 vermelhos; tenant vindo do corpo ⇒ 1 vermelho |
+| Nada fica para trás | `gateway-inbound-dreno.test.ts` | remover o aviso da Central e a carência do dreno ⇒ 2 vermelhos |
+| Estado não regride | `gateway-inbound-status.test.ts` | remover a guarda de não-regressão ⇒ 1 vermelho |
+| Canal novo sem código novo | `gateway-inbound-canal-novo.test.ts` | descartar tipo desconhecido ⇒ 1 vermelho |
+| Conexão nova nasce certa | `gateway-conexao-nova.test.ts` | — (cobre o default e o CHECK) |
+| Host do payload não decide download | `tests/unit/gateway-media-source.test.ts` | usar o host do envelope ⇒ 2 vermelhos |
+| Mensagem sobrevive ao gateway reiniciar | `gateway_go/internal/entrega/fila_test.go` | trocar disco por memória ⇒ 3 vermelhos |
+
+**O que ainda depende de ambiente real, e por quê** — nenhum destes é dúvida de projeto; são provas
+que exigem número de WhatsApp, gateway de pé e app servido:
+
+| Caso | Task | O que falta |
+|---|---|---|
+| J2.9 — mensagem real no inbox pela tela | T022 / T030 | celular real + p95 de 20 envios |
+| J2.10 — anexo abre pela tela | T047 | os três anexos, com receiver real |
+| CRM fora do ar 5 min sem perder mensagem | T038 | derrubar e subir com o gateway entregando |
+| Rajada de 200 mensagens em 60s (SC-010) | T038a | com o teto de requisições **ligado** |
+| Rollback de uma conexão sem perder o que está em voo | T064 | virar a chave nos dois sentidos em ambiente vivo |
+| Estreia cronometrada ≤10 min sem regressão | T065 | instalação fresca + relógio |
+
+**Por que isto está escrito aqui e não só no `tasks.md`.** O mapa é o lugar onde se enxerga o buraco
+de cobertura de UMA jornada. Espalhado pelas tasks, "falta provar pela tela" vira seis linhas
+distantes umas das outras, e a soma delas — *a jornada de recebimento nunca foi percorrida inteira
+por uma pessoa* — não aparece em lugar nenhum.

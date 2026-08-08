@@ -42,7 +42,10 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiError;
 // -----------------------------------------------------------------------------
 
 type OkOptions = {
-  status?: 200 | 201 | 204;
+  // 202 = aceito e DURÁVEL, ainda não processado. É o contrato do
+  // ACK-primeiro: quem responde antes de executar a cadeia não pode dizer 200,
+  // que promete resultado, nem 201, que promete recurso criado.
+  status?: 200 | 201 | 202 | 204;
   meta?: ApiSuccess<unknown>["meta"];
   requestId?: string;
   headers?: HeadersInit;

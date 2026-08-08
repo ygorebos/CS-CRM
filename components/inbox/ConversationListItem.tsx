@@ -4,6 +4,7 @@ import { ptBR } from "date-fns/locale";
 import { Robot } from "@/lib/ui/icons";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { seloDeCanal } from "@/lib/channels/rotulo-de-canal";
 import { cn } from "@/lib/utils";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
 
@@ -65,6 +66,7 @@ export function ConversationListItem({
     c?.phone_number ||
     "Sem nome";
   const phoneFallback = c?.phone_number ?? "??";
+  const canal = seloDeCanal(conversation.channel_sessions?.provider);
   const tags = c?.tags ?? [];
   const visibleTags = tags.slice(0, 2);
   const overflow = tags.length - visibleTags.length;
@@ -145,6 +147,15 @@ export function ConversationListItem({
         </p>
 
         <div className="mt-1.5 flex flex-wrap items-center gap-1">
+          {/* Canal de origem. Só aparece quando NÃO é WhatsApp: marcar todas as
+              conversas com "WhatsApp" seria ruído em toda linha, e ruído
+              constante deixa de ser lido — inclusive no dia em que aparecesse
+              a conversa que é diferente. */}
+          {canal && (
+            <Badge variant="outline" className="h-4 px-1.5 text-[10px]">
+              {canal}
+            </Badge>
+          )}
           {visibleTags.map((t) => (
             <Badge key={t} variant="secondary" className="h-4 px-1.5 text-[10px]">
               {t}

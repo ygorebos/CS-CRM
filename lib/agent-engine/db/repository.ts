@@ -48,6 +48,19 @@ export type InboxKind =
   | 'capabilities_missing'
   | 'message_send_stuck'
   | 'promise_unfulfilled'
+  // (0120) Conexão sem chave de verificação: a entrega do gateway é fail-closed
+  // sem válvula, então toda mensagem daquela conexão é recusada. Nenhuma se
+  // perde (o gateway retenta 5xx), mas nenhuma entra — e sem este aviso o
+  // sintoma é "as mensagens pararam", sem lugar nenhum para olhar.
+  | 'channel_secret_missing'
+  // (0121) Entrega de envelope descartada pelo dreno: tentativas esgotadas,
+  // linha sem dono ou envelope que não parseia. Diferente do kind acima, aqui
+  // NÃO haverá nova tentativa — a mensagem daquele cliente não vai chegar.
+  | 'gateway_delivery_dead'
+  // (0122) Conexão apontada para o gateway com o recebimento desligado: a rota
+  // responde 404, o gateway descarta sem retentar, e NADA entra. Silêncio total
+  // com conserto de uma variável.
+  | 'gateway_inbound_down'
   | 'assistance_without_grounding'
   | 'other';
 

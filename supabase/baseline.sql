@@ -8417,21 +8417,60 @@ alter table public.channel_sessions
   add column if not exists provider text not null default 'waha',
   add column if not exists meta_phone_number_id text,
   add column if not exists meta_waba_id text,
-  add column if not exists meta_token_encrypted bytea;
+  add column if not exists meta_token_encrypted bytea,
+  -- migration 0119: ponteiro para a conexão do lado do gateway. Mora AQUI, e não
+  -- num bloco próprio lá embaixo, porque o ref_check abaixo o referencia e o
+  -- apêndice é lido de cima para baixo numa instalação nova.
+  add column if not exists gateway_connection_id text;
 
 alter table public.channel_sessions alter column waha_session_name drop not null;
 
-do $$ begin
-  alter table public.channel_sessions add constraint channel_sessions_provider_check
-    check (provider = any (array['waha'::text, 'meta_cloud'::text]));
-exception when duplicate_object then null; end $$;
+-- Vocabulário de canal — BLOCO ÚNICO (ver tests/unit/baseline-constraint-reconstruida.test.ts).
+-- Migration que amplia o vocabulário EDITA esta lista; não acrescenta um segundo
+-- bloco lá embaixo. Dois blocos fariam o clone com dado do vocabulário novo
+-- falhar no bloco antigo ao re-aplicar, e ficar sem constraint entre o drop e o
+-- add que funciona.
+--
+-- `drop ... if exists` + `add` em vez do `exception when duplicate_object`: o
+-- padrão antigo é no-op quando a constraint já existe, então um clone que já
+-- rodou a versão de dois valores NUNCA receberia os quatro novos e recusaria
+-- toda sessão vinda do gateway. Trocar é seguro — a lista nova é superconjunto
+-- da antiga, nenhuma linha existente pode violá-la.
+--
+-- migration 0119: os quatro últimos espelham `MensagemNormalizada.Platform` do
+-- gateway_go, e o par com `lib/channels/types.ts` é vigiado por
+-- tests/invariants/channel-provider-schema.test.ts.
+alter table public.channel_sessions
+  drop constraint if exists channel_sessions_provider_check;
+alter table public.channel_sessions
+  add constraint channel_sessions_provider_check
+  check (provider = any (array[
+    'waha'::text,
+    'meta_cloud'::text,
+    'whatsapp_uazapi'::text,
+    'whatsapp_cloud'::text,
+    'instagram'::text,
+    'messenger'::text
+  ]));
 
-do $$ begin
-  alter table public.channel_sessions add constraint channel_sessions_provider_ref_check check (
+-- Cada provider tem de trazer a referência que o SEU canal usa. Também bloco
+-- único, e também com drop+add pelo mesmo motivo: sem isto, um clone que já
+-- rodou a versão de dois ramos recusaria toda sessão de canal do gateway com
+-- `channel_sessions_provider_ref_check`, e o erro apontaria para a coluna
+-- errada.
+--
+-- migration 0119: os canais do gateway se identificam por `gateway_connection_id`,
+-- não por sessão do WAHA nem por número da Meta. Exigi-lo é o que impede uma
+-- linha órfã que não dá para rotear de volta.
+alter table public.channel_sessions
+  drop constraint if exists channel_sessions_provider_ref_check;
+alter table public.channel_sessions
+  add constraint channel_sessions_provider_ref_check check (
     (provider = 'waha'       and waha_session_name    is not null) or
-    (provider = 'meta_cloud' and meta_phone_number_id is not null)
+    (provider = 'meta_cloud' and meta_phone_number_id is not null) or
+    (provider in ('whatsapp_uazapi', 'whatsapp_cloud', 'instagram', 'messenger')
+       and gateway_connection_id is not null)
   );
-exception when duplicate_object then null; end $$;
 
 comment on column public.channel_sessions.provider is
   'Canal desta sessão. Vocabulário espelhado em lib/channels/types.ts → ChannelProvider (cobrado por tests/invariants/vocabulario-banco-x-typescript.test.ts).';
@@ -9034,6 +9073,30 @@ alter table public.agent_inbox_items
     -- (carregar o material que falta) em vez de virar silêncio. Entra NESTA lista pela
     -- mesma razão das duas de cima.
     'assistance_without_grounding',
+    -- (migration 0120, spec 001 §T017e) Conexão cuja chave de verificação nunca
+    -- foi gerada: a entrega do gateway é fail-closed sem válvula, então toda
+    -- mensagem daquela conexão é recusada. Nenhuma se perde — o gateway retenta
+    -- 5xx — mas nenhuma entra, e sem este aviso o sintoma é "as mensagens
+    -- pararam", sem lugar nenhum para olhar. A cura das linhas antigas roda
+    -- FORA do SQL (scripts/curar-segredos-de-canal.ts, no install.sh e no
+    -- update.sh), porque a chave de cifra só existe depois deste arquivo — logo
+    -- um clone que atualize pela metade cai exatamente neste estado.
+    'channel_secret_missing',
+    -- (migration 0121, spec 001 §T037) Entrega de envelope DESCARTADA pelo dreno
+    -- do recebimento: as tentativas acabaram, ou a linha chegou sem
+    -- conexão/organização, ou o envelope não parseia. A diferença para o kind de
+    -- cima é o desfecho — lá nada se perde e as mensagens entram quando a chave
+    -- existir; aqui não haverá nova tentativa, a mensagem daquele cliente não vai
+    -- chegar, e esta é a única forma de alguém ficar sabendo. Entra NESTA lista,
+    -- e não num bloco novo, pela mesma razão do #159.
+    'gateway_delivery_dead',
+    -- (migration 0122, spec 001 §T059) Conexão apontada para o gateway com o
+    -- recebimento DESLIGADO: `ingest_path='gateway'` + `GATEWAY_INBOUND_ENABLED
+    -- =false` fazem a rota responder 404, e o gateway descarta sem retentar
+    -- (404 é defeito de configuração pelo contrato §5). Nenhuma mensagem entra,
+    -- nenhuma volta, e a tela fica igual a um dia devagar. Curável com uma
+    -- variável — mas só se alguém souber.
+    'gateway_inbound_down',
     'other'
   ));
 
@@ -9698,6 +9761,83 @@ end $$;
 -- false. Passá-lo aqui daria a impressão de que este é o lugar que decide.
 revoke execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) from public, anon, authenticated;
 grant  execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) to service_role;
+
+-- ---- recebimento unificado pelo gateway (migration 0119) ----
+--
+-- O gateway_go passa a ser o receptor geral do tráfego de entrada: recebe de
+-- todos os canais, normaliza para UM envelope e entrega ao CRM por HTTP
+-- assinado. Quem persiste continua sendo o CRM — receber uma mensagem aqui não
+-- é um INSERT, dispara agente, follow-up, guardrails, auditoria e event_log.
+--
+-- Sem tabela nova: o mapa conexão→organização já existe
+-- (channel_sessions.webhook_path_token) e a fila do ACK-primeiro também
+-- (webhook_events_log já tem status received/processed/error/dead + attempts).
+-- Falta vocabulário e uma chave de corte.
+
+-- O vocabulário de `channel_sessions.provider` e o `provider_ref_check` NÃO são
+-- reconstruídos aqui de propósito: os quatro canais do gateway e o ramo do
+-- `gateway_connection_id` já entraram no BLOCO ÚNICO desses dois, lá em cima
+-- (busque `channel_sessions_provider_check`). Um segundo bloco faria o clone com
+-- dado do vocabulário novo falhar no bloco antigo ao re-aplicar o `update.sh`, e
+-- a tabela ficaria sem constraint entre o `drop` e o `add` que funciona. Regra e
+-- histórico em tests/unit/baseline-constraint-reconstruida.test.ts.
+--
+-- `gateway_connection_id` também mora lá, porque o `provider_ref_check` a
+-- referencia e uma instalação nova lê este arquivo de cima para baixo.
+
+alter table public.webhook_events_log
+  drop constraint if exists webhook_events_log_provider_check;
+
+alter table public.webhook_events_log
+  add constraint webhook_events_log_provider_check
+  check (provider = any (array[
+    'waha'::text,
+    'nuvemshop'::text,
+    'generic'::text,
+    'gateway'::text
+  ]));
+
+-- Chave de corte por conexão. Auto-curativa: se um clone já tinha a coluna com
+-- valor fora do vocabulário (edição manual), normaliza ANTES de criar a
+-- constraint — senão o update.sh do clone quebra, e ele roda sem ON_ERROR_STOP,
+-- o que faria a falha passar em silêncio.
+alter table public.channel_sessions
+  add column if not exists ingest_path text not null default 'legacy';
+
+update public.channel_sessions
+   set ingest_path = 'legacy'
+ where ingest_path is null
+    or ingest_path not in ('legacy', 'gateway');
+
+alter table public.channel_sessions
+  drop constraint if exists channel_sessions_ingest_path_check;
+
+alter table public.channel_sessions
+  add constraint channel_sessions_ingest_path_check
+  check (ingest_path = any (array['legacy'::text, 'gateway'::text]));
+
+comment on column public.channel_sessions.ingest_path is
+  'Por qual caminho esta conexão ingere mensagens: ''legacy'' (webhook direto do '
+  'provedor) ou ''gateway'' (envelope normalizado do gateway_go). Migra-se uma '
+  'conexão por vez e volta-se atrás sem release — num produto self-host, virada '
+  'sem caminho de volta é a que não se pode consertar remotamente. Default '
+  '''legacy'' preserva instalação existente; instalação nova nasce em ''gateway'' '
+  'pelo bootstrap.';
+
+comment on column public.channel_sessions.gateway_connection_id is
+  'Identificador desta conexão no gateway_go. TEXT e sem FK de propósito: FK '
+  'cruzando fronteira de produto é proibida (constituição, Princípio VII). Serve '
+  'a diagnóstico e ao roteamento da entrega. Nullable — conexão legada não tem.';
+
+create index if not exists idx_webhook_events_log_pendentes
+  on public.webhook_events_log (received_at)
+  where status = 'received';
+
+comment on index public.idx_webhook_events_log_pendentes is
+  'Índice do dreno de ACK-primeiro: a rota responde 202 e grava status=''received'', '
+  'e o worker recolhe o que ficou parado. Parcial porque só o pendente interessa — '
+  'a tabela passa a receber TODO o tráfego de entrada e varrê-la inteira a cada '
+  'minuto seria custo crescente sem fim.';
 
 notify pgrst, 'reload schema';
 

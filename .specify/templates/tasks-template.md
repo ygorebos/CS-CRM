@@ -247,6 +247,8 @@ With multiple developers:
 - [Story] label maps task to specific user story for traceability
 - Each user story should be independently completable and testable
 - Verify tests fail before implementing
-- Commit after each task or logical group
+- Commit once per completed PHASE, not per task (constitution v1.3.0, "Cadência de commit").
+  The phase-closing commit carries the checked tasks, the updated plan progress, and green gates.
+  Commit earlier only when the tree is shared or the phase is long — losing work beats tidy history.
 - Stop at any checkpoint to validate story independently
 - Avoid: vague tasks, same file conflicts, cross-story dependencies that break independence

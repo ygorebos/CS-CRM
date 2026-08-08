@@ -175,6 +175,55 @@ async function checkWaha(): Promise<Check> {
 }
 
 /**
+ * O gateway responde?
+ *
+ * Entra no health porque ele é a PORTA DE ENTRADA de todo o tráfego de canal:
+ * com ele fora, nenhuma mensagem de cliente chega — e é o único componente da
+ * cadeia que roda em instância única e sem réplica. Um health que cobre banco,
+ * Redis e WAHA e não cobre o gateway responde "healthy" no exato cenário em que
+ * o produto está mudo.
+ *
+ * Só é cobrado quando o recebimento pela via nova está LIGADO. Com o
+ * interruptor desligado, o gateway pode legitimamente não existir nesta
+ * instalação, e um `down` permanente ensinaria a ignorar o health inteiro.
+ */
+async function checkGateway(): Promise<Check> {
+  const t0 = Date.now();
+  if (!env.GATEWAY_INBOUND_ENABLED) {
+    return { status: "ok", latency_ms: 0, error: "not_enabled", reason: "nao_configurado" };
+  }
+  const base = env.GATEWAY_BASE_URL;
+  if (!base) {
+    // `lib/env` já recusa este par no boot. Se chegou aqui, alguém contornou —
+    // e "degraded" com motivo é melhor diagnóstico que uma exceção.
+    return { status: "degraded", latency_ms: 0, error: "not_configured", reason: "nao_configurado" };
+  }
+  try {
+    const res = await withTimeout(
+      fetch(`${base.replace(/\/$/, "")}/health`, { cache: "no-store" }),
+    );
+    if (!res.ok) {
+      return {
+        status: "down",
+        latency_ms: Date.now() - t0,
+        error: `http_${res.status}`,
+        reason: motivoDoStatusHttp(res.status),
+        target: alvoDe(base),
+      };
+    }
+    return { status: "ok", latency_ms: Date.now() - t0, target: alvoDe(base) };
+  } catch (e) {
+    return {
+      status: "down",
+      latency_ms: Date.now() - t0,
+      error: e instanceof Error ? e.message : String(e),
+      reason: classificarFalhaDeAlcance(e),
+      target: alvoDe(base),
+    };
+  }
+}
+
+/**
  * O segredo interno dos crons também abre o modo verboso. Mesmo contrato de
  * `/api/v1/system/agent`: Bearer, comparação em tempo constante, e segredo vazio
  * nunca vira credencial válida.
@@ -200,15 +249,21 @@ function semAlvo(check: Check): Check {
 }
 
 export async function GET(req: NextRequest) {
-  const [supabase, redis, waha] = await Promise.all([
+  const [supabase, redis, waha, gateway] = await Promise.all([
     checkSupabase(),
     checkRedis(),
     checkWaha(),
+    checkGateway(),
   ]);
 
   const verboso = req.nextUrl.searchParams.get("verbose") === "1" && segredoInternoConfere(req);
   const filtrar = verboso ? (c: Check) => c : semAlvo;
-  const checks = { supabase: filtrar(supabase), redis: filtrar(redis), waha: filtrar(waha) };
+  const checks = {
+    supabase: filtrar(supabase),
+    redis: filtrar(redis),
+    waha: filtrar(waha),
+    gateway: filtrar(gateway),
+  };
 
   const anyDown = Object.values(checks).some((c) => c.status === "down");
   const anyDegraded = Object.values(checks).some((c) => c.status === "degraded");

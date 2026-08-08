@@ -42,6 +42,20 @@ export const KIND_LABEL = {
   // "Promessa não cumprida" é a única frase que faz o dono do negócio agir: do
   // lado de lá existe uma pessoa que ouviu um compromisso e está aguardando.
   promise_unfulfilled: "O assistente prometeu algo a um cliente e ninguém cumpriu ainda",
+  // Diz a CONSEQUÊNCIA, não a causa: quem lê a Central não sabe (nem precisa
+  // saber) o que é chave de verificação de webhook. O que ele precisa entender
+  // em um segundo é que existe um número por onde nada está entrando — o resto
+  // fica no corpo do aviso, com o que fazer.
+  channel_secret_missing: "Uma conexão não está recebendo mensagens",
+  // Diz que ACABOU, não que "falhou": o kind acima descreve mensagens que ainda
+  // vão entrar; este descreve mensagens que não vão. Quem lê precisa perceber a
+  // diferença sem abrir o aviso, porque a ação é outra — aqui é procurar o
+  // cliente, não esperar o sistema se recuperar.
+  gateway_delivery_dead: "Mensagens de clientes não chegaram e não virão",
+  // Diz que é CONFIGURAÇÃO, sem dizer qual: quem lê a Central não sabe o que é
+  // rota de recebimento, mas entende "está desligado" e entende que alguém
+  // precisa ligar. O nome da variável fica no corpo, para quem for consertar.
+  gateway_inbound_down: "O recebimento de mensagens está desligado",
   // Diz o que FALTA, não o que o guardrail fez. "Recusa por ausência de lastro" é
   // verdade e é inútil para quem lê: o dono do negócio precisa entender que existe um
   // cliente esperando e que a solução está na mão dele — carregar o material. O motivo

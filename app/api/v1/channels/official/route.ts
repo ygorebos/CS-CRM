@@ -24,6 +24,7 @@ import { randomUUID } from "node:crypto";
 import type { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 
+import { caminhoDeIngestaoParaConexaoNova } from "@/lib/gateway/caminho-de-ingestao";
 import { fail, ok } from "@/lib/api/wrappers";
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { ROLE_RANK } from "@/lib/auth/types";
@@ -166,6 +167,9 @@ export async function POST(req: NextRequest): Promise<NextResponse> {
     meta_token_encrypted: cifrado,
     phone_number: validacao.displayPhoneNumber ? `+${validacao.displayPhoneNumber.replace(/\D/g, "")}` : null,
     display_name: validacao.verifiedName ?? "Canal oficial",
+    // Mesma regra do canal não-oficial: nasce no caminho que a instalação está
+    // usando. Ver lib/gateway/caminho-de-ingestao.ts.
+    ingest_path: caminhoDeIngestaoParaConexaoNova(),
     status: "WORKING",
   };
 

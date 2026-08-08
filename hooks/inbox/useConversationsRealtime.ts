@@ -27,8 +27,24 @@ export interface ContactSummary {
   force_human?: boolean | null;
 }
 
+/**
+ * A conexão por onde a conversa chegou. Só o que a tela precisa: o `provider`.
+ *
+ * A origem NÃO sai de `conversations.channel` — aquela coluna tem CHECK
+ * `= 'whatsapp'` e continuaria dizendo "whatsapp" para uma conversa de
+ * Instagram. Alargar o CHECK seria mudança de schema com dado a corrigir; ler o
+ * `provider` da conexão é a verdade que já existe, e é a mesma que o envelope
+ * carrega em `messages.metadata.platform`.
+ */
+export interface ChannelSessionSummary {
+  id: string;
+  provider: string | null;
+}
+
 export type ConversationWithContact = Conversation & {
   contacts?: ContactSummary | null;
+  /** Opcional: conversas em cache de antes do campo existir. */
+  channel_sessions?: ChannelSessionSummary | null;
 };
 
 export interface ConversationsFilters {

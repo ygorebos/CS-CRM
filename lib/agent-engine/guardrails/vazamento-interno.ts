@@ -137,6 +137,27 @@ const PALAVRAS_ARQUITETURA = [
 const PROVIDERES_DE_CANAL = Object.keys(CHANNEL_CAPABILITIES);
 
 /**
+ * Alternação dos nomes de provider com a MESMA guarda de endereço que `RE_ADMIN`
+ * já usa — e pelo mesmo motivo medido.
+ *
+ * Quando o vocabulário de canal passou a incluir os canais que chegam pelo
+ * gateway, dois dos nomes novos deixaram de ser jargão interno e viraram
+ * palavras que o cliente e o corretor escrevem todo dia: uma rede social e um
+ * mensageiro. O detector então calava `instagram.com/loja_da_ana` — endereço
+ * legítimo, o mesmo falso-positivo de `admin@minhaloja.com.br` que este módulo
+ * já pagou uma vez.
+ *
+ * A guarda é a de sempre: nome colado a `@`, seguido de `.` + letra (domínio) ou
+ * de `/` (caminho) é ENDEREÇO, não vocabulário de arquitetura. O nome solto
+ * continua barrando, que é o caso que o gate existe para pegar — "a sessão
+ * instagram do tenant" não passa.
+ */
+const RE_PROVIDERES_DE_CANAL = new RegExp(
+  `(?<![\\w@./])(?:${PROVIDERES_DE_CANAL.join('|')})s?\\b(?!@|\\.[a-z]|/)`,
+  'g',
+);
+
+/**
  * (C) PAPEL/PERMISSÃO — o vocabulário de controle de acesso. Nenhuma destas é palavra
  * portuguesa: "manager"/"scope"/"insufficient" são do sistema, e `admin` com fronteira
  * de palavra não casa "administração"/"administrativo".
@@ -222,7 +243,11 @@ const RE_ARQUIVO_DE_CODIGO = new RegExp(
 );
 
 const REGRAS: ReadonlyArray<RegraTexto> = [
-  { categoria: 'arquitetura', re: alternacao([...PALAVRAS_ARQUITETURA, ...PROVIDERES_DE_CANAL]) },
+  { categoria: 'arquitetura', re: alternacao(PALAVRAS_ARQUITETURA) },
+  // Os providers saíram da alternação simples acima: parte dos nomes é palavra
+  // de uso comum, e sem guarda de endereço o gate calava link legítimo. Ver
+  // RE_PROVIDERES_DE_CANAL.
+  { categoria: 'arquitetura', re: RE_PROVIDERES_DE_CANAL },
   { categoria: 'papel', re: alternacao(PALAVRAS_PAPEL) },
   { categoria: 'papel', rotulo: 'admin', re: RE_ADMIN },
   // (C-bis) as duas ambíguas, só em contexto de papel. "seu perfil atual é agent" é a

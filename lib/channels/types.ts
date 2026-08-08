@@ -8,7 +8,24 @@ import type { OutboundMedia } from "@/lib/waha/media-send";
 
 export type { OutboundMedia };
 
-export type ChannelProvider = "waha" | "meta_cloud";
+/**
+ * Os dois primeiros são canais que o CRM fala DIRETO. Os quatro seguintes
+ * chegam pelo gateway (spec 001) e espelham `MensagemNormalizada.Platform`
+ * dele — o nome é o mesmo dos dois lados de propósito, para que a origem de uma
+ * conversa seja legível sem tradução.
+ *
+ * Este union e o CHECK `channel_sessions_provider_check` falam o mesmo
+ * vocabulário, e `tests/invariants/channel-provider-schema.test.ts` reprova se
+ * divergirem. Acrescentar valor aqui sem a migration (ou o contrário) quebra o
+ * portão de propósito.
+ */
+export type ChannelProvider =
+  | "waha"
+  | "meta_cloud"
+  | "whatsapp_uazapi"
+  | "whatsapp_cloud"
+  | "instagram"
+  | "messenger";
 
 export interface ChannelCapabilities {
   /** Pode enviar texto livre a qualquer momento? false = exige template fora da janela. */

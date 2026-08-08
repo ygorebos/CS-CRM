@@ -76,6 +76,8 @@ supabase/.branches/
 .env.sentry-build-plugin
 inbox-with-real-msgs.png
 .e2e-creds.json
+# Fixture do E2E de recebimento: carrega o SEGREDO de assinatura da conexão.
+.e2e-gateway.json
 .e2e-agente-mcp.json
 test-results/
 playwright-report/
@@ -109,13 +111,6 @@ evidence/.sonda-score-residuo.json
 # Screenshots soltos do fluxo de QA visual. A evidência versionada vive em
 # .superpowers/evidence/ — "image copy N.png" na raiz é sobra de colagem.
 /image copy*.png
-
-# Rascunhos de spec do Spec Kit (`specify`), por decisão do mantenedor: ficam na
-# máquina de quem escreve até virarem doc versionada em docs/specs/. A barra
-# inicial é obrigatória — sem ela o padrão casaria também com docs/specs/ e
-# docs/superpowers/specs/, que SÃO versionados, e todo arquivo novo lá dentro
-# ficaria invisível ao git.
-/specs/
 
 # Runbook do Supabase self-hosted de desenvolvimento: descreve a VPS pessoal do
 # mantenedor (hostnames, layout de rede), não a instalação que o self-hoster faz.
