@@ -301,8 +301,29 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       15 s no escuro. **(FR-031)**
 - [ ] **T042** Traduzir os estados do gateway para o vocabulário da tela; estado desconhecido cai em
       estado seguro e legível — **nunca tela vazia**. **(FR-032)**
-- [ ] **T043** Criar canal tudo-ou-nada: provisionamento falhando não deixa linha órfã no CRM nem
-      instância órfã no provedor. **O CRM é o dono da compensação** (T003): recebe o `connection_id` do gateway, grava sua linha, e se a gravação falhar chama `DELETE` no gateway. Prova compartilhada com T029. **(FR-033, FR-012)**
+- [X] **T043** ✅ Criar canal tudo-ou-nada: provisionamento falhando não deixa linha órfã no CRM nem
+      instância órfã no provedor. **O CRM é o dono da compensação** (T003). **(FR-033, FR-012)**
+  - **Cliente do contrato:** `lib/gateway/provisionamento.ts` — as cinco rotas do
+    `gateway-provisioning-v1.md`, mais `estadoConhecido()` (§5.1: estado que o CRM não reconhece cai
+    em `failed` com o cru preservado, **nunca** tela vazia — já entrega a FR-032 da T042).
+  - **Token ADMIN, não o interno** (§2, correção 2): `GATEWAY_ADMIN_TOKEN` nova em `lib/env.ts` e
+    `.env.example`. Criar instância custa dinheiro e apagar é irreversível; vazar a credencial de
+    **envio** não pode significar poder de apagar a instância de todos. O gateway já recusa o interno
+    nessas rotas (`middleware/admin.go:21`), então trocar um pelo outro falha alto.
+  - **A ordem é gateway-primeiro, e isso é a decisão:** se a linha do CRM viesse antes, um
+    provisionamento falho deixaria **canal fantasma na tela**, e o corretor tentaria parear um número
+    que não existe em lugar nenhum. Nesta ordem, a falha do primeiro passo não deixa rastro.
+  - **A compensação saiu da rota para `provisionarEGravarConexao`**: compensação dentro de Route
+    Handler só se exercita montando request, sessão e cliente — três dublês para testar um `if`. Com
+    as portas injetáveis, o caso que importa é um teste de três linhas.
+  - **Idempotência derivada da conexão** (`channel:<org>:<sessionName>`), não aleatória: clique duplo
+    ou retry depois de timeout reusam a MESMA chave e o gateway devolve a MESMA instância. Chave
+    aleatória por chamada tornaria a proteção enfeite, e **cada timeout viraria uma instância paga e
+    órfã**.
+  - **Órfã que não dá para desfazer AGORA vira alerta**, nunca silêncio: quem receber a fatura do
+    provedor não tem como saber que a instância é nossa.
+  - **Prova:** `tests/unit/conexao-tudo-ou-nada.test.ts` (14). Sabotagem (remover a chamada de
+    compensação): reprova o caso que congela o defeito.
 - [X] **T044** ✅ Convergir as duas portas (onboarding e Central de Conexões) para o mesmo caminho de
       criação. **(FR-034)**
   - **A divergência que doía não era a rota, era a COLUNA.** Medido: o onboarding não definia

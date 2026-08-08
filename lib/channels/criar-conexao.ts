@@ -42,6 +42,11 @@ import { randomUUID } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { audit } from "@/lib/audit";
+import {
+  apagarNoGatewaySemLancar,
+  criarConexaoNoGateway,
+} from "@/lib/gateway/provisionamento";
+import { logger } from "@/lib/logger";
 import { caminhoDeIngestaoParaConexaoNova } from "@/lib/gateway/caminho-de-ingestao";
 import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 
@@ -55,6 +60,11 @@ export interface PedidoDeConexao {
    * intenções diferentes — ver o cabeçalho.
    */
   sessionName: string;
+  /**
+   * Quando presente, a conexão nasce do GATEWAY: `provider` do canal e
+   * `gateway_connection_id` no lugar de `waha_session_name` (spec 004, T043).
+   */
+  gateway?: { provider: string; connectionId: string };
   displayName?: string | null;
   /** Quem pediu — a auditoria de `channel.connected` não pode nascer sem dono. */
   actorUserId: string;
@@ -95,7 +105,15 @@ export async function criarConexaoDeCanal(
     .from("channel_sessions")
     .insert({
       organization_id: pedido.organizationId,
-      waha_session_name: pedido.sessionName,
+      // O CHECK `channel_sessions_provider_ref_check` exige a referência do
+      // canal da vez e NULL na do outro — gravar as duas recusaria a linha.
+      ...(pedido.gateway
+        ? {
+            provider: pedido.gateway.provider,
+            gateway_connection_id: pedido.gateway.connectionId,
+            waha_session_name: null,
+          }
+        : { waha_session_name: pedido.sessionName }),
       display_name: pedido.displayName ?? null,
       engine: "NOWEB",
       webhook_path_token: randomUUID().replace(/-/g, ""),
@@ -126,8 +144,72 @@ export async function criarConexaoDeCanal(
     resourceType: "channel_session",
     resourceId: conexao.id as string,
     requestId: pedido.requestId,
-    metadata: { waha_session_name: pedido.sessionName, origem: pedido.origem },
+    metadata: {
+      origem: pedido.origem,
+      ...(pedido.gateway
+        ? { provider: pedido.gateway.provider, gateway_connection_id: pedido.gateway.connectionId }
+        : { waha_session_name: pedido.sessionName }),
+    },
   });
 
   return { ok: true, conexao };
+}
+
+/**
+ * A criação COMPLETA de uma conexão pelo gateway: provisiona lá, grava aqui, e
+ * **compensa** se a segunda metade falhar (spec 004, T043 / FR-033, FR-012).
+ *
+ * Mora aqui e não na rota porque a compensação é a parte que precisa de prova, e
+ * lógica de compensação dentro de um Route Handler só se exercita montando
+ * request, sessão e cliente — três dublês para testar um `if`.
+ *
+ * ## A ordem, e por que ela é essa
+ *
+ * Instância primeiro, linha depois. Se a linha viesse antes, um provisionamento
+ * que falhasse deixaria **canal fantasma na tela do usuário**, e ele tentaria
+ * parear um número que não existe em lugar nenhum. Nesta ordem a falha do
+ * primeiro passo não deixa rastro, e a do segundo é desfeita.
+ */
+export async function provisionarEGravarConexao(
+  supabase: SupabaseClient,
+  pedido: Omit<PedidoDeConexao, "gateway"> & { platform: string },
+  portas: {
+    criarNoGateway: typeof criarConexaoNoGateway;
+    apagarNoGateway: typeof apagarNoGatewaySemLancar;
+  } = { criarNoGateway: criarConexaoNoGateway, apagarNoGateway: apagarNoGatewaySemLancar },
+): Promise<ResultadoDaCriacao & { gatewayConnectionId?: string }> {
+  const noGateway = await portas.criarNoGateway({
+    platform: pedido.platform,
+    label: pedido.displayName ?? null,
+    // Chave derivada do NOME da sessão, que já é único por conexão: clique duplo
+    // ou retry do navegador depois de um timeout reusam a MESMA, e o gateway
+    // devolve a MESMA instância. Chave aleatória por chamada tornaria a proteção
+    // enfeite, e cada timeout viraria uma instância órfã que custa dinheiro.
+    idempotencyKey: `channel:${pedido.organizationId}:${pedido.sessionName}`,
+  });
+
+  const criacao = await criarConexaoDeCanal(supabase, {
+    ...pedido,
+    gateway: { provider: pedido.platform, connectionId: noGateway.connectionId },
+  });
+
+  if (!criacao.ok) {
+    // A COMPENSAÇÃO, com um dono só (decisão T003): o CRM criou, o CRM desfaz.
+    // Sem ela sobraria uma instância que nenhum dos dois lados reconhece como
+    // sua — o gateway achando que o CRM usa, o CRM sem saber que existe — e que
+    // continua sendo cobrada. `DELETE` é idempotente por contrato (§7).
+    const desfeita = await portas.apagarNoGateway(noGateway.connectionId);
+    if (!desfeita) {
+      // Não deu para desfazer AGORA: vira alerta, nunca silêncio. Quem receber a
+      // fatura do provedor não tem como saber que aquela instância é nossa.
+      logger.error("[canal] instância órfã no gateway: criei e não consegui desfazer", {
+        requestId: pedido.requestId,
+        organization_id: pedido.organizationId,
+        gateway_connection_id: noGateway.connectionId,
+      });
+    }
+    return criacao;
+  }
+
+  return { ...criacao, gatewayConnectionId: noGateway.connectionId };
 }

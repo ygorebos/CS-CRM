@@ -122,6 +122,15 @@ const schema = z.object({
    * exatamente a inversão de gravidade que o FR-025 proíbe.
    */
   GATEWAY_INTERNAL_TOKEN: z.string().optional().default(""),
+  /**
+   * Token ADMIN do gateway — provisionar e desprovisionar conexão (spec 004,
+   * T043). Deliberadamente DIFERENTE do interno: o interno circula no `.env` do
+   * app e autoriza envio de mensagem; vazá-lo não pode significar poder de
+   * apagar a instância de todo mundo no provedor. O gateway recusa o interno
+   * nessas rotas (`internal/middleware/admin.go:21`), então usar um pelo outro
+   * falha alto em vez de degradar em silêncio.
+   */
+  GATEWAY_ADMIN_TOKEN: z.string().optional().default(""),
 
   // Upstash Redis
   UPSTASH_REDIS_REST_URL: required("UPSTASH_REDIS_REST_URL"),
