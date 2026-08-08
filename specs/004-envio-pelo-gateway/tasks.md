@@ -450,10 +450,29 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
 
 ## Fase 5 — Transversais
 
-- [ ] **T056** Completar a FR-013 na fila: **teto de tamanho** (hoje só há teto de tentativas — fila
-      sem teto de tamanho enche o disco na indisponibilidade longa) e **alarme quando parar de
-      drenar** (pendência mais velha que N minutos = alerta; hoje só o descarte alarma, e o
-      empilhamento silencioso é justamente o sintoma de CRM fora do ar). **(FR-013)**
+- [X] **T056** ✅ FR-013 completa na fila: **teto de tamanho** e **alarme de dreno parado**
+      (commit `3dd8856` no worktree do gateway). **(FR-013)**
+  - **Teto de tentativas ≠ teto de tamanho.** O primeiro limita quanto tempo UMA pendência insiste;
+    não limita QUANTAS existem. Numa indisponibilidade longa o outro lado não retorna, ninguém esgota
+    tentativa, e a fila cresce com o tráfego até acabar o disco — que não derruba só a fila, derruba
+    o processo, e aí o gateway perde também o que ainda conseguiria entregar.
+  - **Descarta a VELHA, não recusa a nova.** Recusar a nova perde a mensagem que acabou de chegar —
+    a que tem mais chance de ainda importar para alguém esperando resposta — e faz isso justamente
+    quando o volume está alto. A velha já falhou várias vezes e vai para `mortas/`, inspecionável.
+    `AoLotar` é gancho separado de `AoMorrer`: lá a pendência esgotou as próprias tentativas, aqui
+    ela morre por causa das outras, e a ação de quem lê é diferente.
+  - **O alarme que faltava:** o único existente era o do DESCARTE, e descarte só acontece quando as
+    tentativas esgotam. O sintoma de "CRM fora do ar" aparece antes e em silêncio — a pendência mais
+    velha envelhecendo sem nenhum evento. `VerificarParada` declara parada acima de 15 min, e roda
+    **depois** de processar: antes, alarmaria por pendência que ia sair naquele instante.
+  - **Deadlock meu, medido:** a primeira versão chamava `aparar()` com o lock do `Enfileirar` tomado,
+    e `matar()` pega o mesmo mutex. `sync.Mutex` não é reentrante — a suíte travou **sem erro** até o
+    timeout. Agora apara fora do lock, com a consequência aceita escrita no código: duas entradas
+    simultâneas podem passar momentaneamente do teto, e a próxima apara. Teto é proteção de disco,
+    não invariante exato.
+  - **Prova:** 3 testes em `internal/entrega/fila_teto_test.go`, incluindo o de fila vazia (alarme
+    falso é o que ensina a ignorar alarme). Sabotagens: remover o teto e remover a checagem de idade
+    reprovam um caso cada. Suíte inteira do gateway verde.
 
 - [X] **T050** ✅ Reconciliação periódica do lado do CRM — a segunda ponta que o Princípio XIV
       exige. **(FR-013a)**
@@ -531,8 +550,26 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       `GATEWAY_INTERNAL_TOKEN`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e
       `GATEWAY_MAX_MEDIA_BYTES` existem em `lib/env.ts` **e** em `.env.example`, e `lib/env.ts:238`
       já falha no boot quando `GATEWAY_INBOUND_ENABLED=true` sem `GATEWAY_BASE_URL`. **(FR-044)**
-- [ ] **T055** Toda mudança de estado de canal/mensagem sai como migration versionada + apêndice no
-      baseline + linha no MANIFEST. Conferir ao fim de cada fase, não no fim de tudo. **(FR-040)**
+- [X] **T055** ✅ Conferência da tripla, **executada** ao fim das Fases 1–5. **(FR-040)**
+  - Quatro migrations nasceram nesta spec, e as três peças existem para as quatro:
+
+    | # | Arquivo em `migrations/` | Apêndice no `baseline.sql` | Linha no MANIFEST |
+    |---|---|---|---|
+    | 0127 | `gateway_writer` | ✅ (papel + revogações) | ✅ |
+    | 0128 | `gateway_escrita` | ✅ (as 2 funções) | ✅ |
+    | 0129 | `aviso_gateway_fora` | ✅ (`gateway_unreachable` no bloco único) | ✅ |
+    | 0130 | `aviso_divergencia_reconciliacao` | ✅ (`gateway_reconciliation_gap`, idem) | ✅ |
+
+  - **A prova não é a tabela, é o gate:** `pnpm test:db` aplica **só o `baseline.sql`**, em modo
+    install E update, e roda os 555 invariantes — entre eles o
+    `vocabulario-banco-x-typescript`, que compara o CHECK do banco com a união do TypeScript contra
+    Postgres real. Se um apêndice faltasse, o ambiente fresco nasceria sem a mudança e o gate
+    reprovaria. **Verde nas quatro.**
+  - **Os dois kinds novos entraram no bloco ÚNICO da constraint**, editando a lista existente em vez
+    de acrescentar um segundo bloco — a lição do #159: blocos antigos rodam antes e falham em cadeia
+    ao re-aplicar num banco que já tem vocabulário posterior.
+  - Nenhuma mudança **destrutiva** nesta spec: as quatro só acrescentam (papel, funções, dois valores
+    de CHECK). Não há caminho de volta a declarar porque não há nada a desfazer.
 
 ---
 
