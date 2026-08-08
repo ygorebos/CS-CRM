@@ -1018,3 +1018,42 @@ mesma família do caso que passou medindo a tela de login.
 
 ⚠️ **Não re-executado** — o ambiente estava derrubado quando o bug foi encontrado (por leitura do
 próprio código, não por nova rodada).
+
+### T061 — MEDIDA em 2026-08-08, e o resultado é sério
+
+Com instância real pareada por QR, três medições em sequência:
+
+**1. O formato do id NÃO é o problema.** Chamada crua ao `/message/find` do provedor:
+
+```
+messageid = '3EB046EC374B391855945A'          ← forma PURA, idêntica à do envio
+id        = '558521346320:3EB046EC374B391855945A'  ← a forma prefixada é OUTRO campo
+fromMe    = True
+```
+
+A hipótese (d) — id prefixado quebrando o casamento — está **morta**. E a (b) também: `fromMe: True`
+prova que **outbound aparece** na busca.
+
+**2. Mas a mensagem que NÓS enviamos não aparece.** Enviada pela rota do gateway, wamid
+`3EB0F6C734A634F16474AF` devolvido no aceite. Um minuto depois, varrendo as **200 mais recentes**
+(`hasMore: true`, ordem decrescente confirmada):
+
+```
+devolvidas: 200 | meu wamid presente? False
+```
+
+**3. A conclusão, e por que ela ameaça a T050.** As outbound que a busca devolve são as do histórico
+do aparelho; a que saiu **pela API** não estava lá. Se isso se confirmar como comportamento estável,
+a reconciliação **nunca** vai encontrar as mensagens que o próprio CRM enviou — e as declarará
+faltantes em toda rodada, disparando o alarme de divergência para sempre. **O alarme que existe para
+tornar a perda visível vira ruído constante, que é como se ensina a ignorá-lo.**
+
+**O que ainda NÃO foi medido, e decide o desenho:** se é latência de indexação maior que um minuto
+(então basta a reconciliação olhar uma janela defasada) ou se mensagem enviada por API nunca entra
+no `/message/find` (então a fonte da reconciliação para OUTBOUND tem de ser outra — por exemplo o
+próprio registro de envio do gateway, e não o provedor). **Repetir a mesma consulta 10-30 min depois
+do envio responde isso.**
+
+**Impacto declarado:** a T050 está correta por teste e **não está provada em campo para o lado
+outbound**. Para inbound, a premissa original continua de pé — a mensagem do cliente chega pelo
+webhook e o provedor a indexa.
