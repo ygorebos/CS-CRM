@@ -343,8 +343,16 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
     de novo. Sabotagem (`requireRole("viewer")`): 2 reprovam.
 - [ ] **T046** Desconectar e reconectar pela tela no canal migrado, com os mesmos desfechos de hoje.
       **(FR-036)**
-- [ ] **T047** Cada canal continua com segredo de recebimento próprio — a migração não pode
+- [X] **T047** ✅ Cada canal continua com segredo de recebimento próprio — a migração não pode
       reintroduzir segredo global. **(FR-037)**
+  - Satisfeito por construção depois da T044: o caminho único chama
+    `provisionarSegredoDeWebhook` **por conexão** (32 bytes novos, cifrados at-rest), e o
+    `webhook_path_token` também nasce por conexão — dois canais com o mesmo token receberiam a
+    entrega um do outro.
+  - **A guarda afirma o MECANISMO, não o valor:** provisionamento chamado uma vez por conexão. Um
+    segredo guardado em módulo, env ou cache passaria por um teste que só comparasse dois valores
+    diferentes na mesma rodada; não passa por este.
+  - Prova: caso `T047/FR-037` em `tests/unit/portas-de-conexao-convergem.test.ts`.
 - [ ] **T048** [SABOTAGEM] Provar que os testes das Fases 3 e 4 vigiam: quebrar a resolução de
       conexão e ver T032 vermelho; remover a checagem de papel e ver T045 vermelho. **(SC-012)**
 

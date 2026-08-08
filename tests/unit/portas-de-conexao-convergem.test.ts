@@ -136,6 +136,37 @@ describe("as duas portas de conexão convergem (FR-034)", () => {
     expect(evento!.metadata).toMatchObject({ origem: "onboarding" });
   });
 
+  it("T047/FR-037. cada conexão provisiona o PRÓPRIO segredo — nunca um global", async () => {
+    // A migração para o gateway não pode reintroduzir segredo compartilhado: a
+    // entrega é verificada por conexão, e um segredo único faria o vazamento de
+    // um canal comprometer todos. A prova é o provisionamento acontecer UMA VEZ
+    // POR CONEXÃO — valor guardado em módulo, env ou cache reutilizaria.
+    vi.mocked(provisionarSegredoDeWebhook).mockReset();
+    vi.mocked(provisionarSegredoDeWebhook)
+      .mockResolvedValueOnce("\\xAAAA")
+      .mockResolvedValueOnce("\\xBBBB");
+
+    const um = fakeSupabase();
+    const dois = fakeSupabase();
+    for (const [i, alvo] of [um, dois].entries()) {
+      await criarConexaoDeCanal(alvo.client, {
+        organizationId: ORG,
+        sessionName: `org_11111111_${i}`,
+        actorUserId: USER,
+        requestId: `req-seg-${i}`,
+        origem: "central",
+      });
+    }
+
+    expect(vi.mocked(provisionarSegredoDeWebhook)).toHaveBeenCalledTimes(2);
+    expect(um.inserido[0]!.webhook_secret_encrypted).not.toBe(
+      dois.inserido[0]!.webhook_secret_encrypted,
+    );
+    // O token do caminho de webhook também é por conexão: dois canais com o
+    // mesmo token receberiam a entrega um do outro.
+    expect(um.inserido[0]!.webhook_path_token).not.toBe(dois.inserido[0]!.webhook_path_token);
+  });
+
   it("sem cifra a conexão NÃO nasce — nem meia linha", async () => {
     // Conexão incapaz de verificar entrega recusaria 100% das mensagens, e o
     // defeito só apareceria na primeira mensagem, longe daqui.
