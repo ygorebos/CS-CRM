@@ -78,8 +78,12 @@ abrir o código para responder está mal escrito e deve ser reescrito.
   há cenário exigindo comportamento que nenhum FR sustenta.
 - [x] CHK027 Cada critério de sucesso corresponde a ao menos um requisito, e nenhum requisito
   crítico ficou sem forma de medir.
-- [x] CHK028 As Assumptions não contradizem os requisitos nem a constituição, e nenhuma delas
+- [ ] CHK028 As Assumptions não contradizem os requisitos nem a constituição, e nenhuma delas
   "resolve" por conta própria uma pergunta que ficou marcada como em aberto.
+  → **reprovado na rodada 3**: A-10 contradiz o princípio X, que declara conteúdo de operadora como
+  dado de tenant. A contradição é deliberada, está declarada no topo da spec e tem caminho de
+  resolução (emenda em PR próprio), mas enquanto a emenda não entra o item é falso. Reavaliar
+  depois da emenda.
 - [x] CHK029 Os edge cases não introduzem comportamento novo que os requisitos não cobrem — ou, se
   introduzem, o requisito correspondente existe.
 
@@ -102,8 +106,13 @@ abrir o código para responder está mal escrito e deve ser reescrito.
 
 - [x] CHK036 Há história para o **corretor** (quem carrega) e para o **cliente final** (quem
   pergunta), e as duas são independentemente testáveis.
-- [x] CHK037 As histórias estão priorizadas, e a P1 sozinha entrega valor observável — cabe no
+- [ ] CHK037 As histórias estão priorizadas, e a P1 sozinha entrega valor observável — cabe no
   ritmo de duas jornadas do princípio II.
+  → **reprovado na rodada 3**: a P1 passou de três histórias para quatro (US1, US2, US3, US7) e
+  ganhou a camada curada inteira — superfície de curadoria, semeadura versionada que nunca
+  sobrescreve, precedência entre camadas e vínculo cliente↔operadora por duas vias. Continua
+  priorizada e entregando valor observável, mas **não cabe em duas jornadas**. O fatiamento é
+  trabalho do plano, não da spec — por isso o item fica aberto em vez de a spec ser reescrita.
 - [x] CHK038 Edge case "operadora sem conteúdo" está coberto.
 - [x] CHK039 Edge case "conteúdo desatualizado" está coberto, incluindo o caso de o material
   vencido ser o **único** que responderia.
@@ -139,6 +148,13 @@ Duas rodadas, ambas em 2026-08-07, sobre a spec deste diretório.
 - **Rodada 2** — spec corrigida (5 requisitos e 5 critérios novos ou reescritos); **48/48
   aprovados**. Contagens conferidas mecanicamente ao fim: **35 FR**, **16 SC**, **1** marcador
   `[NEEDS CLARIFICATION]`.
+- **Rodada 3** (2026-08-08) — reavaliação após a sessão de clarificação que trocou o eixo da
+  feature: o conhecimento de operadora passou a ter **duas camadas** (catálogo curado pelo
+  fabricante, compartilhado e distribuído com o produto; acervo próprio do corretor, isolado por
+  organização, com precedência). **46/48 aprovados**; **2 reprovações novas**: CHK028 e CHK037,
+  ambas consequência direta da mudança de eixo e ambas com caminho de resolução declarado.
+  Contagens conferidas mecanicamente: **41 FR**, **21 SC**, **18 Assumptions**, **0** marcadores
+  de clarificação pendentes.
 
 ## Achados
 
@@ -195,3 +211,43 @@ Duas rodadas, ambas em 2026-08-07, sobre a spec deste diretório.
   SC-012.
 - **CHK037**: a US1 sozinha (carregar uma operadora e obter uma resposta ancorada e rastreável) é
   entregável, demonstrável e cabe no ritmo de duas jornadas do princípio II; as demais ampliam.
+  *(Superado na rodada 3 — ver abaixo.)*
+
+### Rodada 3 — o que a mudança de eixo quebrou, e o que ela consertou
+
+**As duas reprovações novas**
+
+1. **CHK028 — a spec agora contradiz o princípio X, de propósito.** O princípio diz que conteúdo de
+   operadora "é dado de tenant e entra no isolamento por `organization_id` como qualquer outro"; a
+   decisão do dono do produto cria um catálogo curado pelo fabricante, compartilhado por todas as
+   organizações da instalação. Não é ambiguidade da spec, é mudança de doutrina — e a Governança
+   exige que ela entre como **emenda em PR próprio, anterior à feature**. O item fica aberto até lá.
+   A spec já declara o alcance exato que a emenda precisa cobrir, para que ela não seja escrita
+   larga demais: partição somente-leitura para o tenant, sem dado de ninguém dentro, sem afrouxar o
+   isolamento de nenhuma tabela tenant-aware.
+2. **CHK037 — "simplificar" aumentou o primeiro corte.** A intenção declarada era tirar trabalho do
+   corretor, e ela foi atendida (a instalação nasce sabendo). Mas as respostas escolhidas mantiveram
+   a camada do corretor **e** acrescentaram a camada curada, a superfície de curadoria, a semeadura
+   versionada e o vínculo cliente↔operadora por duas vias. O resultado líquido é um escopo maior que
+   o da spec original, não menor. Registrado aqui em vez de silenciado porque o plano precisa
+   começar pelo fatiamento, e um checklist verde teria escondido exatamente isso.
+
+**O que a mudança consertou, e vale registrar**
+
+- **CHK004 e CHK013 ficaram mais fortes.** Antes, "estrutura pré-pronta que já funciona" significava
+  um agente que sabe recusar; agora a instalação nasce com conteúdo que ancora resposta de verdade
+  (FR-030, SC-017). O estado de fábrica deixou de ser "recusa tudo".
+- **CHK023 zerou.** O único marcador de clarificação pendente (o vínculo cliente↔operadora, em
+  FR-017) foi respondido; a spec não tem mais nenhum.
+- **CHK024 continua válido por pouco, e por escolha.** O nome do artefato de schema e do atualizador
+  aparece **apenas** na seção de evidência e no registro literal das perguntas da sessão de
+  clarificação. Nenhum requisito, critério, entidade ou cenário de aceite nomeia arquivo: todos
+  falam em "artefato de schema que o instalador e o atualizador aplicam". Isso foi corrigido durante
+  a rodada, não nasceu assim.
+- **CHK027 exigiu quatro critérios novos.** FR-036 a FR-039 nasceram sem medida e ganharam SC-018,
+  SC-020, SC-021 e uma cláusula em SC-008; FR-040 (o RAG de aprendizado não ancora assistência)
+  ganhou cláusula em SC-001. Requisito novo sem critério é a forma mais comum de a spec parecer
+  completa e não ser.
+- **CHK029 pegou dois edge cases sem requisito**, os dois criados nesta rodada: desativar para o
+  próprio tenant uma operadora que veio do catálogo (virou cláusula em FR-008) e o administrador de
+  plataforma enxergar as lacunas da instalação dele (virou cláusula em FR-028).
