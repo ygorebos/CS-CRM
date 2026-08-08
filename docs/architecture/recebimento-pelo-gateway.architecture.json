@@ -1,0 +1,242 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Recebimento pelo gateway — uma porta, um envelope, um ingest",
+    "subtitle": "onde a mensagem do cliente entra, o que a segura quando algo cai, e onde o silêncio vira aviso",
+    "output": "recebimento-pelo-gateway.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "mundo", "label": "Fora do CRM" },
+    { "id": "gateway", "label": "gateway_go (instância única, sem réplica)" },
+    { "id": "borda", "label": "Borda HTTP do CRM" },
+    { "id": "fila", "label": "Fila e dreno" },
+    { "id": "dados", "label": "Banco" },
+    { "id": "humano", "label": "O que a pessoa vê" }
+  ],
+  "mainPath": ["provedor", "normalizador", "filaDisco", "rota", "log", "ingest", "mensagens", "inbox"],
+  "nodes": [
+    {
+      "id": "provedor",
+      "lane": "mundo",
+      "col": 1,
+      "type": "external",
+      "label": "Provedores",
+      "sublabel": "uazapi · WhatsApp Cloud · Instagram · Messenger"
+    },
+    {
+      "id": "normalizador",
+      "lane": "gateway",
+      "col": 2,
+      "type": "service",
+      "label": "internal/normalizer + internal/envelope",
+      "sublabel": "payload do provedor vira envelope v1"
+    },
+    {
+      "id": "filaDisco",
+      "lane": "gateway",
+      "col": 3,
+      "type": "queue",
+      "label": "internal/entrega/fila.go",
+      "sublabel": "pendência em DISCO antes da 1ª tentativa · espera crescente · mortas/"
+    },
+    {
+      "id": "assinatura",
+      "lane": "gateway",
+      "col": 3,
+      "type": "service",
+      "label": "internal/entrega.Enviar",
+      "sublabel": "HMAC-SHA512 sobre timestamp+corpo"
+    },
+    {
+      "id": "rota",
+      "lane": "borda",
+      "col": 4,
+      "type": "route",
+      "label": "POST /api/v1/webhooks/gateway/[token]",
+      "sublabel": "token = conexão e organização · ACK 202 antes de qualquer I/O"
+    },
+    {
+      "id": "auth",
+      "lane": "borda",
+      "col": 4,
+      "type": "lib",
+      "label": "lib/gateway/auth.ts",
+      "sublabel": "timingSafeEqual · janela ±300s · fail-closed sem válvula"
+    },
+    {
+      "id": "teto",
+      "lane": "borda",
+      "col": 4,
+      "type": "lib",
+      "label": "lib/gateway/rate-limit.ts",
+      "sublabel": "teto POR CONEXÃO — nunca global nem por IP"
+    },
+    {
+      "id": "log",
+      "lane": "fila",
+      "col": 5,
+      "type": "table",
+      "label": "webhook_events_log",
+      "sublabel": "received → processed | error → dead · attempts"
+    },
+    {
+      "id": "dreno",
+      "lane": "fila",
+      "col": 5,
+      "type": "worker",
+      "label": "cron gateway-inbound-drain",
+      "sublabel": "recolhe o parado além da carência · dono declarado da fila"
+    },
+    {
+      "id": "ingest",
+      "lane": "fila",
+      "col": 6,
+      "type": "lib",
+      "label": "lib/gateway/ingest.ts",
+      "sublabel": "UM ingest para todo canal — zero ramo por plataforma"
+    },
+    {
+      "id": "rpcs",
+      "lane": "dados",
+      "col": 6,
+      "type": "function",
+      "label": "fn_upsert_wa_contact · fn_upsert_wa_conversation",
+      "sublabel": "as MESMAS do caminho legado — posse de nome mora aqui"
+    },
+    {
+      "id": "mensagens",
+      "lane": "dados",
+      "col": 7,
+      "type": "table",
+      "label": "messages",
+      "sublabel": "unique (organization_id, external_id) — 23505 é caminho normal"
+    },
+    {
+      "id": "eventos",
+      "lane": "dados",
+      "col": 7,
+      "type": "table",
+      "label": "event_log",
+      "sublabel": "ai_agent.dispatch_requested · media.persist_requested"
+    },
+    {
+      "id": "midia",
+      "lane": "fila",
+      "col": 7,
+      "type": "worker",
+      "label": "workers/media-persist-worker",
+      "sublabel": "baixa por lib/messaging/media/gateway-source.ts"
+    },
+    {
+      "id": "storage",
+      "lane": "dados",
+      "col": 8,
+      "type": "external",
+      "label": "Supabase Storage",
+      "sublabel": "bucket whatsapp-media (privado, URL assinada)"
+    },
+    {
+      "id": "inbox",
+      "lane": "humano",
+      "col": 8,
+      "type": "frontend",
+      "label": "Inbox",
+      "sublabel": "conversa + selo do canal de origem (quando não é WhatsApp)"
+    },
+    {
+      "id": "central",
+      "lane": "humano",
+      "col": 8,
+      "type": "frontend",
+      "label": "Central de avisos",
+      "sublabel": "channel_secret_missing · gateway_delivery_dead · gateway_inbound_down"
+    },
+    {
+      "id": "chave",
+      "lane": "dados",
+      "col": 4,
+      "type": "table",
+      "label": "channel_sessions.ingest_path",
+      "sublabel": "legacy | gateway — chave de corte POR CONEXÃO"
+    },
+    {
+      "id": "legado",
+      "lane": "borda",
+      "col": 4,
+      "type": "route",
+      "label": "POST /api/v1/webhooks/waha/[token]",
+      "sublabel": "caminho legado — coexiste durante a virada"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "provedor", "to": "normalizador", "label": "webhook cru do provedor" },
+    { "id": "e2", "from": "normalizador", "to": "filaDisco", "label": "envelope serializado UMA vez (a assinatura cobre bytes)" },
+    { "id": "e3", "from": "filaDisco", "to": "assinatura", "label": "tentativa (retenta rede/5xx/429; 400/401/404/409 descartam)" },
+    { "id": "e4", "from": "assinatura", "to": "rota", "label": "POST assinado + X-Gateway-Timestamp/Signature/Delivery-Id" },
+    { "id": "e5", "from": "rota", "to": "auth", "label": "verifica antes de tudo" },
+    { "id": "e6", "from": "rota", "to": "teto", "label": "teto por conexão" },
+    { "id": "e7", "from": "rota", "to": "chave", "label": "conexão em 'legacy' ⇒ 409 connection_not_migrated" },
+    { "id": "e8", "from": "provedor", "to": "legado", "label": "enquanto a conexão não virou a chave" },
+    { "id": "e9", "from": "rota", "to": "log", "label": "grava e responde 202 (ACK-primeiro)" },
+    { "id": "e10", "from": "rota", "to": "ingest", "label": "disparo em segundo plano — sustenta o ≤5s" },
+    { "id": "e11", "from": "dreno", "to": "log", "label": "recolhe 'received' parado > carência" },
+    { "id": "e12", "from": "dreno", "to": "ingest", "label": "reingere (idempotente)" },
+    { "id": "e13", "from": "ingest", "to": "rpcs", "label": "contato e conversa" },
+    { "id": "e14", "from": "rpcs", "to": "mensagens", "label": "conversa resolvida" },
+    { "id": "e15", "from": "ingest", "to": "mensagens", "label": "insere (23505 = duplicada, caminho normal)" },
+    { "id": "e16", "from": "ingest", "to": "eventos", "label": "turno do agente + pedido de mídia" },
+    { "id": "e17", "from": "eventos", "to": "midia", "label": "media.persist_requested" },
+    { "id": "e18", "from": "midia", "to": "storage", "label": "grava e assina URL" },
+    { "id": "e19", "from": "midia", "to": "mensagens", "label": "media_storage_path · media_status" },
+    { "id": "e20", "from": "mensagens", "to": "inbox", "label": "Realtime" },
+    { "id": "e21", "from": "dreno", "to": "central", "label": "entrega descartada vira aviso (gateway_delivery_dead)" },
+    { "id": "e22", "from": "dreno", "to": "central", "label": "recebimento desligado vira aviso (gateway_inbound_down)" },
+    { "id": "e23", "from": "auth", "to": "central", "label": "segredo não provisionado vira aviso (channel_secret_missing)" },
+    { "id": "e24", "from": "auth", "to": "log", "label": "recusa grava linha com motivo (SC-012)" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "As duas metades da durabilidade, e por que nenhuma sozinha basta",
+      "items": [
+        "gateway: fila em DISCO antes da 1ª tentativa (internal/entrega/fila.go). Cobre o gateway reiniciar e o CRM estar fora do ar",
+        "CRM: ACK-primeiro em webhook_events_log + dreno periódico. Cobre o CRM cair ENTRE o 202 e o fim da ingestão",
+        "só o dreno: latência de minutos, o inbox deixa de parecer tempo real",
+        "só o disparo em segundo plano: tudo que estiver em voo num restart se perde",
+        "o gateway roda em instância única e SEM RÉPLICA (Princípio XIV) — é o que torna a fila em disco obrigatória, não zelo"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Três silêncios, três avisos — e eles NÃO são o mesmo aviso",
+      "items": [
+        "channel_secret_missing: a conexão não tem chave. Recusa 100%, mas o gateway retenta (503) e o período entra sozinho quando a chave existir. Ação: consertar e esperar",
+        "gateway_delivery_dead: as tentativas daquela entrega ACABARAM. Não haverá outra. Ação: ir atrás do cliente",
+        "gateway_inbound_down: a conexão aponta para o gateway com o interruptor global desligado. A rota responde 404, o gateway descarta sem retentar. Ação: ligar GATEWAY_INBOUND_ENABLED",
+        "um kind só para os três diria a mesma frase para gravidades diferentes — e a Central é lida em segundos, não em parágrafos"
+      ]
+    },
+    {
+      "dot": "sky",
+      "title": "Não-ligações declaradas (ausência de aresta ≠ aresta esquecida)",
+      "items": [
+        "o gateway NÃO escreve no banco do CRM. Receber mensagem aqui não é INSERT: dispara agente, follow-up, guardrails, auditoria, event_log e Realtime",
+        "conversations.channel NÃO identifica o canal — o CHECK só aceita 'whatsapp'. A tela lê channel_sessions.provider; messages.metadata.platform é a segunda origem",
+        "media_url NÃO recebe o endereço do envelope. O host que vem no payload é descartado e a URL é reconstruída sobre GATEWAY_BASE_URL (anti-SSRF por construção)",
+        "o gateway NÃO entra no docker-compose.prod.yml do CRM (Princípio XIV): ciclos de deploy separados, endereço é configuração"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "SC-008 medido: canal novo custa ZERO linha de ingestão",
+      "items": [
+        "grep por instagram|messenger|uazapi|meta_cloud|waha em lib/gateway/*.ts: 0 ocorrências em 1377 linhas",
+        "a única leitura de envelope.platform no ingest copia o valor para metadata — não ramifica",
+        "provado em tests/invariants/gateway-inbound-canal-novo.test.ts: Instagram entra, identificador que não é telefone vira contato, tipo desconhecido vira system + metadata.original_type",
+        "plataforma que este build não conhece também entra: recusar exigiria release do CRM a cada canal que o gateway aprendesse"
+      ]
+    }
+  ]
+}

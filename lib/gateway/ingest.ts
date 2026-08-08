@@ -25,6 +25,7 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 import { numeroCanonicoParaUpsert } from "@/lib/channels/identidade-canonica";
+import { env } from "@/lib/env";
 import type { EnvelopeNormalizado } from "@/lib/gateway/envelope";
 import { logger } from "@/lib/logger";
 
@@ -126,6 +127,15 @@ export async function ingerirEnvelope(
   const agora = new Date().toISOString();
   const ehEco = msg.direction === "outbound";
 
+  // Anexo que o PRÓPRIO envelope declara acima do teto não é baixado. Não é
+  // economia: baixar para descobrir o que já está escrito no envelope gasta a
+  // rede e a memória do processo justamente no caso em que o arquivo é enorme —
+  // e o desfecho seria o mesmo. A mensagem entra marcada como anexo
+  // indisponível (FR-025); a conversa nunca some por causa de um arquivo.
+  const tamanhoDeclarado = envelope.media?.sizeBytes ?? null;
+  const anexoGrandeDemais =
+    tamanhoDeclarado !== null && tamanhoDeclarado > env.GATEWAY_MAX_MEDIA_BYTES;
+
   const { data: inserida, error: insErr } = await admin
     .from("messages")
     .insert({
@@ -150,6 +160,12 @@ export async function ingerirEnvelope(
       error_message: envelope.delivery.errorDetail,
       metadata: {
         ...envelope.metadata,
+        ...(anexoGrandeDemais
+          ? {
+              media_status: "failed",
+              media_unavailable_reason: "declared_size_above_limit",
+            }
+          : {}),
         gateway_event_id: envelope.eventId,
         platform: envelope.platform,
         reply_to_external_id: msg.replyToExternalId,
@@ -200,6 +216,34 @@ export async function ingerirEnvelope(
       .update({ is_blocked: true, blocked_reason: "stop_keyword", blocked_at: agora })
       .eq("id", contactId)
       .eq("organization_id", sessao.organization_id);
+  }
+
+  // Anexo: pede a persistência DEPOIS de a mensagem já existir, e num evento
+  // separado. A ordem é a promessa do FR-025 em forma de código — a conversa
+  // aparece na tela mesmo que o arquivo nunca baixe. Fazer o download aqui
+  // dentro amarraria a mensagem a um binário de dezenas de MiB vindo de outro
+  // processo: anexo lento viraria mensagem atrasada, anexo quebrado viraria
+  // mensagem perdida.
+  if (envelope.media?.ref && !anexoGrandeDemais) {
+    const { error: midiaErr } = await admin.rpc("emit_event" as never, {
+      p_event_type: "media.persist_requested",
+      p_entity_kind: "message",
+      p_entity_id: messageId,
+      p_payload: { message_id: messageId, organization_id: sessao.organization_id },
+      p_metadata: { source: "gateway_webhook", request_id: requestId },
+      p_organization_id: sessao.organization_id,
+    } as never);
+    if (midiaErr) {
+      // Não derruba a ingestão: a mensagem já entrou, e é isso que importa.
+      // Fica registrado porque, sem o evento, o anexo nunca baixa e o sintoma na
+      // tela é um anexo eternamente "carregando" — sinal de progresso para algo
+      // que não vai acontecer.
+      logger.error("gateway.ingest: emit media.persist_requested falhou", {
+        organization_id: sessao.organization_id,
+        message_id: messageId,
+        erro: midiaErr.message,
+      });
+    }
   }
 
   // A cadeia viva. Só para mensagem RECEBIDA: o eco do próprio envio não pede

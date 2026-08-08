@@ -47,6 +47,10 @@ export type InboxKind =
   // linha sem dono ou envelope que não parseia. Diferente do kind acima, aqui
   // NÃO haverá nova tentativa — a mensagem daquele cliente não vai chegar.
   | 'gateway_delivery_dead'
+  // (0119) Conexão apontada para o gateway com o recebimento desligado: a rota
+  // responde 404, o gateway descarta sem retentar, e NADA entra. Silêncio total
+  // com conserto de uma variável.
+  | 'gateway_inbound_down'
   | 'other';
 
 export interface InboxItemRow {

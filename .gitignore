@@ -76,6 +76,8 @@ supabase/.branches/
 .env.sentry-build-plugin
 inbox-with-real-msgs.png
 .e2e-creds.json
+# Fixture do E2E de recebimento: carrega o SEGREDO de assinatura da conexão.
+.e2e-gateway.json
 .e2e-agente-mcp.json
 test-results/
 playwright-report/

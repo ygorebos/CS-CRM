@@ -14,6 +14,7 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { caminhoDeIngestaoParaConexaoNova } from "@/lib/gateway/caminho-de-ingestao";
 import { createChannelSchema } from "@/lib/schemas/channels";
 import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 import { createClient } from "@/lib/supabase/server";
@@ -120,6 +121,10 @@ export async function POST(req: NextRequest): Promise<Response> {
       engine: "NOWEB",
       webhook_path_token: randomUUID().replace(/-/g, ""),
       webhook_secret_encrypted: segredoCifrado,
+      // Conexão nova nasce no caminho que a instalação usa de verdade. O
+      // default 'legacy' da coluna vale para as linhas que já existiam quando a
+      // 0116 rodou; herdá-lo aqui deixaria o gateway de pé e sem uso.
+      ingest_path: caminhoDeIngestaoParaConexaoNova(),
       status: "STARTING",
       last_status_change_at: new Date().toISOString(),
       consecutive_health_fails: 0,

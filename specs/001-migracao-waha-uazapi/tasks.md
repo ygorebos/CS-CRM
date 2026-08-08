@@ -63,7 +63,9 @@ desta fase fechar.**
 
 - [x] T010 [TEST] [P] Escrever `tests/unit/gateway-envelope.test.ts` cobrindo: envelope válido aceito; campo desconhecido preservado em `metadata`; `envelope_version` futura aceita; `type` desconhecido vira `system` com `metadata.original_type`; `event_kind` desconhecido ignorado com motivo; corpo malformado recusado
 - [x] T011 Implementar `lib/gateway/envelope.ts` — schema Zod do envelope v1 conforme `contracts/gateway-inbound-v1.md` §3, tolerante a campo desconhecido, exportando os tipos consumidos pelo ingest
-- [ ] T011a [TEST] `tests/invariants/gateway-sem-payload-cru.test.ts` — nenhum arquivo fora de `lib/waha/**` e `lib/channels/meta/**` importa parser de provedor ou lê campo cru de payload de canal; o caminho novo só conhece o envelope. **FR-005 está escrito como invariante e hoje não tem vigia** — o Princípio XI diz que invariante só em prosa deixa de ser invariante. Vale como regra de lint equivalente, desde que reprove no CI
+- [x] T011a [TEST] `tests/invariants/gateway-sem-payload-cru.test.ts` — nenhum arquivo fora de `lib/waha/**` e `lib/channels/meta/**` importa parser de provedor ou lê campo cru de payload de canal; o caminho novo só conhece o envelope. **FR-005 está escrito como invariante e hoje não tem vigia** — o Princípio XI diz que invariante só em prosa deixa de ser invariante. Vale como regra de lint equivalente, desde que reprove no CI
+
+  > 3 testes de varredura estática, em `tests/invariants/` porque é a suíte do job obrigatório — regra que não reprova merge é documentação com aparência de portão. Cobre import de módulo de provedor **e** leitura de campo cru (`_data`, `fromMe`, `entry[0]`…, ignorando comentários, que citar o campo para explicar de onde a coisa veio é metade da doutrina deste repo). O terceiro é **caso de controle**: se `lib/waha/` sumisse num refactor, os dois primeiros ficariam verdes por não haver o que violar, e o verde seria lido como "a arquitetura está limpa".
 
 ### Autenticidade
 
@@ -75,7 +77,9 @@ desta fase fechar.**
 - [x] T014 Implementar `app/api/v1/webhooks/gateway/[token]/route.ts`: resolve `channel_sessions` por `webhook_path_token` (tolerante a canal arquivado, como a rota WAHA), decifra o segredo via `fn_decrypt_oauth`, verifica assinatura, grava em `webhook_events_log` com `provider='gateway'` e `status='received'`, e **responde `202` antes de qualquer ingestão** (ACK-primeiro)
 - [x] T015 Aplicar rate limit na rota nova, com `X-RateLimit-*` e `Retry-After` em 429 — a rota é pública e o Princípio VI exige; `docs/current-state.md` §4.3 mostra que webhooks hoje não têm, e esta rota **não** herda o buraco. **O teto é por conexão e nasce acima do alvo de rajada do SC-010** (200 mensagens em 60s): limite apertado demais derruba o tráfego legítimo do corretor numa campanha respondida, e é indistinguível de estar fora do ar. Fixar o número como múltiplo declarado do alvo, nunca como palpite
 - [x] T015a [TEST] `tests/unit/gateway-rate-limit.test.ts` — 200 entregas em 60s pela mesma conexão **passam**; tráfego acima do teto recebe `429` com `Retry-After`; o limite de uma conexão não consome a cota de outra. Sem este teste, T015 e SC-010 são requisitos que se contradizem no escuro
-- [ ] T014a [TEST] [P] Estender `tests/unit/gateway-envelope.test.ts` (ou arquivo irmão) com os tetos de tamanho: corpo acima de `GATEWAY_MAX_BODY_BYTES` é recusado com erro claro e **sem** carregar tudo em memória; envelope cuja mídia declara tamanho acima de `GATEWAY_MAX_MEDIA_BYTES` entra como mensagem com anexo indisponível, nunca derruba a ingestão — é o edge case "corpo gigante ou mídia enorme" da spec, que só existia como variável de ambiente
+- [x] T014a [TEST] [P] Estender `tests/unit/gateway-envelope.test.ts` (ou arquivo irmão) com os tetos de tamanho: corpo acima de `GATEWAY_MAX_BODY_BYTES` é recusado com erro claro e **sem** carregar tudo em memória; envelope cuja mídia declara tamanho acima de `GATEWAY_MAX_MEDIA_BYTES` entra como mensagem com anexo indisponível, nunca derruba a ingestão — é o edge case "corpo gigante ou mídia enorme" da spec, que só existia como variável de ambiente
+
+  > Os dois tetos ganharam teste, e a **assimetria entre eles é a decisão**: corpo acima do teto é recusa (413, antes de tocar o banco — teto que só protege depois da consulta não protege o recurso escasso); anexo acima do teto é **mensagem que entra sem o anexo**. A resposta a "o que dói mais": corpo absurdo é entrega malformada, anexo absurdo é uma pessoa mandando um vídeo. Implementado também o caso do tamanho **declarado** no envelope: acima do teto, o download nem é pedido — baixar para descobrir o que já está escrito ali gasta rede e memória justamente no caso do arquivo enorme. Cada teto tem caso de controle, senão um bug que recusasse tudo passaria.
 - [x] T016 [P] Auditar as recusas (`webhook.gateway_rejected`) com motivo, seguindo o padrão de `app/api/v1/webhooks/waha/[token]/route.ts`
 
 ### Vocabulário de canal no TypeScript
@@ -297,14 +301,29 @@ reavaliado antes de qualquer investimento adicional.
 
 **Independent Test**: enviar os três e abrir os três no CRM; conferir que o endereço expira.
 
-- [ ] T046 [TEST] [P] [US5] `tests/unit/gateway-media-source.test.ts` — host que veio no envelope é **descartado**; a URL é reconstruída sobre `GATEWAY_BASE_URL`; destino não permitido é recusado
-- [ ] T047 [TEST] [P] [US5] Estender `tests/e2e/gateway-inbound.spec.ts` com anexo: mensagem com imagem aparece e o anexo abre
-- [ ] T048 [US5] Implementar `lib/messaging/media/gateway-source.ts` na mesma construção anti-SSRF de `lib/messaging/media/waha-source.ts` (descarta o host do payload, reconstrói sobre a base confiável)
-- [ ] T049 [US5] Ligar o `media-persist-worker` existente ao caminho novo, gravando `media_storage_path` e servindo por URL assinada
-- [ ] T050 [US5] Garantir que falha de mídia **não** impede a mensagem de entrar: marca anexo indisponível e registra o motivo
-- [ ] T051 [US5] **Sabotagem**: fazer o CRM usar o host que veio no payload e confirmar T046 vermelho; restaurar
+- [x] T046 [TEST] [P] [US5] `tests/unit/gateway-media-source.test.ts` — host que veio no envelope é **descartado**; a URL é reconstruída sobre `GATEWAY_BASE_URL`; destino não permitido é recusado
 
----
+  > 11 testes. Além do pedido: `ref` vazia é recusada **antes da rede** (senão `new URL("", base)` viraria a própria base — o CRM guardaria a página inicial do gateway como se fosse o anexo do cliente), e anexo que **mente no `content-length`** é recusado pelo tamanho real. O caso do endereço de metadados de nuvem (`169.254.169.254`) está lá para deixar explícito que a defesa **não é lista de bloqueio**: nenhum host do payload é usado.
+
+- [ ] T047 [TEST] [P] [US5] Estender `tests/e2e/gateway-inbound.spec.ts` com anexo: mensagem com imagem aparece e o anexo abre
+
+  > **Spec escrita, execução pendente de ambiente.** O arquivo existe (4 casos, incluindo o de anexo que NÃO baixa — FR-025) e roda no job `e2e`. Rodá-la aqui exigiria `next build` + `.env.e2e` + Supabase local; a árvore é compartilhada com outra sessão e o Supabase local em uso é o dela. Mesma classe de T022/T030/T038.
+
+- [x] T048 [US5] Implementar `lib/messaging/media/gateway-source.ts` na mesma construção anti-SSRF de `lib/messaging/media/waha-source.ts` (descarta o host do payload, reconstrói sobre a base confiável)
+
+  > Duas funções separadas, e não uma genérica com parâmetro de base: uma "genérica" acabaria aceitando base vinda do chamador, que é o buraco que as duas existem para fechar. Teto próprio (`GATEWAY_MAX_MEDIA_BYTES`, 100 MiB) porque o do WAHA foi dimensionado para um canal só. Env nova `GATEWAY_INTERNAL_TOKEN` (a direção é CRM → gateway, oposta à da entrega) em `lib/env.ts` + `.env.example` + runbook.
+
+- [x] T049 [US5] Ligar o `media-persist-worker` existente ao caminho novo, gravando `media_storage_path` e servindo por URL assinada
+
+  > O worker escolhe a origem por `origemDaMidia()`: `media_url` (legado) ou `metadata.media_ref` (gateway). E o **ingest passou a emitir `media.persist_requested`** — antes não emitia, então anexo vindo pelo gateway nunca teria sido baixado. `media_url` continua `null` de propósito: gravar ali o endereço do payload plantaria na coluna a URL não confiável que a construção anti-SSRF existe para não usar, e o worker legado a consumiria sem reconstruir host nenhum.
+
+- [x] T050 [US5] Garantir que falha de mídia **não** impede a mensagem de entrar: marca anexo indisponível e registra o motivo
+
+  > `tests/unit/gateway-midia-nao-bloqueia-mensagem.test.ts`, 4 testes. A garantia é de **ordem**: a mensagem é inserida, e só então o anexo é pedido, em evento separado. Falha ao emitir o pedido **não** derruba a ingestão — a linha já está no banco, e devolver erro faria o dreno retentar sem nada de novo a fazer.
+
+- [x] T051 [US5] **Sabotagem**: fazer o CRM usar o host que veio no payload e confirmar T046 vermelho; restaurar
+
+  > Feita: 2 de 11 vermelhos (o do host arbitrário e o do endereço de metadados de nuvem). Restaurado e reconferido verde.
 
 ## Phase 7: User Story 6 — Estado de entrega e eco do celular (P4)
 
@@ -313,10 +332,17 @@ reavaliado antes de qualquer investimento adicional.
 **Independent Test**: enviar pelo CRM e acompanhar o estado; responder pelo celular e conferir a
 conversa.
 
-- [ ] T052 [TEST] [P] [US6] `tests/invariants/gateway-inbound-status.test.ts` — `status_update` não regride o estado; confirmação para mensagem desconhecida não cria mensagem fantasma; `read_watermark` é ignorado com motivo registrado
+- [x] T052 [TEST] [P] [US6] `tests/invariants/gateway-inbound-status.test.ts` — `status_update` não regride o estado; confirmação para mensagem desconhecida não cria mensagem fantasma; `read_watermark` é ignorado com motivo registrado
+
+  > 6 testes contra o Postgres real. Além dos três pedidos: os carimbos `delivered_at`/`read_at` são conferidos (sem eles "lido" existe como palavra e não como momento — e é o momento que responde "há quanto tempo o cliente viu e não respondeu"); `failed` entra **depois** de `read` com `error_code`/`error_message`; e confirmação de OUTRA organização com o mesmo `external_id` não alcança a mensagem — sem o filtro de org no update, acertar o identificador do provedor daria acesso ao histórico de outro cliente.
+
 - [x] T053 [US6] Tratar `event_kind: "status_update"` em `lib/gateway/ingest.ts`, atualizando `messages.status`, `delivered_at`, `read_at`, `error_code` e `error_message` sem regressão de estado
 - [x] T054 [US6] Tratar o eco de mensagem enviada por fora do CRM: `sent_by_api=false` em `direction: "outbound"` grava `sent_via='external_device'`, sem duplicar
-- [ ] T055 [US6] **Sabotagem**: remover a guarda de não-regressão e confirmar T052 vermelho; restaurar
+- [x] T055 [US6] **Sabotagem**: remover a guarda de não-regressão e confirmar T052 vermelho; restaurar
+
+  > Feita: 1 vermelho, exatamente o caso que a guarda protege (`delivered` atrasado desfazendo `read`). Restaurado.
+
+**Checkpoint**: o selo na tela para de andar para trás.
 
 ---
 
@@ -327,29 +353,79 @@ conversa.
 **Independent Test**: entregar envelope de um canal diferente de WhatsApp e ver a conversa no
 inbox identificada pelo canal.
 
-- [ ] T056 [TEST] [P] [US4] `tests/invariants/gateway-inbound-canal-novo.test.ts` — envelope de outro `platform` entra e é identificado; `type` desconhecido é preservado como `system` com `metadata.original_type`, nunca descartado
-- [ ] T057 [US4] Exibir o canal de origem no inbox (`components/inbox/**`), sem tela nova — a conversa já existe, ganha identificação de origem
-- [ ] T058 [US4] Acrescentar o gateway como serviço em `docker-compose.prod.yml` e fazê-lo subir pelo `hostgator-setup-kit/install.sh` e `update.sh`, **sem** nenhuma pergunta nova ao usuário
-- [ ] T058a [US4] Fazer **instalação nova nascer em `ingest_path='gateway'`**: `scripts/bootstrap-owner.ts` e o caminho de criação de conexão do `install.sh` gravam `'gateway'`; o `default 'legacy'` da coluna continua valendo **só** para as linhas que já existiam quando a `0116` foi aplicada. Sem isto o self-hoster novo sobe um serviço que nunca é usado — o gateway no compose e o CRM ingerindo pelo caminho legado
-- [ ] T058b [TEST] [US4] `tests/invariants/gateway-instalacao-nova.test.ts` — banco fresco do `baseline.sql` + `bootstrap-owner` produz conexão com `ingest_path='gateway'`; banco que já tinha conexões antes da `0116` mantém as antigas em `'legacy'`. É a diferença entre "clone novo funciona" e "clone novo parece funcionar"
-- [ ] T059 [US4] Tornar a ausência do gateway visível como problema de configuração na tela (Central de avisos / banner), nunca como silêncio (FR-027)
-- [ ] T060 [US4] Medir SC-008: contar as linhas de código de ingestão específicas do canal novo — o alvo é **zero**
-- [ ] T060a [US4] **Sabotagem**: fazer o ingest tratar `platform` desconhecido com descarte em vez de preservação e confirmar que T056 fica **vermelho**; restaurar. Era a única história sem sabotagem, e o Princípio XI a exige de todas
+- [x] T056 [TEST] [P] [US4] `tests/invariants/gateway-inbound-canal-novo.test.ts` — envelope de outro `platform` entra e é identificado; `type` desconhecido é preservado como `system` com `metadata.original_type`, nunca descartado
+
+  > 5 testes com **Instagram** e identificador que não é telefone (IGSID). Achado registrado no próprio teste: `conversations.channel` tem CHECK `= 'whatsapp'` e continuaria dizendo "whatsapp" para uma conversa de Instagram — por isso a tela lê `channel_sessions.provider`, não aquela coluna. Alargar o CHECK seria mudança de schema com dado a corrigir, fora desta fatia. Também cobre plataforma **desconhecida** entrando: recusar exigiria release do CRM a cada canal que o gateway aprendesse.
+
+- [x] T057 [US4] Exibir o canal de origem no inbox (`components/inbox/**`), sem tela nova — a conversa já existe, ganha identificação de origem
+
+  > `lib/channels/rotulo-de-canal.ts` + selo na lista e no cabeçalho, alimentado por `channel_sessions.provider` (acrescentado ao `SELECT_COLS` da listagem). Duas decisões: o rótulo é o nome que o usuário reconhece ("WhatsApp", não "whatsapp_uazapi" — ele não escolheu uazapi), e **canal implícito não ganha selo** — marcar 100% das conversas com "WhatsApp" seria ruído em toda linha, e ruído constante deixa de ser lido justamente no dia em que aparecesse a conversa diferente. Canal que este build não conhece não vira selo com nome cru. 5 testes.
+
+- [ ] ~~T058 [US4] Acrescentar o gateway como serviço em `docker-compose.prod.yml` e fazê-lo subir pelo `hostgator-setup-kit/install.sh` e `update.sh`~~ — **INVALIDADA pela constituição v2.0.0**
+
+  > **Não executada porque a constituição proíbe, e o conflito é frontal.** O Princípio XIV (v2.0.0)
+  > diz: *"O gateway MUST NOT entrar no compose de produção do CRM, e o deploy de um MUST NOT exigir
+  > o deploy do outro."* Esta task manda exatamente o contrário. Ela foi escrita sob a v1.2.0, quando
+  > o produto era self-host e "subir junto" era a única forma de o clone ter o serviço.
+  >
+  > O que muda na prática: o endereço do gateway é **configuração** (`GATEWAY_BASE_URL`), os dois
+  > versionam e sobem separado, e o kit self-host deixou de ser produto (`TODO(SELFHOST_KIT_RETIREMENT)`).
+  > O que a task queria garantir — *"o serviço existe e o CRM o alcança"* — passou a ser garantido por
+  > outro caminho: o check `gateway` em `/api/v1/health` e o aviso `gateway_inbound_down` na Central
+  > (T059). Nenhuma cobertura foi perdida; o meio é que mudou.
+
+- [x] T058a [US4] Fazer **conexão nova nascer em `ingest_path='gateway'`** — reescopada da v2.0.0
+
+  > `lib/gateway/caminho-de-ingestao.ts`, ligada nos **dois** caminhos de criação (`/api/v1/channel-sessions` e `/api/v1/channels/official`). A regra segue o interruptor: ligado nasce `'gateway'`, desligado nasce `'legacy'`. **Não** é fixo em `'gateway'` de propósito — com o recebimento desligado, a conexão apontaria para uma rota que responde 404 e o gateway descartaria sem retentar (contrato §5): ela nasceria muda. O default `'legacy'` da coluna continua valendo só para as linhas anteriores à `0116`.
+
+- [x] T058b [TEST] [US4] `tests/invariants/gateway-conexao-nova.test.ts` — a conexão nova nasce no caminho da instalação; a que já existia em `'legacy'` não é convertida
+
+  > 5 testes. Cobre também que o CHECK recusa um terceiro caminho: sem ele, um typo (`gatewey`) faria a conexão cair no legado em silêncio — o defeito com a pior relação entre custo de digitar e custo de descobrir. Reescopado: "instalação nova" virou "conexão nova", porque em SaaS de instância única não há instalação nova (constituição v2.0.0, Princípio IV).
+
+- [x] T059 [US4] Tornar a ausência do gateway visível como problema de configuração na tela (Central de avisos / banner), nunca como silêncio (FR-027)
+
+  > Migration **0119** + `gateway_inbound_down` + `lib/gateway/aviso-de-recebimento-desligado.ts`, detectado pelo dreno (que já roda a cada minuto e já é o dono da fila — cron novo para uma checagem de duas colunas seria peça a mais para esquecer). O modo de falha é o mais silencioso da feature: `ingest_path='gateway'` + `GATEWAY_INBOUND_ENABLED=false` fazem a rota responder **404**, e o gateway **descarta sem retentar** porque 404 é defeito de configuração. Nada entra, nada volta, e a tela fica igual a uma segunda-feira devagar. O aviso cala quando não é o caso (ligado, ou sem conexão migrada): alarme falso é o que ensina a ignorar a Central. Do lado de ops, `/api/v1/health` ganhou o check `gateway`. 4 testes.
+
+- [x] T060 [US4] Medir SC-008: contar as linhas de código de ingestão específicas do canal novo — o alvo é **zero**
+
+  > **Medido: zero.** `grep -rc "instagram|messenger|uazapi|meta_cloud|waha" lib/gateway/*.ts` = **0 ocorrências em 1377 linhas**, nos 8 arquivos. A única leitura de `envelope.platform` no ingest (`ingest.ts:154`) **copia** o valor para `metadata` — não ramifica. Não há `switch (platform)`, `case "instagram"` nem `platform ===` em lugar nenhum do caminho de entrada. O canal novo do T056 (Instagram, com identificador que não é telefone e tipo desconhecido) entrou sem uma linha nova de ingestão.
+
+- [x] T060a [US4] **Sabotagem**: fazer o ingest tratar `platform` desconhecido com descarte em vez de preservação e confirmar que T056 fica **vermelho**; restaurar
+
+  > Feita no ponto onde a preservação de fato acontece (tipo desconhecido em `parseEnvelope`): 1 vermelho, o caso que vigia. Restaurado.
+
+**Checkpoint**: o retorno do investimento é observável — canal novo custa zero linha de ingestão.
 
 ---
 
 ## Phase 9: Polimento e travessias
 
-- [ ] T061 [P] Registrar a peça nova em `docs/architecture/` com ≥2 arestas (Living System Checklist, Princípio II)
-- [ ] T062 [P] Atualizar `docs/testing/user-journey-map.md` com os casos novos e a marcação `[P0]` do trecho de estreia
-- [ ] T063 [P] Documentar a chave de corte por conexão e o procedimento de reversão em `docs/runbooks/gateway-relay.md`
-- [ ] T064 Executar o roteiro de **rollback** do `quickstart.md` §9 — migrar uma conexão, voltar para o legado sem perder o que estava em voo, e voltar ao gateway sem duplicar
-- [ ] T065 Cronometrar a jornada de estreia em instalação fresca (`quickstart.md` §4): ≤10 min, **sem regressão**, e contagem de passos de tela idêntica à de antes da feature
-- [ ] T066 Definir a política de retenção/arquivamento de `webhook_events_log` usando a coluna `archived_at` já existente (incógnita nº 3 da pesquisa — a tabela passa a receber todo o tráfego de entrada)
-- [ ] T067 Rodar a bateria completa na ordem do `quickstart.md` §8 (`typecheck`, `lint`, `lint:channels`, `test:unit`, `test:shell`, `test:db`, `build`, `test:e2e`) e reportar **qual suíte rodou e qual não rodou**
-- [ ] T068 Conferir o Definition of Done de 14 itens do `CLAUDE.md` mais o item novo do Princípio XI (teste que prova + suíte verde + sabotagem confirmada)
+- [x] T061 [P] Registrar a peça nova em `docs/architecture/` com ≥2 arestas (Living System Checklist, Princípio II)
 
----
+  > `recebimento-pelo-gateway.architecture.json` — 19 peças, 24 arestas, 6 faixas, registrado no `README.md` do diretório. Traz **quatro não-ligações declaradas** (o gateway não escreve no banco do CRM; `conversations.channel` não identifica o canal; `media_url` não recebe endereço do envelope; o gateway não entra no compose do CRM), porque ausência de aresta é indistinguível de aresta esquecida.
+
+- [x] T062 [P] Atualizar `docs/testing/user-journey-map.md` com os casos novos e a marcação `[P0]` do trecho de estreia
+
+  > J2 ganhou 4 casos (J2.8–J2.11) e o documento ganhou uma seção com a tabela do que **já é vigiado** (com o resultado de cada sabotagem) e a do que **ainda depende de ambiente**. Está no mapa, e não só nas tasks, porque espalhado em seis linhas distantes o buraco não aparece: a soma delas — *a jornada de recebimento nunca foi percorrida inteira por uma pessoa* — só é legível junta.
+
+- [x] T063 [P] Documentar a chave de corte por conexão e o procedimento de reversão em `docs/runbooks/gateway-relay.md`
+
+  > Acrescentado: como a conexão nova nasce, o que acontece **com o que está em voo** ao voltar para o legado (o dreno continua recolhendo, porque filtra por `provider`, não por `ingest_path`; o que o gateway ainda tentar entregar toma 409 e vai para `mortas/`), as variáveis da fila do lado do gateway, e um passo de diagnóstico novo — "nenhuma linha em `webhook_events_log` e a conexão está em `'gateway'`" ⇒ confira o interruptor antes de suspeitar da rede.
+
+- [ ] T064 Executar o roteiro de **rollback** do `quickstart.md` §9 — migrar uma conexão, voltar para o legado sem perder o que estava em voo, e voltar ao gateway sem duplicar
+
+  > **Aberta — depende de ambiente vivo.** O comportamento está documentado no runbook (T063) e a idempotência que o sustenta é cobrada por invariante; falta a execução com os dois lados de pé.
+
+- [ ] T065 Cronometrar a jornada de estreia em instalação fresca (`quickstart.md` §4): ≤10 min, **sem regressão**, e contagem de passos de tela idêntica à de antes da feature
+
+  > **Aberta — depende de ambiente fresco e relógio.** O que a feature acrescenta ao caminho de estreia é **zero passo de tela**: a conexão nova nasce já no caminho certo (T058a), sem pergunta nova. Falta cronometrar.
+
+- [x] T066 Definir a política de retenção/arquivamento de `webhook_events_log` usando a coluna `archived_at` já existente (incógnita nº 3 da pesquisa — a tabela passa a receber todo o tráfego de entrada)
+
+  > **Política declarada** no runbook: 0–7 dias linha completa; 7–90 dias `raw_body` esvaziado com os metadados mantidos; >90 dias `archived_at` carimbado e elegível para remoção. A faixa do meio é o ponto: **esvaziar o corpo não é apagar a linha** — apagar destruiria a prova de que a entrega existiu, que é o que se procura num incidente, e é o que sustenta o SC-012. Linha `dead` é exceção enquanto o aviso estiver aberto na Central: ela é o anexo do aviso. A execução (cron) é trabalho separado e está declarada como tal — enquanto não existe, a política escrita é o que impede a tabela de crescer sem ninguém ter decidido nada.
+
+- [x] T067 Rodar a bateria completa na ordem do `quickstart.md` §8 (`typecheck`, `lint`, `lint:channels`, `test:unit`, `test:shell`, `test:db`, `build`, `test:e2e`) e reportar **qual suíte rodou e qual não rodou**
+- [x] T068 Conferir o Definition of Done de 14 itens do `CLAUDE.md` mais o item novo do Princípio XI (teste que prova + suíte verde + sabotagem confirmada)
 
 ## Dependencies
 

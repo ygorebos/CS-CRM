@@ -9,6 +9,7 @@ import { useClaimConversation } from "@/hooks/inbox/useClaimConversation";
 import { useReleaseConversation } from "@/hooks/inbox/useReleaseConversation";
 import { useCloseConversation } from "@/hooks/inbox/useCloseConversation";
 import { useResumeAiAttendance } from "@/hooks/inbox/useResumeAiAttendance";
+import { seloDeCanal } from "@/lib/channels/rotulo-de-canal";
 import { ReassignDialog } from "@/components/inbox/ReassignDialog";
 import { SnoozeButton } from "@/components/inbox/SnoozeButton";
 import type { ConversationWithContact } from "@/hooks/inbox/useConversationsRealtime";
@@ -42,6 +43,7 @@ export function ConversationHeader({ conversation }: Props) {
   const c = conversation.contacts ?? null;
   const displayName = c?.display_name?.trim() || c?.name?.trim() || c?.phone_number || "Sem nome";
   const phone = c?.phone_number ?? null;
+  const canal = seloDeCanal(conversation.channel_sessions?.provider);
   const status = conversation.status;
   const isMineAssigned = conversation.assigned_to_user_id === user.id;
   const isOpen = status === "open" || conversation.assigned_to_user_id == null;
@@ -72,6 +74,14 @@ export function ConversationHeader({ conversation }: Props) {
           {emAtendimentoHumano && (
             <Badge variant="outline" className="h-4 px-1.5 text-[10px]" data-testid="badge-atendimento-humano">
               Automático pausado
+            </Badge>
+          )}
+          {/* Canal de origem — só quando não é WhatsApp. Quem responde precisa
+              saber ONDE está falando antes de escrever: o que é natural no
+              WhatsApp (áudio, mensagem longa) não é no Direct do Instagram. */}
+          {canal && (
+            <Badge variant="outline" className="h-4 px-1.5 text-[10px]" data-testid="badge-canal-de-origem">
+              {canal}
             </Badge>
           )}
         </div>

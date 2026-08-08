@@ -179,13 +179,26 @@ Nenhuma camada nova, nenhum projeto novo, nenhuma dependência nova no CRM.
 | 3 · US1 — a costura | 🟡 **quase** | ingest único, dreno periódico, agendamento no `scheduler`, invariantes de banco (T020/T021) e a identidade canônica (T027a/T027b — a mesma pessoa com as duas grafias do número vira UM contato, regra extraída para `lib/channels/identidade-canonica.ts` com a busca injetada, para o invariante exercitar a MESMA função que o ingest). Do lado do gateway (`c3d44fd`): o encaminhamento cru virou **envelope normalizado e assinado** — `internal/envelope` (mapeador, `event_id` determinístico) e `internal/entrega` (HMAC sobre timestamp+corpo), ligados nos quatro canais, com **virada por destino** para não quebrar quem já consome o formato antigo. **Falta**: a prova pela tela (T022) e a ponta a ponta com mensagem real (T030) |
 | 4 · US2 — durabilidade | 🟡 **quase** | a fila durável existe (`internal/entrega/fila.go` no `gateway_go`): pendência gravada em disco **antes** da primeira tentativa, espera crescente com teto, `Retry-After` como piso, política do contrato §5 (`409` e demais 4xx não listados também vão ao descarte — insistir contra eles é laço infinito), e descarte inspecionável em `mortas/`. Ligada no encaminhamento e no boot, com retomada imediata do que sobrou do processo anterior. Uma decisão mudou no caminho: o segredo de assinatura **mora na pendência** — sem ele a retentativa pós-reinício é inassinável, e o gateway resolve conexão por token do provedor, não por ID. Do lado do CRM, `0118` + `gateway_delivery_dead`: o dreno emitia evento que **ninguém escutava**, e agora o descarte chega à Central. **Falta**: T038 e T038a, que pedem ambiente real (gateway + WAHA + número), mesma classe de T022 e T030 |
 | 5 · US3 — autenticidade provada | ✅ **concluída** | as sete requisições do quickstart §3 viraram invariante de banco (`gateway-inbound-autenticidade.test.ts`), somadas ao isolamento entre duas organizações (`gateway-inbound-isolamento.test.ts`). O corpo nunca decide tenant, e a tentativa vira auditoria em vez de silêncio; recusa passou a gravar linha com motivo e `valid_signature` verdadeiro (era `true` fixo — a coluna mentia justamente para quem fosse auditar). Sabotagens do T045 confirmadas vermelhas |
-| 6–8 · mídia, estado, canal novo | ⬜ não iniciadas | |
+| 6 · US5 — mídia | 🟡 **quase** | `lib/messaging/media/gateway-source.ts` com a mesma construção anti-SSRF do caminho legado (host do payload descartado, URL remontada sobre `GATEWAY_BASE_URL`) e teto próprio de 100 MiB; o worker de mídia passou a escolher a origem, e o **ingest passou a emitir `media.persist_requested`** — sem isso, anexo vindo pelo gateway nunca teria sido baixado. FR-025 provado como ordem: a mensagem entra, e só então o anexo é pedido. Anexo declarado acima do teto nem é baixado. **Falta**: T047 (a prova pela tela) |
+| 7 · US6 — estado de entrega | ✅ **concluída** | `gateway-inbound-status.test.ts` contra o Postgres real: não regride, `failed` entra depois de `read` com motivo, confirmação de mensagem desconhecida não cria fantasma, `read_watermark` é ignorado COM motivo, e confirmação de outra organização não alcança a mensagem. Sabotagem da guarda de não-regressão: 1 vermelho |
+| 8 · US4 — canal novo | 🟢 **concluída, com uma task invalidada pela constituição** | **SC-008 medido: zero** — nenhuma ocorrência de nome de canal em 1377 linhas de `lib/gateway/`. Instagram entra com identificador que não é telefone, tipo desconhecido vira `system` + `metadata.original_type`, plataforma desconhecida também entra. Selo de canal na lista e no cabeçalho (só quando não é WhatsApp). Conexão nova nasce no caminho da instalação. `0119` + `gateway_inbound_down`: a combinação `ingest_path='gateway'` + interruptor desligado deixou de ser silêncio. **T058 não foi executada**: o Princípio XIV (v2.0.0) proíbe o gateway no compose do CRM, que é literalmente o que ela mandava fazer — o que ela garantia passou para o check `gateway` do health e o aviso do T059 |
+| 9 · Polimento | 🟡 **quase** | mapa de arquitetura (19 peças, 24 arestas, 4 não-ligações declaradas), mapa de jornadas, runbook (reversão, o que fica em voo, variáveis da fila, diagnóstico do interruptor), política de retenção de `webhook_events_log` declarada, bateria completa rodada. **Falta**: T064 e T065, que pedem ambiente vivo |
 
-**Placar de tarefas**: 52 de 82 concluídas.
+**Placar de tarefas**: 74 de 82 concluídas. As 8 abertas: 1 invalidada pela constituição (T058) e 7 que dependem de ambiente real (T022, T030, T038, T038a, T047, T064, T065) — nenhuma delas é dúvida de projeto.
 
-**Portões no último commit**: `typecheck` 0 · `lint` 0 erros · `lint:channels` ok ·
-`test:unit` 294 arquivos / 3006 testes verde · `test:db` 75 arquivos / 503 testes verde (1 skip) ·
-`go test ./...` verde nos 14 pacotes do `gateway_go` (rodado em contêiner: a máquina não tem Go).
+**Portões no último commit** (bateria completa do `quickstart.md` §8 — T067):
+
+| Suíte | Resultado |
+|---|---|
+| `typecheck` | ✅ 0 erros |
+| `lint` | ✅ 0 erros (187 avisos pré-existentes) |
+| `lint:channels` | ✅ ok — 61 arquivos de dívida conhecida, **nenhum novo** |
+| `test:unit` | ✅ 298 arquivos / **3038 testes** |
+| `test:shell` | ✅ todas as provas |
+| `test:db` | ✅ 80 arquivos / **530 testes** (1 skip) |
+| `build` | ✅ `next build` completo |
+| `go test ./...` (gateway) | ✅ 14 pacotes (em contêiner: a máquina não tem Go) |
+| `test:e2e` | ⬜ **NÃO rodada** — exige `next build` + `.env.e2e` + Supabase local, e o Supabase local desta máquina está em uso por outra sessão nesta árvore compartilhada. A spec nova (`gateway-inbound.spec.ts`) está escrita e entra no job `e2e` |
 
 **Fonte do Constitution Check**: este plano foi escrito contra a **v1.2.0**. A constituição está
 em **v2.0.0** e redefiniu III e IV e acrescentou XIII e XIV. As decisões do plano seguem válidas —

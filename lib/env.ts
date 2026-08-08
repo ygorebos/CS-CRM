@@ -114,6 +114,14 @@ const schema = z.object({
    * conversa é pior.
    */
   GATEWAY_MAX_MEDIA_BYTES: z.coerce.number().int().positive().default(100 * 1024 * 1024),
+  /**
+   * Credencial do CRM AO BAIXAR anexo do gateway (direção CRM → gateway, oposta
+   * à da entrega, que é assinada por conexão com outro segredo). Opcional de
+   * propósito: gateway sem token interno é configuração válida, e derrubar o
+   * app por causa dela transformaria "anexo não abre" em "sistema não sobe" —
+   * exatamente a inversão de gravidade que o FR-025 proíbe.
+   */
+  GATEWAY_INTERNAL_TOKEN: z.string().optional().default(""),
 
   // Upstash Redis
   UPSTASH_REDIS_REST_URL: required("UPSTASH_REDIS_REST_URL"),

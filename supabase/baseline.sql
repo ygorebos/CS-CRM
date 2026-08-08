@@ -9084,6 +9084,13 @@ alter table public.agent_inbox_items
     -- chegar, e esta é a única forma de alguém ficar sabendo. Entra NESTA lista,
     -- e não num bloco novo, pela mesma razão do #159.
     'gateway_delivery_dead',
+    -- (migration 0119, spec 001 §T059) Conexão apontada para o gateway com o
+    -- recebimento DESLIGADO: `ingest_path='gateway'` + `GATEWAY_INBOUND_ENABLED
+    -- =false` fazem a rota responder 404, e o gateway descarta sem retentar
+    -- (404 é defeito de configuração pelo contrato §5). Nenhuma mensagem entra,
+    -- nenhuma volta, e a tela fica igual a um dia devagar. Curável com uma
+    -- variável — mas só se alguém souber.
+    'gateway_inbound_down',
     'other'
   ));
 

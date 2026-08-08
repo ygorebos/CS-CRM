@@ -36,6 +36,7 @@ import type { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { env } from "@/lib/env";
 import { avisarEntregaDescartada } from "@/lib/gateway/aviso-de-descarte";
+import { avisarRecebimentoDesligado } from "@/lib/gateway/aviso-de-recebimento-desligado";
 import { parseEnvelope } from "@/lib/gateway/envelope";
 import { ingerirEnvelope } from "@/lib/gateway/ingest";
 import { logger } from "@/lib/logger";
@@ -74,6 +75,16 @@ async function handle(req: NextRequest): Promise<Response> {
   }
 
   const admin = createAdminClient();
+
+  // FR-027: a ausência do recebimento aparece como problema de CONFIGURAÇÃO na
+  // tela, e não como silêncio. Roda antes do lote porque, quando o interruptor
+  // está desligado, o lote é justamente o que não tem nada para recolher — e o
+  // vazio seria lido como "não chegou mensagem".
+  const avisosDeDesligado = await avisarRecebimentoDesligado(admin, {
+    habilitado: env.GATEWAY_INBOUND_ENABLED,
+    requestId,
+  });
+
   const corte = new Date(Date.now() - CARENCIA_SEGUNDOS * 1000).toISOString();
 
   const { data, error } = await admin
@@ -148,7 +159,13 @@ async function handle(req: NextRequest): Promise<Response> {
   }
 
   return ok(
-    { examined: linhas.length, processed: processadas, dead: mortas, failed: falhas },
+    {
+      examined: linhas.length,
+      processed: processadas,
+      dead: mortas,
+      failed: falhas,
+      inbound_off_notices: avisosDeDesligado,
+    },
     { requestId },
   );
 }

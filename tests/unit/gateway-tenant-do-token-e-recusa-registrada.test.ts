@@ -268,6 +268,30 @@ describe("T043 — a recusa é reconstruível pelo banco (SC-012)", () => {
   });
 });
 
+describe("teto do corpo da entrega (T014a)", () => {
+  it("corpo acima de GATEWAY_MAX_BODY_BYTES é recusado com 413, antes de tocar o banco", async () => {
+    // 1 MiB é o teto dublado no topo deste arquivo. O corpo aqui passa dele.
+    const gigante = { recheio: "x".repeat(1_200_000) };
+    const res = await POST(entrega(gigante), ctx);
+
+    // 413, e não 400: o corpo pode estar perfeitamente bem formado — o problema
+    // é o tamanho, e o emissor precisa saber a diferença para não ficar
+    // reenviando o mesmo payload achando que corrigiu o formato.
+    expect(res.status).toBe(413);
+
+    // E nada foi gravado. Um teto que só protege depois da consulta não protege
+    // o banco, que é o recurso escasso quando alguém resolve mandar 500 MiB.
+    expect(registros).toHaveLength(0);
+  });
+
+  it("corpo dentro do teto segue o caminho normal — caso de controle", async () => {
+    const res = await POST(entrega(envelopeValido()), ctx);
+    // Sem este caso, um bug que recusasse TUDO com 413 faria o teste acima
+    // passar e a feature inteira estar morta.
+    expect(res.status).toBe(202);
+  });
+});
+
 /**
  * SABOTAGENS que devem deixar este arquivo VERMELHO:
  *

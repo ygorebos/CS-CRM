@@ -52,6 +52,10 @@ export const KIND_LABEL = {
   // diferença sem abrir o aviso, porque a ação é outra — aqui é procurar o
   // cliente, não esperar o sistema se recuperar.
   gateway_delivery_dead: "Mensagens de clientes não chegaram e não virão",
+  // Diz que é CONFIGURAÇÃO, sem dizer qual: quem lê a Central não sabe o que é
+  // rota de recebimento, mas entende "está desligado" e entende que alguém
+  // precisa ligar. O nome da variável fica no corpo, para quem for consertar.
+  gateway_inbound_down: "O recebimento de mensagens está desligado",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 
