@@ -1724,11 +1724,14 @@ export type Database = {
       }
       catalog_materials: {
         Row: {
+          adopted_at: string | null
+          adopted_by: string | null
           applies_to_all: boolean
           body: string
           catalog_scope_id: string | null
           created_at: string
           id: string
+          inert: boolean
           origin: string
           published_at: string
           slug: string
@@ -1738,11 +1741,14 @@ export type Database = {
           version: number
         }
         Insert: {
+          adopted_at?: string | null
+          adopted_by?: string | null
           applies_to_all?: boolean
           body: string
           catalog_scope_id?: string | null
           created_at?: string
           id?: string
+          inert?: boolean
           origin?: string
           published_at?: string
           slug: string
@@ -1752,11 +1758,14 @@ export type Database = {
           version: number
         }
         Update: {
+          adopted_at?: string | null
+          adopted_by?: string | null
           applies_to_all?: boolean
           body?: string
           catalog_scope_id?: string | null
           created_at?: string
           id?: string
+          inert?: boolean
           origin?: string
           published_at?: string
           slug?: string
