@@ -3,7 +3,8 @@
 **Spec**: [spec.md](./spec.md) · **Plano**: [plan.md](./plan.md) · **Research**:
 [research.md](./research.md)
 
-> **Esta feature não cria tabela nenhuma.** Cria **um papel** e **quatro funções**, e dá significado
+> **Esta feature não cria tabela nenhuma.** Cria **um papel** e **duas funções** (mais o grant de
+> três que já existem), e dá significado
 > de escrita a duas colunas que já nasceram na spec 001. Se você veio procurar DDL de tabela, não há
 > — e isso é resultado da doutrina DIRC, não descuido: tudo que a feature precisa **já existe**
 > (`I`ntegrar), e o que falta é caminho de escrita, não campo.
@@ -16,14 +17,14 @@
 |---|---|---|
 | Login | `nologin` | Não é conta; é papel assumido por troca via PostgREST (research D1) |
 | Grants de tabela | **nenhum** | FR-002. Escrever tabela crua tem de falhar em desenvolvimento |
-| Grants de função | `EXECUTE` só nas quatro da §2 | A superfície inteira do fork |
+| Grants de função | `EXECUTE` só nas cinco da §2 (2 novas + 3 existentes) | A superfície inteira do fork |
 | Membro de | `authenticator`, **se o papel existir** | Armadilha medida — research D1.1 |
 | Vigiado por | `tests/invariants/` (T011) | Reprova se ganhar qualquer privilégio em `role_table_grants` |
 
 **Regra que não pode ser afrouxada**: `gateway_writer` **nunca** recebe `service_role`, nunca recebe
 `bypassrls`, e nunca recebe grant de tabela — nem de `select`. Um `select` direto em `messages`
-parece inofensivo e já é acoplamento ao schema, que é exatamente o que a mitigação do FAIL de VII
-promete impedir.
+parece inofensivo e já é acoplamento ao schema, que é exatamente o que a **trava 1 do Princípio VII**
+(v2.3.0) existe para impedir — e ela é condição de existência da quarta superfície, não recomendação.
 
 ---
 
@@ -43,7 +44,7 @@ Criadas para o caminho do WAHA, com o grant certo (`baseline.sql:4187-4234` e `:
 **Mudança necessária**: acrescentar `grant execute ... to gateway_writer` (hoje só `service_role`).
 Nada mais — assinatura e corpo ficam.
 
-### 2.2 Novas (migration 0128)
+### 2.2 Novas (migration 0128) — **duas**
 
 #### `fn_gateway_ingest_message` — a peça central
 
@@ -106,10 +107,15 @@ Transição só é aplicada se **avança**. Duas exceções, e as duas têm moti
 > Esta guarda **não existe** no caminho do WAHA (`lib/waha/ingest.ts:657-677`). Migrar herda um ACK
 > melhor que o atual, de graça.
 
-#### `fn_gateway_provision_connection` — **condicionada a T003**
+#### ~~`fn_gateway_provision_connection`~~ — **não existe** (T003 decidiu a rota HTTP)
 
-Nasce a `channel_sessions` com `gateway_connection_id`, `organization_id` e `ingest_path='gateway'`.
-Pode morrer para a rota HTTP — research D6 está aberto.
+Ela chegou a ser desenhada e **morreu na decisão de 2026-08-08** (research D6): o provisionamento é
+a rota HTTP do gateway, e quem grava `channel_sessions` volta a ser o **CRM**, pelo caminho que ele
+já usa — service role com `organization_id` filtrado de fonte confiável.
+
+**Efeito colateral bom**: a superfície de escrita do gateway fica em **duas** funções em vez de
+quatro, e `channel_sessions` **nunca** é tocada por ele. Registrado aqui, riscado e não apagado, para
+a próxima sessão não recriar a função achando que faltou.
 
 ---
 

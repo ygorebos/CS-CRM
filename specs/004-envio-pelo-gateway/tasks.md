@@ -17,7 +17,7 @@ opcionais nem agrupáveis no fim.
 
 ---
 
-## Fase 0 — Decisões que bloqueiam (nenhuma é código)
+## Fase 0 — Decisões que bloqueiam (nenhuma é código) — ✅ **COMPLETA em 2026-08-08**
 
 - [X] **T001** ✅ **FEITA em 2026-08-08 — constituição v2.3.0.** Emendados VII (quarta superfície
       nomeada e cercada por seis travas) e XIV (a ponta de durabilidade do CRM muda de forma:
@@ -39,11 +39,15 @@ opcionais nem agrupáveis no fim.
       **ganhou a seção de canal e gateway, que não existia** — ele mencionava o gateway uma única
       vez e nenhum agente externo tinha como saber destas regras. `.specify/templates/plan-template.md`:
       gates VII e XIV atualizados (era o `TODO(PLAN_TEMPLATE_VII)` do Sync Impact Report).
-- [ ] **T003** ⛔ **ÚNICO BLOQUEIO RESTANTE DA FASE 0 — precisa de decisão do dono.**
-      **Desempatar quem provisiona** — item 5 do §8 da decisão, hoje em aberto e a causa de
-      T014 e T029 fazerem a mesma coisa por caminhos diferentes. Escolher: (a) rota HTTP no gateway
-      (`gateway-provisioning-v1.md`), (b) função no CRM (`fn_gateway_provision_connection`), ou
-      (c) as duas com dono declarado. **Registrar a escolha no contrato**; a task perdedora morre.
+- [X] **T003** ✅ **DECIDIDA em 2026-08-08 pelo dono: (a) rota HTTP no gateway.** O provisionamento
+      é o `gateway-provisioning-v1.md` §3-§8. **T014 morre** (`fn_gateway_provision_connection` não
+      nasce) e **T029 deixa de ser condicional**.
+      **Consequência que melhora a mitigação de VII**: quem grava `channel_sessions` volta a ser o
+      **CRM**, pelo caminho que ele já usa (service role com `organization_id` de fonte confiável).
+      O gateway devolve o `connection_id` e **nunca toca essa tabela** — a superfície de escrita dele
+      cai de quatro funções para **duas**. Superfície menor é acoplamento menor.
+      **E o tudo-ou-nada passa a ter um dono só, o CRM**: ele chama o gateway, recebe o id, grava sua
+      linha; se a gravação falhar, chama `DELETE` no gateway para desfazer a instância (T043).
 
 ---
 
@@ -67,9 +71,10 @@ opcionais nem agrupáveis no fim.
       outro dono, corpo inválido) vs **transitório** (banco fora, tempo esgotado, conflito de
       serialização), com erro sem classe caindo em transitório. É o que decide se o gateway retenta
       para sempre ou descarta cedo demais. **(FR-005)**
-- [ ] **T014** `fn_gateway_provision_connection` — nasce a `channel_sessions` com
-      `gateway_connection_id`, `organization_id` e `ingest_path`. **Condicionada a T003** (pode
-      morrer para T029). **(FR-011)**
+- [~] **T014** ❌ **MORTA pela T003.** Era `fn_gateway_provision_connection`. Com o provisionamento
+      na rota HTTP do gateway, quem grava `channel_sessions` é o CRM pelo caminho dele (T043) — não
+      há função de provisionamento a criar. Mantida riscada, não apagada, para a próxima sessão não
+      reabrir a discussão achando que foi esquecimento. **(FR-011 agora é servida por T029 + T043)**
 - [ ] **T015** `fn_gateway_update_message_status` — o ACK. Portar a guarda de não-regressão de
       `lib/gateway/ingest.ts:278-340` (`ORDEM_DO_ESTADO`): estado que não avança é ignorado com
       sucesso, `failed` sempre passa. Sem a guarda, um ACK atrasado apaga um `read` com um `sent`.
@@ -111,10 +116,13 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
       endereço). Um tenant não pode degradar outro. **(Princípio XIV)**
 - [ ] **T028** Endpoint de reconciliação: dado uma janela, devolver o que foi entregue naquela
       conexão. É o que a T050 do lado do CRM consome. **(FR-013a)**
-- [ ] **T029** Rotas de provisionamento do `gateway-provisioning-v1.md` §3–§8, com as duas correções
-      que o contrato pede: comparação de token em tempo constante (`internal/middleware/token.go:25`
-      usa `!=`) e escopo de admin para provisionar/desprovisionar. **Condicionada a T003** (pode
-      morrer para T014). **(FR-011, FR-012)**
+- [ ] **T029** Rotas de provisionamento do `gateway-provisioning-v1.md` §3–§8 — **o caminho
+      escolhido na T003**, não mais condicional. Com as duas correções que o contrato pede:
+      comparação de token em **tempo constante** (`internal/middleware/token.go:25` usa `!=`,
+      enquanto `admin.go:44` já usa `subtle.ConstantTimeCompare`) e **escopo de admin** para
+      provisionar/desprovisionar — hoje um token único deixa quem envia mensagem apagar instância.
+      `DELETE` idempotente: apagar o que já não existe é `204`, senão o CRM trava com linha que não
+      consegue limpar. **(FR-011, FR-012)**
 
 ---
 
@@ -156,7 +164,7 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
 - [ ] **T042** Traduzir os estados do gateway para o vocabulário da tela; estado desconhecido cai em
       estado seguro e legível — **nunca tela vazia**. **(FR-032)**
 - [ ] **T043** Criar canal tudo-ou-nada: provisionamento falhando não deixa linha órfã no CRM nem
-      instância órfã no provedor. Prova compartilhada com T014/T029. **(FR-033, FR-012)**
+      instância órfã no provedor. **O CRM é o dono da compensação** (T003): recebe o `connection_id` do gateway, grava sua linha, e se a gravação falhar chama `DELETE` no gateway. Prova compartilhada com T029. **(FR-033, FR-012)**
 - [ ] **T044** Convergir as duas portas (onboarding e Central de Conexões) para o mesmo caminho de
       criação — hoje divergem em rota e em formato de nome de sessão. **(FR-034)**
 - [ ] **T045** Exigir papel `admin` nas **duas** portas. Hoje a do onboarding não exige papel nenhum
@@ -221,8 +229,8 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
 ## Ordem e o que trava o quê
 
 ```
-T001 ✅ T002 ✅  emenda + propagação feitas
-T003 ⛔ AGUARDA DECISÃO  ──▶ libera Fase 1 (decide T014 vs T029)
+T001 ✅ T002 ✅ T003 ✅  Fase 0 COMPLETA — Fase 1 liberada
+                        (T003 escolheu a rota HTTP: T014 morta, T029 firme)
 T010-T011  papel + trava       ──▶ T012-T016
 T012-T016  funções             ──▶ T017-T019 (provas)  e  ──▶ T022
 T020-T021  costura             ──▶ T022-T025

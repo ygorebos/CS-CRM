@@ -357,10 +357,15 @@ de versão próprio — e **não** foi feito aqui.
    configuração (Princípio XIV) — sem `localhost`, sem nome de serviço de compose.
 4. **`wa_template_envios` não tem equivalente no CRM.** Ou nasce tabela, ou o registro de envio de
    template se perde na migração dos "demais registros".
-5. **A F1 da spec 004 e o `gateway-provisioning-v1.md` precisam de reescrita** — foram escritos para
-   um gateway dono do próprio armazenamento. O contrato HTTP de provisionamento pode até sobreviver
-   como fachada, mas o §1 dele está agora errado.
-6. **Emenda da constituição** (§7), como ato próprio.
+5. ✅ **RESOLVIDO em 2026-08-08.** A F1 foi reescrita (FR-001 a FR-014) e o §1 do
+   `gateway-provisioning-v1.md` foi marcado como superado. **O provisionamento fica na rota HTTP**
+   (T003, research D6): quem grava `channel_sessions` é o CRM, e o gateway nunca toca essa tabela —
+   a superfície de escrita dele fica em **duas** funções, não quatro.
+6. ✅ **FEITA em 2026-08-08 — constituição v2.3.0.** VII ganhou a quarta superfície com seis travas;
+   XIV explicitou que a ponta de durabilidade do CRM muda de forma, nunca de obrigatoriedade.
+   `CLAUDE.md`, `AGENTS.md` e o `plan-template.md` propagados. ⚠️ **A permissão é condicional**: sem
+   o invariante que reprova grant de tabela (T011) e a varredura de HTTP na função (T016), a
+   superfície volta a ser proibida.
 7. **`DEFERRABLE` de `messages`**: decidir se fica (com `set constraints` em toda função de escrita) ou
    se sai (com a medição que o precedente do `baseline.sql:9124` exige). Não bloqueia; escolher cedo
    evita meia dúzia de funções carregando a linha por herança.

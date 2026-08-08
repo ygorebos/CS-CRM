@@ -3,8 +3,8 @@
 **Spec**: [spec.md](./spec.md) · **Plano**: [plan.md](./plan.md) · **Decisão que governa**:
 [decisao-escrita-direta.md](./decisao-escrita-direta.md)
 
-Seis desconhecidos entraram nesta fase. Cinco fecharam com decisão; o sexto é decisão de **produto**,
-não técnica, e está isolado numa task de Fase 0 (T003).
+Seis desconhecidos entraram nesta fase. **Todos fechados** — os cinco técnicos aqui, e o sexto (D6,
+decisão de produto) pelo dono em 2026-08-08.
 
 ---
 
@@ -107,10 +107,14 @@ copia o motivo junto, e é assim que a regra sobrevive à próxima sessão.
 
 ## D3 — Uma função gorda ou várias finas
 
-**Decisão**: **uma função por operação de negócio**, não uma por tabela. Quatro no total:
-`fn_gateway_ingest_message`, `fn_gateway_update_message_status`, `fn_gateway_provision_connection` e
-o reaproveitamento das três de contato/conversa que **já existem** (`fn_upsert_wa_contact`,
-`fn_upsert_wa_conversation`, `fn_mark_conversation_message`, `baseline.sql:4187-4234`).
+**Decisão**: **uma função por operação de negócio**, não uma por tabela. **Duas** novas —
+`fn_gateway_ingest_message` e `fn_gateway_update_message_status` — mais o reaproveitamento das três
+de contato/conversa que **já existem** (`fn_upsert_wa_contact`, `fn_upsert_wa_conversation`,
+`fn_mark_conversation_message`, `baseline.sql:4187-4234`).
+
+> Eram **quatro** até a D6 ser decidida. Com o provisionamento indo para a rota HTTP do gateway,
+> `fn_gateway_provision_connection` deixou de existir e quem grava `channel_sessions` volta a ser o
+> CRM, pelo caminho dele. Superfície menor sem perder capacidade.
 
 **Rationale**: três razões, e a primeira é a que decide.
 
@@ -172,25 +176,36 @@ banco errado, e o banco errado é de outro produto).
 
 ---
 
-## D6 — Onde a conexão nasce (ABERTO — é decisão de produto)
+## D6 — Onde a conexão nasce
 
-**Status**: **NEEDS DECISION**, isolado na task T003 da Fase 0. Não é desconhecido técnico — os dois
-caminhos funcionam e estão desenhados. É escolha de dono.
+**Decisão**: **(a) rota HTTP no gateway** — escolhida pelo dono do produto em 2026-08-08 (T003).
 
-| Opção | A favor | Contra |
-|---|---|---|
-| **(a)** rota HTTP no gateway (`gateway-provisioning-v1.md` §3-§8) | contrato já escrito; o gateway continua dono da instância do provedor; funciona igual para os dois produtos | mais uma superfície de rede para manter e autenticar |
-| **(b)** função no CRM (`fn_gateway_provision_connection`) | coerente com a decisão de escrita direta; uma superfície só; transação única | o gateway precisaria chamar o provedor **e** o CRM, e o tudo-ou-nada (FR-012) fica com dois donos |
-| **(c)** as duas, com dono declarado por etapa | separa "criar instância no provedor" (gateway) de "criar registro" (CRM) | é a que mais parece certa no papel e a que mais tem chance de virar duas verdades divergentes |
+**Consequência que melhora a mitigação de VII, e não era óbvia**: com (a), quem escreve a linha de
+`channel_sessions` é o **próprio CRM**, pelo caminho que ele já usa hoje para criar canal — service
+role com `organization_id` filtrado de fonte confiável. O gateway devolve o `connection_id` e nunca
+toca essa tabela. Logo `fn_gateway_provision_connection` **não precisa existir**, e a superfície de
+escrita do gateway cai de **quatro funções para duas** (`fn_gateway_ingest_message` e
+`fn_gateway_update_message_status`). Superfície menor é acoplamento menor — o argumento que sustenta
+a quarta superfície fica mais forte, não mais fraco.
 
-**Enquanto não decidir**: T014 (função) e T029 (rotas) estão ambas no `tasks.md`, marcadas como
-condicionadas a T003, e a perdedora morre. Implementar as duas é o desfecho ruim que T003 existe para
-evitar.
+**O tudo-ou-nada passa a ter um dono só, e é o CRM** (FR-012, FR-033): ele chama o gateway, recebe o
+`connection_id`, grava sua linha; se a gravação falhar, ele chama `DELETE` no gateway para desfazer a
+instância. Compensação com um dono é o que a alínea (b) não conseguia oferecer.
 
-**Recomendação para quando for decidir**: **(a)**. O contrato já está escrito e revisado, o gateway
-já é dono da instância do provedor, e o tudo-ou-nada fica com um dono só. A (b) só ganha se o
-provisionamento passar a ser raro o bastante para a viagem extra não importar — e ele acontece
-exatamente no passo 2 do onboarding, que é onde o teto de 10 minutos aperta mais.
+| Opção | A favor | Contra | Desfecho |
+|---|---|---|---|
+| **(a)** rota HTTP no gateway (`gateway-provisioning-v1.md` §3-§8) | contrato já escrito; o gateway continua dono da instância do provedor; funciona igual para os dois produtos | mais uma superfície de rede para manter e autenticar | ✅ **ESCOLHIDA** |
+| **(b)** função no CRM (`fn_gateway_provision_connection`) | coerente com a decisão de escrita direta; uma superfície só; transação única | o gateway precisaria chamar o provedor **e** o CRM, e o tudo-ou-nada (FR-012) fica com dois donos | ❌ descartada |
+| **(c)** as duas, com dono declarado por etapa | separa "criar instância no provedor" (gateway) de "criar registro" (CRM) | é a que mais parece certa no papel e a que mais tem chance de virar duas verdades divergentes | ❌ descartada |
+
+**Efeito no `tasks.md`**: **T014 morre** (a função de provisionamento não nasce) e **T029 deixa de
+ser condicional** (as rotas do contrato são o caminho). A escrita da linha de `channel_sessions` fica
+com o CRM, na T031/T043, que já existiam.
+
+**Por que (a) e não (b)**: o contrato já estava escrito e revisado, o gateway já é dono da instância
+do provedor, e o tudo-ou-nada fica com um dono só. A (b) só ganharia se provisionar fosse raro o
+bastante para a viagem extra não importar — e ele acontece exatamente no passo 2 do onboarding, onde
+o teto de 10 minutos aperta mais.
 
 ---
 

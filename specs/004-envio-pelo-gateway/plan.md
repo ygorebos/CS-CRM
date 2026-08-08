@@ -65,7 +65,7 @@ jornada login → primeira conversa atendida **≤ 10 min** (Princípio VIII).
 - Instância única: mudança destrutiva exige expand/contract; não há versão de escape.
 
 **Scale/Scope**: 39 requisitos funcionais, 12 critérios de sucesso, 58 tasks em 7 fases. Toca 2
-repositórios. **Não** cria tabela; cria 4 funções, 1 papel, 2 migrations (0127, 0128).
+repositórios. **Não** cria tabela; cria **2** funções, 1 papel, 2 migrations (0127, 0128). Eram 4 até a T003 decidir que o provisionamento é rota HTTP no gateway — `channel_sessions` deixou de ser escrita por ele.
 
 ---
 
@@ -129,7 +129,7 @@ specs/004-envio-pelo-gateway/
 ├── data-model.md                    # Fase 1 — funções, papel, vocabulário
 ├── quickstart.md                    # Fase 1 — roteiros de validação
 ├── contracts/
-│   └── gateway-provisioning-v1.md   # §1 superado pela decisão; §2-12 válidos
+│   └── gateway-provisioning-v1.md   # §1 superado pela decisão; §2-12 são O caminho (T003)
 ├── checklists/
 │   └── requirements.md              # conformidade, com o FAIL de VII declarado
 └── tasks.md                         # 58 tasks, 7 fases

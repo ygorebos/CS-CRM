@@ -36,17 +36,25 @@ onde entregar o que chegar nela.
 
 > ⚠️ **Esta seção está desatualizada e é mantida para registro.** Ela assumia um gateway dono do
 > próprio armazenamento. A decisão de 2026-08-08 — [`../decisao-escrita-direta.md`](../decisao-escrita-direta.md) —
-> aponta o fork do gateway para o banco do CRM: conexão, instância, mensagem, conversa e contato
-> passam a ser gravados lá, por **função `security definer` versionada**, com papel Postgres próprio
-> e sem grant de tabela.
+> aponta o fork do gateway para o banco do CRM: **mensagem, conversa e contato** passam a ser
+> gravados lá, por **função `security definer` versionada**, com papel Postgres próprio e sem grant
+> de tabela. A **conexão** (`channel_sessions`) ficou de fora — quem a grava é o CRM, ver abaixo.
 >
 > **O que sobrevive desta seção**: `organization_id` continua sem vir do corpo (resolvido da conexão,
 > §3c da decisão), e o gateway continua sem tocar tabela crua. **O que caiu**: a fronteira de rede e,
 > com ela, o `webhook_events_log` como segunda rede de proteção.
 >
-> **As seções 2 a 12 abaixo seguem válidas** como contrato HTTP de provisionamento, mas o
-> provisionamento passa a ter uma segunda forma possível — `fn_gateway_provision_connection` — e a
-> escolha entre as duas é trabalho aberto (§8 item 5 da decisão).
+> **As seções 2 a 12 abaixo são O caminho de provisionamento** — decidido pelo dono em 2026-08-08
+> (T003 / research D6). A alternativa que chegou a ser desenhada, uma função
+> `fn_gateway_provision_connection` no CRM, foi **descartada**.
+>
+> **Quem grava `channel_sessions` é o CRM**, pelo caminho que ele já usa: chama `POST /v1/connections`
+> aqui, recebe o `connection_id`, grava sua própria linha. O gateway **nunca toca essa tabela** — e é
+> por isso que a superfície de escrita dele ficou em duas funções (mensagem e ACK), não quatro.
+>
+> **A compensação tem um dono só, e é o CRM**: se a gravação da linha falhar depois da instância ter
+> nascido, ele chama o `DELETE` da §7 para desfazer. É o que fecha FR-012 e FR-033 sem partir o
+> tudo-ou-nada entre dois sistemas.
 
 O texto original, para não se perder o motivo de ele ter sido escrito assim:
 
@@ -106,6 +114,7 @@ passos deixam instância órfã quando o segundo falha.
   "label": "Comercial",                // opcional, só diagnóstico
 
   // Para onde ENTREGAR o que chegar nesta conexão. Sem isto a conexão nasce muda.
+  // ⚠️ OBRIGATÓRIO na variante do COTADOR; ver a nota abaixo para a do CRM.
   "delivery": {
     "url": "https://crm.exemplo/api/v1/webhooks/gateway/<webhook_path_token>",
     "format": "envelope_v1",           // único valor aceito em v1
@@ -113,6 +122,18 @@ passos deixam instância órfã quando o segundo falha.
   }
 }
 ```
+
+> **`delivery` na variante do CRM — o que a escrita direta mudou.** O gateway apontado para o banco
+> do CRM **não entrega por webhook**: ele grava pela função. Nessa variante o bloco `delivery` é
+> **opcional**, e o que o toma o lugar dele é o alvo de escrita, que é **configuração do processo**
+> (research D1/D5), não campo de requisição — deixá-lo vir no corpo permitiria a um chamador
+> redirecionar a escrita de uma conexão para outro banco.
+>
+> **A variante do Cotador continua exigindo `delivery`**, e é por isso que o campo não sai do
+> contrato: as duas versões falam a mesma v1. O gateway MUST recusar `delivery` ausente quando a
+> configuração do processo for "entregar por webhook", e MUST ignorá-lo com aviso quando for
+> "escrever por função" — silêncio aqui faria o operador achar que configurou uma entrega que nunca
+> vai acontecer.
 
 **201**
 
@@ -130,8 +151,11 @@ passos deixam instância órfã quando o segundo falha.
 - **`Idempotency-Key` obrigatório.** Repetir a mesma chave devolve a mesma conexão, não uma
   segunda. Sem isso, um timeout do lado do CRM vira duas instâncias no provedor e uma delas
   fica órfã para sempre — e instância órfã custa dinheiro e some do inventário.
-- **Tudo-ou-nada.** Se a instância nasce no provedor e o registro falha, o gateway desfaz a
-  instância antes de responder erro. É o FR-033 da spec.
+- **Tudo-ou-nada, em dois níveis.** (1) Dentro do gateway: instância nascendo e registro falhando,
+  ele desfaz a instância antes de responder erro. (2) **Entre CRM e gateway**: se o `201` volta e o
+  CRM falha ao gravar sua `channel_sessions`, **o CRM** chama o `DELETE` da §7. A compensação tem um
+  dono só — é o que T003 decidiu, e é o que impede a instância órfã que nenhum dos dois lados
+  reconhece como sua. FR-012 e FR-033.
 - O gateway **NÃO** recebe `organization_id`. O dono da conexão é quem apresentou a credencial. O
   corpo nunca decide tenant — mesma regra que a rota de entrada já aplica.
 - O `secret` **nunca** volta em nenhuma resposta, nem em `GET`, nem em log, nem em erro.
