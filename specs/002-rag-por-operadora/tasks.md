@@ -53,9 +53,16 @@ Monorepo Next.js. `lib/` e `workers/` para lógica, `app/app/…` para tela do t
 **Purpose**: destravar o processo e tornar a prova reproduzível. Nada aqui escreve código de
 produto.
 
-- [ ] T001 Abrir o PR da emenda constitucional a partir da branch `docs/constituicao-principio-x-catalogo-curado` (commit `3c2a06b4`) e mergeá-la na `main` — **bloqueia toda a fatia F2 em diante**; sem ela o Constitution Check do plano reprova no gate X
-- [ ] T002 Atualizar `feat/002-rag-por-operadora` com a `main` após o merge da emenda (`git fetch origin && git merge origin/main`), conforme a higiene de branches
-- [ ] T003 [P] Montar o ambiente fresco descrito em `quickstart.md` — Supabase local pg17, `baseline.sql` aplicado, `scripts/bootstrap-owner.ts`, WAHA + Redis via `docker compose`, `pnpm build && pnpm start`, e **`RESEND_API_KEY` ausente**
+> ✅ **Destravado em 2026-08-08.** O PR [#10](https://github.com/ygorebos/CS-CRM/pull/10)
+> (constituição v2.0.0 + v2.1.0) foi mergeado na `main`, e esta branch foi atualizada com ela
+> (merge limpo, sem conflito). O gate X do Constitution Check passa agora sob a regra vigente,
+> não sob uma emenda pendente — **a fatia F2 em diante deixou de estar bloqueada**.
+> O PR [#11](https://github.com/ygorebos/CS-CRM/pull/11) leva o planejamento e a F1, e segue
+> aberto de propósito: a F1 ainda não foi provada pela tela.
+
+- [X] T001 Abrir o PR da emenda constitucional a partir da branch `docs/constituicao-principio-x-catalogo-curado` (commit `3c2a06b4`) e mergeá-la na `main` — **bloqueia toda a fatia F2 em diante**; sem ela o Constitution Check do plano reprova no gate X
+- [X] T002 Atualizar `feat/002-rag-por-operadora` com a `main` após o merge da emenda (`git fetch origin && git merge origin/main`), conforme a higiene de branches
+- [X] T003 [P] Montar o ambiente fresco descrito em `quickstart.md` — Supabase local pg17, `baseline.sql` aplicado, `scripts/bootstrap-owner.ts`, WAHA + Redis via `docker compose`, `pnpm build && pnpm start`, e **`RESEND_API_KEY` ausente**
 - [X] T004 [P] Registrar a linha de jornada `[P0]` "a instalação já responde assistência" em `docs/testing/user-journey-map.md`, com o aviso de que ela **não é vigiada por gate** (o check `e2e` não é obrigatório e a spec irmã `vps-fresh-onboarding` está fora do CI — issue #63)
 - [ ] T005 [P] Abrir issue de alinhamento para a divergência já reportada: `docs/current-state.md` afirma "81 migrations até 0092" e o repositório tem até **0115**
 
@@ -99,7 +106,7 @@ que se descobre, antes de qualquer partição.
 - [X] T012 [P] [US2] Teste da classificação determinística em `lib/agent-engine/guardrails/assistance-grounding.test.ts` — inclusive o viés de A-03: na dúvida, classifica como assistência
 - [X] T013 [P] [US2] Teste de que busca indisponível é tratada como ausência de lastro em `lib/agent-engine/agent/search-knowledge.test.ts` (FR-013)
 - [X] T014 [P] [US2] Teste de **efeito** do guardrail `rag_must_hit` em `tests/unit/rag-must-hit-efeito.test.ts` — prova de que ligar a opção muda o comportamento, não de que o valor foi gravado (FR-015, SC-012)
-- [ ] T015 [P] [US2] Spec E2E da jornada de recusa e escalação em `tests/e2e/assistencia-sem-lastro.spec.ts`, dirigindo o frontend e conferindo o item na Central
+- [X] T015 [P] [US2] Spec E2E da jornada de recusa e escalação em `tests/e2e/assistencia-sem-lastro.spec.ts`, dirigindo o frontend e conferindo o item na Central
 
 ### Implementation for User Story 2
 
@@ -122,28 +129,37 @@ que se descobre, antes de qualquer partição.
 - [X] T130 [US2] **Fazer o agente padrão nascer com a exigência de lastro ligada** em `app/actions/onboarding/createDefaultAgent.ts` — hoje ele não grava guardrail nenhum, e T022 faz o gate nascer desarmado; sem esta tarefa a instalação fresca **não recusa**, e FR-030, SC-001, SC-011 e SC-017 são falsos. Teste em `app/actions/onboarding/createDefaultAgent.test.ts` conferindo que `rag_must_hit` sai gravado
 - [X] T032 [US2] **Sabotar e confirmar**: desarmar o gate em `lib/agent-engine/guardrails/before-send.ts` e verificar que os testes de T011–T014 ficam **vermelhos**; reverter. Teste que passa com a implementação sabotada não é teste (Princípio XI)
 - [ ] T131 [US2] **Medir SC-001 e SC-002**: rodar a bateria de 20 perguntas de assistência sem lastro num tenant vazio, anotar recusas, escalações e afirmações factuais, repetir com a busca derrubada, e registrar os três números em `.superpowers/evidence/` — critério declarado sem execução que o produza é critério que ninguém verificou
-- [ ] T033 [US2] Rodar `pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm test:unit && pnpm test:shell && pnpm build` e `pnpm test:db`, e registrar evidência da jornada em `.superpowers/evidence/`
+- [X] T033 [US2] Rodar `pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm test:unit && pnpm test:shell && pnpm build` e `pnpm test:db`, e registrar evidência da jornada em `.superpowers/evidence/`
 
 **Checkpoint**: o agente para de inventar. Entregável e demonstrável sozinho, sem catálogo nenhum.
 
 ### Estado desta fase — 2026-08-08
 
-**28 de 31 tarefas fechadas.** Portões rodados nesta árvore: `typecheck` limpo, `lint` com 0
+**30 de 31 tarefas fechadas.** Portões rodados nesta árvore: `typecheck` limpo, `lint` com 0
 erros, `lint:channels` sem dívida nova, **`test:unit` 2981 verdes**, `test:shell` verde,
 **`test:db` 477 verdes** (Postgres descartável nascido do `baseline.sql`) e `build` de
-produção completo. Sabotagem confirmada em dois eixos (gate desarmado: 12 vermelhas;
-classificação cega: 14 vermelhas), revertida nos dois. Evidência em
-`.superpowers/evidence/002-f1-lastro/RELATORIO.md`.
+produção completo. Evidência em `.superpowers/evidence/002-f1-lastro/RELATORIO.md`.
 
-**As três que ficaram abertas dependem do ambiente fresco (T003), não de código:**
+**Provado pela tela**, em ambiente fresco montado do zero: Supabase local pg17 em portas
+próprias (o de dev da máquina e o WAHA de outro worktree ficaram intocados), cadeia de
+migrations confirmada como **não-subível** (0 tabelas), `baseline.sql` em modo install
+(**97 tabelas**), `bootstrap-owner.ts`, build de produção **sem chave de IA e sem
+`RESEND_API_KEY`**. `tests/e2e/assistencia-sem-lastro.spec.ts`: **4 casos, 4 verdes**.
 
-- **T003** — o ambiente estilo VPS não foi montado nesta sessão.
-- **T015** — a spec E2E precisa dele para existir.
-- **T131** — SC-001 e SC-002 estão provados por unidade e por sabotagem, **não por bateria
-  em conversa real**. Continua sendo dívida declarada, não item concluído.
+**Sabotagem confirmada em três eixos**, revertida nos três: gate desarmado (12 vermelhas),
+classificação cega (14 vermelhas), aviso não criado (3 das 4 do E2E — a quarta seguiu verde
+porque a sabotagem não a alcançava, e isso é o que distingue sabotagem cirúrgica de
+sabotagem que esconde).
 
-**A fatia F1 não pode ser declarada "pronta" pela doutrina de QA Visual**: nada aqui foi
-provado pela tela. O que existe é prova de backend e de comportamento de cadeia.
+**A tela ensinou algo que o desenho não sabia**: a porta da Central não é o item "Alertas"
+da barra lateral — o grupo `ia` do registry não renderiza para o papel `agent`. A porta real
+é o sino do cabeçalho, com contador. A primeira versão do spec falhou por assumir a porta
+errada, que é exatamente o tipo de erro que só a prova pela tela pega.
+
+**A única aberta é a T131**, e ela depende de chave de IA: SC-001 e SC-002 seguem provados
+por unidade e sabotagem, **não por bateria de 20 perguntas em conversa real**. O veto em si
+também não foi exercido pela tela pelo mesmo motivo — o que a tela prova é o que o corretor
+vê **depois** dele.
 
 ---
 

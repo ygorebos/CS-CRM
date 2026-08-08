@@ -65,18 +65,62 @@ e **nenhum runtime ler**.
 
 ---
 
-## O que NÃO foi medido
+## A prova pela tela — feita em 2026-08-08
 
-**Nada disto foi provado pela tela.** A doutrina de QA Visual é explícita: `curl` e teste
-unitário validam o backend, não a experiência de quem instala. Esta fatia está provada por
-unidade e por sabotagem — não pela tela.
+Ambiente fresco montado do zero, pelo caminho do `install.sh`, e **isolado**: o Supabase de
+dev da máquina ocupa 54321/54322 e o WAHA de pé pertence a outro worktree, então o stack
+desta prova subiu em 544xx. Nada de ninguém foi derrubado.
+
+| Passo | Resultado |
+|---|---|
+| Supabase local pg17 pela CLI, portas próprias | 9 contêineres |
+| Cadeia de migrations do zero | **não sobe** — 0 tabelas, exatamente o que a doutrina afirma |
+| `baseline.sql` em modo install (`ON_ERROR_STOP=1`) | **97 tabelas** |
+| `bootstrap-owner.ts` | dono + org + super-admin |
+| `pnpm e2e:build` + `next start` | produção, com `RESEND_API_KEY` e chave de IA **ausentes** |
+
+`tests/e2e/assistencia-sem-lastro.spec.ts` — **4 casos, 4 verdes**, dirigindo o browser:
+
+1. o aviso chega pela porta que o corretor já usa, **com contador**
+2. o aviso carrega os três campos de FR-012 — pergunta original, operadora, motivo e o que fazer
+3. o aviso **não fala a língua do sistema**: zero ocorrências de `guardrail`, `gate`, `grounding`, `chunk`, `embedding`, `rag_must_hit`
+4. a conversa saiu do automático e está esperando uma pessoa
+
+Capturas em `alertas-com-aviso-de-falta-de-material.png`,
+`aviso-com-pergunta-operadora-e-motivo.png` e `conversa-de-volta-para-a-fila-humana.png`.
+
+### O que a tela ensinou, e o teste não sabia
+
+A porta da Central **não é** o item "Alertas" da barra lateral: o grupo `ia` do
+`lib/navigation/registry.ts` não renderiza para o papel `agent` — quem atende no dia a dia
+não veria o item nenhum. A porta real é o **sino do cabeçalho**, presente em toda tela e já
+com a contagem. A primeira versão do spec falhou por assumir a porta errada, e é por isso
+que a prova pela tela não é substituível por asserção de banco: ela mede o caminho que a
+pessoa percorre, não o que o desenho supôs.
+
+### Sabotagem da prova visual
+
+`escalarAssistenciaSemLastro` alterada para não criar o aviso: **3 das 4 vermelhas**. A
+quarta (a conversa volta à fila) permaneceu verde — e está correto, porque a sabotagem
+atingiu só o aviso. Uma sabotagem que derrubasse as quatro esconderia que cada caso vigia
+uma coisa diferente. Revertida, 4 verdes de novo.
+
+### O seed chama a função real
+
+`scripts/seed-e2e-assistencia-sem-lastro.ts` chama `escalarAssistenciaSemLastro`, não um
+`INSERT` equivalente — mesmo princípio do `seed-e2e-escalacao.ts`. Um seed que montasse o
+estado na mão provaria o teste contra uma cópia da regra, e no dia em que a função mudasse
+o teste seguiria verde.
+
+---
+
+## O que ainda NÃO foi medido
 
 | Item | Estado |
 |---|---|
-| Ambiente fresco estilo VPS (Supabase local pg17 + `baseline.sql` + `bootstrap-owner.ts` + WAHA + Redis, `RESEND_API_KEY` ausente) | **não montado** |
-| `tests/e2e/assistencia-sem-lastro.spec.ts` (T015) | **não escrito** — depende do ambiente acima |
-| SC-001 e SC-002 medidos numa bateria real de 20 perguntas (T131) | **não medidos** — o que existe é a prova unitária do veto, não a contagem em conversa real |
-| J9.1 a J9.5 do `user-journey-map.md` | **pendentes**, registradas lá como pendentes |
+| **O veto em si, pela tela** | a suíte roda **sem chave de IA** (é o estado de um primeiro deploy). Para o gate decidir é preciso um turno com modelo. O veto está provado por unidade e por sabotagem; o que a tela prova é o que o corretor vê **depois** dele |
+| **SC-001 e SC-002** numa bateria real de 20 perguntas (T131) | **não medidos** — depende da mesma chave |
+| J9.1 a J9.3 do `user-journey-map.md` | pendentes; J9.4 e J9.5 passaram a estar cobertas |
 
 E a advertência que precisa sobreviver a esta sessão: **a regressão dessas jornadas não é
 vigiada por job nenhum.** O check `e2e` não é obrigatório na branch protection, e a spec da
