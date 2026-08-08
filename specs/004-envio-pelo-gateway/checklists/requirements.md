@@ -42,16 +42,16 @@
 | **II** — nada é ilha | FR-023 (queda vira alerta **e** aviso na Central), FR-043 (auditoria de toda mudança de canal). O Living System Checklist completo é do `plan.md` |
 | **III** — schema muda por migration | FR-040. Reversibilidade por canal em FR-041 é o caminho de volta declarado |
 | **IV** — prova pela tela | US4 e SC-006 exigem conta nova, estado vazio, cronometrado; SC-010 exige o anexo abrindo **no aparelho** |
-| **V** — evento na fila | FR-022: estado com dono declarado, nunca órfão. A lacuna herdada está nomeada: hoje só a direção de **entrada** tem fila durável |
+| **V** — evento na fila | FR-022: estado com dono declarado, nunca órfão. FR-010: função MUST NOT fazer HTTP — efeito colateral sai por `event_log`. FR-008 põe o pedido de turno do agente na **mesma transação** do insert, fechando a janela em que a mensagem existe e ninguém a atende |
 | **VI** — contrato de API | FR-018: credencial em cabeçalho, nunca em query string |
-| **VII** — interoperável por contrato | ⚠️ **CONFLITO ABERTO.** A decisão de 2026-08-08 põe o gateway escrevendo no banco do CRM, contra o texto vigente. FR-001 a FR-003 preservam a *intenção* (contrato versionado, papel sem grant de tabela, schema não vaza) e FR-004 preserva a outra metade (tenant nunca vem do corpo). Mas o texto do princípio **precisa de emenda** — é a T001 do `tasks.md`, e até ela existir esta linha é uma não-conformidade declarada, não resolvida |
+| **VII** — interoperável por contrato | ⚠️ **NÃO-CONFORMIDADE ABERTA.** VII não proíbe "acoplamento" em geral: **enumera** as superfícies permitidas — API REST `/api/v1/`, MCP, webhooks. RPC PostgREST **não é nenhuma das três**, então nem o desenho mais cuidadoso declara conformidade por argumento. FR-001 a FR-004 preservam a *intenção* (função versionada, papel sem grant de tabela, tenant resolvido no banco), e é isso que torna a emenda defensável — mas a emenda tem de **nomear e delimitar a quarta superfície**, não só afrouxar a palavra "banco". T001 do `tasks.md`. Até lá, esta linha é não-conformidade declarada |
 | **VIII** — corretor em 10 minutos | US4 é o passo 2 do onboarding. SC-006 exige contagem de passos **idêntica** |
 | **IX** — vender ou assistir | Declarado no cabeçalho: serve às duas |
 | **X** — operadora é dado curado | N/A — feature de transporte |
 | **XI** — teste que prova e vigia | SC-012 exige sabotagem confirmada em **cada** teste novo. SC-005 exige varredura mecânica, não inspeção |
 | **XII** — contexto antes de ação | Esta sessão leu a constituição (v2.2.0), o `CLAUDE.md` e os artefatos da spec 001 antes de escrever, e releu depois da compactação de contexto |
 | **XIII** — cobrança mora no Cotador | Assumption explícita e item em "Fora de escopo" |
-| **XIV** — gateway único e sem réplica | FR-018 (endereço é configuração), FR-023 (queda visível), FR-042 (só envelope). **A frente 1 existe justamente porque XIV proíbe o atalho** de o CRM escrever no banco do outro produto — e isso **continua valendo** na direção CRM→Cotador; o que a decisão de 2026-08-08 mudou foi a direção oposta. O que XIV cobra a mais agora é FR-013: sem réplica e sem o `webhook_events_log` no caminho, a fila em disco do gateway virou a **única** rede contra perda |
+| **XIV** — gateway único e sem réplica | FR-018 (endereço é configuração), FR-023 (queda visível), FR-042 (só envelope). **A frente 1 existe justamente porque XIV proíbe o atalho** de o CRM escrever no banco do outro produto — e isso **continua valendo** na direção CRM→Cotador; o que a decisão de 2026-08-08 mudou foi a direção oposta. O que XIV cobra a mais agora são **as duas pontas de durabilidade**, que ele exige por escrito: FR-013 (fila em disco do gateway, com prova de reinício, teto e alarme) **e** FR-013a (reconciliação periódica do lado do CRM). A versão anterior desta spec deixava só a primeira e **derrubava um MUST** — corrigido em 2026-08-08 |
 
 ## Notas
 

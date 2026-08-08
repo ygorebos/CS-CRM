@@ -269,8 +269,9 @@ cada um no aparelho.
 - **O gateway aceita e o provedor recusa depois.** A resposta síncrona do gateway só diz "o
   provedor aceitou" e devolve um id; a falha real pode chegar minutos depois, no envelope. O CRM
   precisa aceitar que `sent` é provisório.
-- **`connection_id` apontando para conexão de outra organização.** O gateway resolve o
-  `escritorio_id` a partir da conexão, nunca do corpo — mas quem escolhe qual `connection_id`
+- **`connection_id` apontando para conexão de outra organização.** O gateway resolve o dono a partir
+  da conexão, nunca do corpo — `organization_id` no fork do CRM, `escritorio_id` no do Cotador
+  (tradução na §3c da [decisão](decisao-escrita-direta.md)) — mas quem escolhe qual `connection_id`
   mandar é o CRM. Se ele mandar o errado, a mensagem sai pelo número errado, para o cliente certo.
   Essa é a pior falha possível desta feature.
 - **Duas jornadas de conexão divergentes.** Onboarding e Central de Conexões hoje criam sessão por
@@ -314,7 +315,13 @@ cada um no aparelho.
   qual a mensagem chegou (`channel_sessions.gateway_connection_id`). O corpo da chamada MUST NOT
   decidir tenant — mesma regra do recebimento de hoje.
 - **FR-005**: Conexão inexistente, arquivada ou de outra organização MUST recusar a escrita com erro
-  distinguível de falha transitória, para o gateway não retentar para sempre o que nunca vai passar.
+  **definitivo**, distinguível de falha transitória, para o gateway não retentar para sempre o que
+  nunca vai passar. A taxonomia MUST ser explícita e ter só duas classes no contrato:
+  **definitivo** (conexão desconhecida, arquivada, de outro dono, corpo inválido — o gateway
+  descarta e registra) e **transitório** (banco indisponível, tempo esgotado, conflito de
+  serialização — o gateway retenta com recuo). Erro sem classe declarada MUST ser tratado como
+  transitório pelo gateway — errar para o lado de retentar perde menos que errar para o lado de
+  descartar.
 
 **Idempotência**
 
@@ -333,7 +340,7 @@ cada um no aparelho.
   NOT ser usada: morrer no meio deixa mensagem sem atendimento e sem ninguém perceber.
 - **FR-009**: O eco do próprio envio MUST NOT pedir turno de agente — pedir faria o agente responder
   a si mesmo.
-- **FR-010**: Nenhuma função desta frente MUST fazer HTTP. Efeito colateral sai por `event_log`,
+- **FR-010**: Função desta frente MUST NOT fazer HTTP. Efeito colateral sai por `event_log`,
   consumido por worker (anti-pattern 9).
 
 **Ciclo de vida da conexão**
@@ -344,12 +351,36 @@ cada um no aparelho.
 - **FR-012**: A criação MUST ser tudo-ou-nada: instância criada no provedor com registro falhando
   MUST desfazer a instância antes de reportar erro.
 
-**Durabilidade — o que a decisão concentrou**
+> **FR-011/FR-012 e FR-030/FR-033/FR-036 descrevem a mesma coisa por lados diferentes, de
+> propósito.** A F1 declara a **capacidade** (existe caminho, e ele é atômico); a F3 declara a
+> **jornada** (o corretor consegue pelo tela, sem passo a mais). Uma pode passar com a outra
+> falhando — capacidade sem tela é backend mudo, tela sem capacidade é botão que mente. Por isso
+> são requisitos separados e não uma duplicação a fundir. **A prova, porém, é compartilhada**:
+> quem satisfaz FR-012 satisfaz o backend de FR-033, e o teste de tudo-ou-nada roda uma vez só.
 
-- **FR-013**: Com o `webhook_events_log` fora do caminho do gateway, a fila em disco do gateway
-  passa a ser a **única** rede contra perda. Ela MUST sobreviver a reinício do processo, MUST ter
-  teto de tamanho declarado e MUST alarmar quando parar de drenar. Sem isto a decisão troca duas
-  redes por nenhuma.
+**Durabilidade — as duas pontas, porque o Princípio XIV exige as duas**
+
+> A versão anterior deste bloco dizia que a fila do gateway passava a ser "a **única** rede contra
+> perda". Isso **contraria o Princípio XIV por escrito**, não apenas de espírito: ele exige
+> *"entrega com retentativa durável e fila persistida em disco do lado do gateway, **e dreno
+> periódico do lado do CRM**"*. Derrubar a ponta do CRM é derrubar um MUST. Corrigido abaixo.
+
+- **FR-013**: A fila em disco do gateway MUST sobreviver a reinício do processo, MUST ter teto de
+  tamanho declarado e MUST alarmar quando parar de drenar. É a ponta de **empurrar**.
+- **FR-013a**: O CRM MUST ter uma **reconciliação periódica** que pergunta ao gateway o que ele
+  entregou numa janela e detecta o que falta, gravando o que faltar pelo mesmo caminho da ingestão
+  normal (idempotente por FR-006, então reconciliar duas vezes não duplica). É a ponta de **puxar**,
+  e é o que o Princípio XIV chama de dreno do lado do CRM.
+
+  **Por que puxar não é redundância de empurrar**: a fila do gateway só protege contra o CRM estar
+  fora do ar. Não protege contra o gateway perder a fila, contra a entrega ser aceita e a transação
+  falhar depois, nem contra defeito no próprio empurrador. A ponta que puxa é a única que enxerga
+  mensagem que **nunca chegou a existir** do lado do CRM — e essa é exatamente a falha que o
+  usuário não tem como detectar, pela qual XIV existe.
+
+  A janela de reconciliação MUST cobrir com margem o maior tempo tolerado de indisponibilidade do
+  CRM, e a divergência encontrada MUST virar alerta — reconciliar em silêncio esconde justamente o
+  defeito que se queria medir.
 
 **Enquanto não existir**
 
@@ -382,7 +413,10 @@ cada um no aparelho.
 - **FR-023**: Queda ou indisponibilidade do gateway MUST virar alerta para a operação **e** aviso
   na Central para o usuário (Princípio XIV). Silêncio é proibido.
 - **FR-024**: Mídia MUST ser entregue ao gateway por referência de endereço, não embutida no corpo,
-  e a validade dessa referência MUST cobrir com folga o tempo de busca pelo provedor.
+  e a validade dessa referência MUST ser de **no mínimo 1 hora** a partir da emissão. O número não é
+  arbitrário: cobre a retentativa do gateway (fila em disco, FR-013) somada ao tempo de busca do
+  provedor, com margem para o CRM ter reiniciado no meio. Referência que expira antes vira anexo
+  que não abre no celular do cliente — e o CRM não fica sabendo, porque para ele o envio deu certo.
 - **FR-025**: O envio para conversa de grupo MUST permanecer impedido pelo caminho novo, com o
   mesmo desfecho de hoje.
 

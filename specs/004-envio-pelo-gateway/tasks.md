@@ -1,6 +1,8 @@
 # Tasks — Envio e conexão pelo gateway (spec 004)
 
 **Escrito em**: 2026-08-08, já sob a [decisão de escrita direta](decisao-escrita-direta.md).
+**Revisado** no mesmo dia pela análise cruzada, que achou 18 requisitos sem executor — as Fases 3 a
+6 saíram dessa revisão.
 
 **Numeração de migrations**: começa em **0127**. 0119–0122 foram gastas pela spec 001; 0123–0126
 estão **reservadas** pela spec 002 (`002-rag-por-operadora/tasks.md`). Conferir `ls
@@ -9,56 +11,74 @@ supabase/migrations/` antes de criar arquivo — colisão de número já mordeu 
 **Doutrina que vale em toda task de schema**: migration versionada **+** apêndice idempotente no
 `baseline.sql` **+** linha no `MANIFEST.md`. Os três, sempre. `pnpm test:db` local antes do PR.
 
+**Doutrina que vale em toda task de teste**: o teste só conta depois de ficar **vermelho sob
+sabotagem** (Princípio XI, SC-012). Cada fase termina com sua task de sabotagem — elas não são
+opcionais nem agrupáveis no fim.
+
 ---
 
-## Fase 0 — Emenda de doutrina (BLOQUEIA tudo abaixo)
+## Fase 0 — Decisões que bloqueiam (nenhuma é código)
 
-Não é zelo: as tasks da Fase 1 contrariam texto vigente com autoridade acima do `CLAUDE.md`.
-Implementar antes de emendar deixa o repo inconsistente consigo mesmo e o próximo agente reverte.
-
-- [ ] **T001** Emendar o Princípio VII da constituição (`/speckit-constitution`, versão própria):
-      trocar "o gateway NUNCA escreve no banco do CRM" pela redação que sobrevive — *o gateway nunca
-      toca tabela do CRM; escreve só por função versionada, com papel próprio, e nunca decide tenant
-      pelo corpo*. Ver §7 da decisão para o argumento.
+- [ ] **T001** Emendar a constituição (`/speckit-constitution`, versão própria). **Dois princípios,
+      não um** — e a análise cruzada achou que só citar VII era insuficiente:
+      - **VII**: não basta afrouxar "acesso direto ao banco". VII **enumera** as superfícies
+        permitidas (API REST `/api/v1/`, MCP, webhooks) e RPC PostgREST não é nenhuma. A emenda tem
+        de **nomear e delimitar a quarta superfície**: função `security definer` versionada, papel
+        dedicado sem grant de tabela, tenant resolvido dentro do banco, e quem pode usá-la.
+      - **XIV**: reler antes de concluir que só VII muda. A spec passou a cumpri-lo (FR-013 +
+        FR-013a), mas a emenda tem de deixar claro que as **duas** pontas de durabilidade seguem
+        obrigatórias quando o gateway escreve direto.
 - [ ] **T002** Refletir a emenda em `CLAUDE.md` (seção Gateway + anti-pattern 15) e em `AGENTS.md`.
+- [ ] **T003** **Desempatar quem provisiona** — item 5 do §8 da decisão, hoje em aberto e a causa de
+      T014 e T029 fazerem a mesma coisa por caminhos diferentes. Escolher: (a) rota HTTP no gateway
+      (`gateway-provisioning-v1.md`), (b) função no CRM (`fn_gateway_provision_connection`), ou
+      (c) as duas com dono declarado. **Registrar a escolha no contrato**; a task perdedora morre.
 
 ---
 
-## Fase 1 — Superfície de escrita no banco do CRM
+## Fase 1 — Superfície de escrita no banco do CRM (F1)
 
-- [ ] **T010** Criar papel `gateway_writer` na migration `<ts>_0127_gateway_writer.sql`: `nologin`
-      não serve (o gateway autentica), zero grant de tabela, `EXECUTE` concedido só nas funções das
-      tasks abaixo. Apêndice no baseline + MANIFEST.
-- [ ] **T011** Invariante em `tests/invariants/` que **reprova** se `gateway_writer` tiver qualquer
-      privilégio em `information_schema.role_table_grants`. É a trava que impede o acoplamento
-      voltar por acidente (FR-002).
-- [ ] **T012** `fn_gateway_ingest_message` na migration `<ts>_0128_gateway_escrita.sql`. Esqueleto em
-      §4 da decisão. Obrigatórios, e cada um tem um motivo medido:
-      - resolve `organization_id` de `channel_sessions.gateway_connection_id` (FR-004);
+- [ ] **T010** Papel `gateway_writer` na migration `<ts>_0127_gateway_writer.sql`: zero grant de
+      tabela, `EXECUTE` só nas funções desta fase. Apêndice no baseline + MANIFEST. **(FR-002)**
+- [ ] **T011** Invariante que **reprova** se `gateway_writer` tiver qualquer privilégio em
+      `information_schema.role_table_grants`. É a trava que impede o acoplamento voltar por
+      acidente. **(FR-002)**
+- [ ] **T012** `fn_gateway_ingest_message` na migration `<ts>_0128_gateway_escrita.sql`. Esqueleto na
+      §4 da decisão. Cada item tem motivo medido:
+      - resolve `organization_id` de `channel_sessions.gateway_connection_id` **(FR-004)**;
       - `set constraints public.messages_org_external_id_unique immediate` **antes** do insert
-        (FR-007 — sem isso o handler nunca dispara);
-      - `exception when unique_violation` devolve o id existente + `duplicada = true` (FR-006);
-      - emite `ai_agent.dispatch_requested` na mesma transação, só para inbound e só se não for eco
-        (FR-008, FR-009);
-      - `revoke execute ... from public, anon` + `grant ... to gateway_writer` (FR-003).
-- [ ] **T013** `fn_gateway_update_message_status` — o ACK. Portar a guarda de não-regressão de
+        **(FR-007)** — sem isso o handler nunca dispara;
+      - `exception when unique_violation` devolve o id existente + `duplicada = true` **(FR-006)**;
+      - emite `ai_agent.dispatch_requested` na mesma transação, só inbound e só se não for eco
+        **(FR-008, FR-009)**;
+      - `revoke execute ... from public, anon` + `grant ... to gateway_writer` **(FR-003)**.
+- [ ] **T013** Taxonomia de erro das funções: **definitivo** (conexão desconhecida, arquivada, de
+      outro dono, corpo inválido) vs **transitório** (banco fora, tempo esgotado, conflito de
+      serialização), com erro sem classe caindo em transitório. É o que decide se o gateway retenta
+      para sempre ou descarta cedo demais. **(FR-005)**
+- [ ] **T014** `fn_gateway_provision_connection` — nasce a `channel_sessions` com
+      `gateway_connection_id`, `organization_id` e `ingest_path`. **Condicionada a T003** (pode
+      morrer para T029). **(FR-011)**
+- [ ] **T015** `fn_gateway_update_message_status` — o ACK. Portar a guarda de não-regressão de
       `lib/gateway/ingest.ts:278-340` (`ORDEM_DO_ESTADO`): estado que não avança é ignorado com
       sucesso, `failed` sempre passa. Sem a guarda, um ACK atrasado apaga um `read` com um `sent`.
-- [ ] **T014** `fn_gateway_provision_connection` — nasce a `channel_sessions` com
-      `gateway_connection_id`, `organization_id` e `ingest_path` (FR-011). Tudo-ou-nada com a
-      instância do provedor é responsabilidade do chamador (T031).
-- [ ] **T015** Teste de isolamento entre 2 organizações para as três funções novas: conexão da org A
-      **não** consegue escrever mensagem na org B, nem lendo id de fora. Sabotar a resolução de
-      tenant e ver o teste ficar vermelho — sem isso o teste não é prova (Princípio XI).
-- [ ] **T016** Teste que prova a idempotência ponta a ponta: mesma `external_id` duas vezes devolve o
-      mesmo id, `duplicada = true` na segunda, **uma** linha em `messages` e **um** dispatch em
-      `event_log`. Sabotar removendo o `set constraints` e ver a transação morrer no commit.
+      **(FR-021, FR-022)**
+- [ ] **T016** Invariante que varre as funções desta fase e reprova qualquer chamada HTTP
+      (`http`, `pg_net`, `net.http_*`) — anti-pattern 9. **(FR-010)**
+- [ ] **T017** [TEST] Isolamento entre 2 organizações nas funções novas: conexão da org A **não**
+      escreve na org B, nem passando id de fora. **(FR-004)**
+- [ ] **T018** [TEST] Idempotência ponta a ponta: mesma `external_id` duas vezes devolve o mesmo id,
+      `duplicada = true` na segunda, **uma** linha em `messages`, **um** dispatch em `event_log`.
+      **(FR-006, FR-007, FR-008)**
+- [ ] **T019** [SABOTAGEM] Provar que T017 e T018 vigiam: remover o `set constraints` e ver a
+      transação morrer no commit; trocar a resolução de tenant por leitura do corpo e ver T017 ficar
+      vermelho. **(SC-012)**
 
 ---
 
 ## Fase 2 — O fork do gateway (`/root/PROJETOS/gateway_go`)
 
-Recomendação de forma: **um repo, dois builds** (§5 da decisão), não fork literal.
+Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal.
 
 - [ ] **T020** Extrair a camada de dados para interface (`internal/store`), com a implementação atual
       (Cotador) como primeira instância. Sem mudança de comportamento — commit próprio, verde antes
@@ -67,55 +87,153 @@ Recomendação de forma: **um repo, dois builds** (§5 da decisão), não fork l
       (`escritorio_id`→`organization_id`, `inbox_mensagens`→`messages`, `wamid`→`external_id`…).
 - [ ] **T022** Trocar o único upsert cru (`internal/processor/mensagem.go:100`) por chamada a
       `fn_gateway_ingest_message`. **É o ponto que não sobrevive à mudança de alvo sem reescrita** —
-      ver §2 da decisão.
-- [ ] **T023** Seleção da implementação por configuração no start, com falha explícita se ambígua.
+      §2 da decisão. **(FR-001)**
+- [ ] **T023** Consumir a taxonomia da T013: definitivo descarta e registra, transitório retenta com
+      recuo. Erro sem classe = transitório. **(FR-005)**
+- [ ] **T024** Seleção da implementação por configuração no start, com falha explícita se ambígua.
       Endereço do banco é configuração — sem `localhost`, sem nome de serviço de compose (XIV).
-- [ ] **T024** Fila em disco: prova de sobrevivência a reinício, teto de tamanho, alarme quando para
-      de drenar (FR-013). **Não é polimento** — virou a única rede contra perda.
-- [ ] **T025** Rotas de provisionamento do `gateway-provisioning-v1.md` §3–§8, com as duas correções
+- [ ] **T025** Fila em disco: sobrevive a reinício, teto de tamanho declarado, alarme quando para de
+      drenar. **Não é polimento** — é metade do que XIV exige. **(FR-013)**
+- [ ] **T026** [TEST] Matar o gateway com a fila cheia, subir de novo, provar que **nada** se perdeu
+      e nada duplicou. **(FR-013, SC-011)**
+- [ ] **T027** Teto de taxa **por conexão** (não global, não por IP — todas as entregas vêm do mesmo
+      endereço). Um tenant não pode degradar outro. **(Princípio XIV)**
+- [ ] **T028** Endpoint de reconciliação: dado uma janela, devolver o que foi entregue naquela
+      conexão. É o que a T050 do lado do CRM consome. **(FR-013a)**
+- [ ] **T029** Rotas de provisionamento do `gateway-provisioning-v1.md` §3–§8, com as duas correções
       que o contrato pede: comparação de token em tempo constante (`internal/middleware/token.go:25`
-      usa `!=`) e escopo de admin para provisionar/desprovisionar.
+      usa `!=`) e escopo de admin para provisionar/desprovisionar. **Condicionada a T003** (pode
+      morrer para T014). **(FR-011, FR-012)**
 
 ---
 
 ## Fase 3 — CRM: envio pelo gateway (F2)
 
-- [ ] **T030** Adapter de envio atrás do seam `getAdapter(provider)`, fail-closed. Nenhuma feature do
-      CRM passa a nomear provedor (FR-011 da F2).
-- [ ] **T031** Criação de canal chama o provisionamento em vez de `waha.startSession`; grava
-      `gateway_connection_id`; desfaz a instância se o registro falhar (FR-012).
-- [ ] **T032** `lib/channels/session-ref.ts`: união ganha o membro do gateway (hoje `waha`,
-      `meta_cloud`).
-- [ ] **T033** Recusar criação de canal de gateway com erro legível enquanto a Fase 2 não estiver de
-      pé (FR-014). Entra **antes** do resto da Fase 3.
-- [ ] **T034** Tela de QR consome `qr_code` + `expires_at` em vez de proxiar bytes do WAHA — para o
-      corretor parar de olhar QR morto achando que o celular dele é que está ruim.
+- [ ] **T030** Recusar criação de canal de gateway com erro legível enquanto a Fase 2 não estiver de
+      pé. **Entra antes de tudo nesta fase.** **(FR-014)**
+- [ ] **T031** Adapter de envio atrás do seam `getAdapter(provider)`, fail-closed. Nenhuma feature do
+      CRM passa a nomear provedor. **(FR-015, FR-016)**
+- [ ] **T032** Resolver a conexão de destino do próprio canal, nunca de corpo de requisição. É o
+      pior caso da feature (Edge Cases: mensagem sai pelo número de outra organização).
+      **(FR-017)**
+- [ ] **T033** Credencial em cabeçalho, nunca em query string; endereço do gateway como
+      configuração. **(FR-018)**
+- [ ] **T034** Gravar como `external_id` o identificador que o gateway devolve, e provar que ele
+      **casa** com o que volta na confirmação de entrega — se não casar, o visto nunca chega.
+      **(FR-019)**
+- [ ] **T035** Passar o envio migrado pelas mesmas travas de vazão e janela do envio atual, e
+      **corrigir `app/api/v1/cron/recover-stuck-messages`**, que hoje monta chamada crua ao WAHA e
+      ignora o seam — num canal migrado ela envia para o lugar errado, em silêncio. **(FR-020)**
+- [ ] **T036** Tratar a resposta do gateway como **aceite provisório**: estado definitivo só pela
+      confirmação assíncrona. **(FR-021)**
+- [ ] **T037** Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário
+      (`agent_inbox_items`). Silêncio é proibido. **(FR-023, Princípio XIV)**
+- [ ] **T038** Mídia entregue por referência de endereço, com validade **≥ 1 h** — cobre a
+      retentativa do gateway mais a busca do provedor, com margem para reinício. **(FR-024)**
+- [ ] **T039** Envio para grupo continua impedido pelo caminho novo, com o mesmo desfecho de hoje —
+      e não vira erro obscuro. **(FR-025)**
 
 ---
 
-## Fase 4 — Prova pela tela (DoD item 12)
+## Fase 4 — CRM: conexão pela tela (F3)
 
-- [ ] **T040** Spec Playwright: conta **nova**, estado **vazio**, conectar canal pelo gateway,
-      receber e responder. Evidência visual em `.superpowers/evidence/`. `curl` não conta.
-- [ ] **T041** Atualizar `docs/testing/user-journey-map.md` com os casos e achados.
-- [ ] **T042** Atualizar `docs/migracao-para-o-gateway.md` e `docs/current-state.md` com o estado
-      real ao fim.
+- [ ] **T040** Parear número novo pela tela, pelo gateway, com QR code, **sem passo a mais** e
+      **sem** a tela nomear provedor. **(FR-030)**
+- [ ] **T041** Tela detecta sozinha que conectou — sem recarregar, sem confirmar à mão. Consome
+      `expires_at` para pedir material novo **quando expira**, em vez de refazer a imagem a cada
+      15 s no escuro. **(FR-031)**
+- [ ] **T042** Traduzir os estados do gateway para o vocabulário da tela; estado desconhecido cai em
+      estado seguro e legível — **nunca tela vazia**. **(FR-032)**
+- [ ] **T043** Criar canal tudo-ou-nada: provisionamento falhando não deixa linha órfã no CRM nem
+      instância órfã no provedor. Prova compartilhada com T014/T029. **(FR-033, FR-012)**
+- [ ] **T044** Convergir as duas portas (onboarding e Central de Conexões) para o mesmo caminho de
+      criação — hoje divergem em rota e em formato de nome de sessão. **(FR-034)**
+- [ ] **T045** Exigir papel `admin` nas **duas** portas. Hoje a do onboarding não exige papel nenhum
+      — furo pré-existente que migrar sem corrigir carregaria para o caminho novo. **(FR-035)**
+- [ ] **T046** Desconectar e reconectar pela tela no canal migrado, com os mesmos desfechos de hoje.
+      **(FR-036)**
+- [ ] **T047** Cada canal continua com segredo de recebimento próprio — a migração não pode
+      reintroduzir segredo global. **(FR-037)**
+- [ ] **T048** [SABOTAGEM] Provar que os testes das Fases 3 e 4 vigiam: quebrar a resolução de
+      conexão e ver T032 vermelho; remover a checagem de papel e ver T045 vermelho. **(SC-012)**
+
+---
+
+## Fase 5 — Transversais
+
+- [ ] **T050** Reconciliação periódica do lado do CRM: pergunta ao gateway (T028) o que ele entregou
+      numa janela, grava o que faltar pelo caminho idempotente, e **alarma** na divergência —
+      reconciliar em silêncio esconde o defeito que se queria medir. É a segunda ponta que o
+      Princípio XIV exige. **(FR-013a)**
+- [ ] **T051** Reversibilidade por canal: migrar e voltar sem tocar nos demais e sem perder mensagem
+      em voo. **(FR-041)**
+- [ ] **T052** Estender o vigia mecânico de payload cru — hoje cobre só o caminho de **recebimento**
+      — para o caminho de **envio**. **(FR-042, anti-pattern 15)**
+- [ ] **T053** Auditoria de toda mudança de canal: criar, migrar, reverter, apagar. **(FR-043)**
+- [ ] **T054** Env vars de endereço e credencial do gateway em `lib/env.ts` **e** `.env.example`, com
+      ausência falhando de forma legível no momento certo. **(FR-044)**
+- [ ] **T055** Toda mudança de estado de canal/mensagem sai como migration versionada + apêndice no
+      baseline + linha no MANIFEST. Conferir ao fim de cada fase, não no fim de tudo. **(FR-040)**
+
+---
+
+## Fase 6 — Execução e prova (os SC não se provam sozinhos)
+
+Cada uma destas é **execução medida**, não implementação. Sem elas os Success Criteria são texto.
+
+- [ ] **T060** 20 envios reais por canal migrado: **100%** chegam, p95 do clique à chegada **≤ 5 s**;
+      **100%** terminam com `external_id` e estado final coerente, zero em estado sem dono.
+      **(SC-001, SC-002)**
+- [ ] **T061** Estado de entrega alcança o valor final em **≥ 99%** de 20 mensagens, com **zero**
+      regressões observadas na tela. **(SC-003)**
+- [ ] **T062** Rajada de 50: espaçamento configurado respeitado em **100%** das amostras, **zero**
+      envios fora da janela de horário. E varredura **mecânica** provando **zero** envios por
+      caminho que escapa das travas. **(SC-004, SC-005)**
+- [ ] **T063** Conta **nova**, estado **vazio**: QR na tela em **≤ 15 s**, jornada login → primeira
+      conversa atendida **≤ 10 min**, contagem de passos **idêntica** à de antes. Evidência visual em
+      `.superpowers/evidence/`. `curl` não conta. **(SC-006, Princípio IV)**
+- [ ] **T064** Varredura por nome de provedor em texto visível nas telas de conexão e onboarding:
+      **zero** ocorrências. **(SC-007)**
+- [ ] **T065** Falha de provisionamento forçada **10 de 10**: nenhum canal órfão no CRM, nenhuma
+      instância órfã no provedor. **(SC-008)**
+- [ ] **T066** Reverter canal no meio de tráfego: **100%** das mensagens em voo preservadas, **zero**
+      duplicatas, provado por contagem antes/depois. **(SC-009)**
+- [ ] **T067** Imagem, documento e áudio abrindo **no aparelho** do destinatário, **3 de 3**.
+      **(SC-010)**
+- [ ] **T068** Gateway derrubado: **100%** das tentativas terminam em estado reagendável e **um**
+      aviso aparece na Central — nenhuma mensagem perdida em silêncio. **(SC-011)**
+- [ ] **T069** Atualizar `docs/testing/user-journey-map.md`, `docs/migracao-para-o-gateway.md` e
+      `docs/current-state.md` com o estado real ao fim.
 
 ---
 
 ## Ordem e o que trava o quê
 
 ```
-T001-T002  emenda            ──▶ libera Fase 1
-T010-T011  papel + trava     ──▶ T012-T014
-T012-T014  funções           ──▶ T015-T016 (provas)  e  ──▶ T022
-T020-T021  costura           ──▶ T022-T023
-T022+T024  escrita + fila    ──▶ Fase 3
-T033       recusa legível    ──▶ antes de T030-T032
-Fase 3     ────────────────────▶ Fase 4
+T001-T003  emenda + desempate  ──▶ libera Fase 1 (T003 decide T014 vs T029)
+T010-T011  papel + trava       ──▶ T012-T016
+T012-T016  funções             ──▶ T017-T019 (provas)  e  ──▶ T022
+T020-T021  costura             ──▶ T022-T025
+T022+T025  escrita + fila      ──▶ Fase 3
+T028       reconciliação (gw)  ──▶ T050 (reconciliação CRM)
+T030       recusa legível      ──▶ antes de T031-T039
+Fase 3 + Fase 4                ──▶ Fase 5 ──▶ Fase 6
 ```
+
+**Paralelizável [P]**: T011 com T012 · T027 com T028 · T051 a T054 entre si · T064 com T067.
+
+## Cobertura declarada
+
+| Bloco | Requisitos | Onde |
+|---|---|---|
+| F1 | FR-001 a FR-014 (+FR-013a) | T010–T019, T050 |
+| F2 | FR-015 a FR-025 | T030–T039 |
+| F3 | FR-030 a FR-037 | T040–T047 |
+| Transversais | FR-040 a FR-044 | T050–T055 |
+| Success Criteria | SC-001 a SC-012 | T060–T068, e as tasks `[SABOTAGEM]` para SC-012 |
 
 **Dívidas herdadas da spec 001 que continuam abertas** (contexto em
 `001-migracao-waha-uazapi/tasks.md`): T069 script de cura sem chamador, T070 prova de segredo
 placeholder no nível do banco, T071 cron de retenção nunca agendado (LGPD). Não bloqueiam esta spec,
-mas seguem contando.
+mas seguem contando — e T071 **não** é dispensada pela decisão: `webhook_events_log` continua em uso
+pelos demais provedores.

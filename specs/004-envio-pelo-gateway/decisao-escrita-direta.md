@@ -278,13 +278,23 @@ construído pela spec 001 fica **sem uso no caminho do gateway**:
 | `lib/gateway/ingest.ts` | vira SQL |
 
 **Nenhuma dessas peças era decorativa**, e a que dói é a fila. Hoje há duas guardas independentes
-contra perda: a fila em disco do gateway **e** o `webhook_events_log` do CRM. Depois, há **uma**. Com
-o gateway sendo SPOF declarado (Princípio XIV, sem réplica), isso concentra risco num único ponto —
-e é exatamente o ponto que a constituição já declara como o mais frágil da arquitetura.
+contra perda: a fila em disco do gateway **e** o `webhook_events_log` do CRM.
 
-Não é motivo para não fazer. É motivo para a fila em disco do gateway virar item de primeira
-classe da spec — com prova de sobrevivência a reinício, teto de tamanho e alarme quando drena
-devagar. Sem isso, a decisão troca duas redes por nenhuma.
+> **Correção de 2026-08-08, achada pela análise cruzada.** A primeira versão deste documento tratou
+> a perda da segunda guarda como *risco a mitigar*. Está errado: o Princípio XIV a exige por escrito
+> — *"fila persistida em disco do lado do gateway, **e dreno periódico do lado do CRM**"*. Ficar com
+> uma ponta só não é concentrar risco, é **derrubar um MUST**.
+
+A ponta do CRM, portanto, **não desaparece — muda de forma**. Ela não pode mais ser uma fila de
+entrada (não há mais o que enfileirar: o gateway escreve direto), então vira **reconciliação
+periódica**: o CRM pergunta ao gateway o que ele entregou numa janela e grava o que faltar, pelo
+mesmo caminho idempotente da ingestão. É a FR-013a da spec.
+
+**Por que puxar não é redundância de empurrar** — e é a razão de o princípio pedir as duas: a fila
+do gateway só protege contra *o CRM estar fora do ar*. Não protege contra o gateway perder a própria
+fila, contra a escrita ser aceita e a transação falhar depois, nem contra defeito no empurrador. A
+ponta que puxa é a única capaz de enxergar mensagem que **nunca chegou a existir** do lado do CRM —
+e essa é exatamente a falha que o usuário não consegue detectar, pela qual XIV existe.
 
 **O que NÃO morre:** o `envelope_v1` continua valendo na direção de **saída** e para qualquer
 consumidor externo; os normalizadores por provedor (a parte cara do gateway) são intocados; o
@@ -311,18 +321,36 @@ para dentro do gateway. O desenho das §3c e §4 preserva as duas. Chamar uma fu
 versionada, com papel dedicado e sem grant de tabela, é mais próximo de "chamar uma API que por acaso
 é implementada em SQL" do que de "escrever no banco alheio".
 
-O que **de fato** se perde é a fronteira de rede — a §6, e a fila que ela levava junto.
+O que **de fato** se perde é a fronteira de rede — a §6.
 
-Portanto: o que a constituição precisa é de **emenda com redação nova**, não de revogação. A regra
-que sobrevive é "o gateway nunca toca tabela do CRM; escreve só por função versionada, com papel
-próprio, e nunca decide tenant pelo corpo". Redigir isso é `/speckit-constitution`, com número de
-versão próprio — e **não** foi feito aqui.
+> **Correção de 2026-08-08, achada pela análise cruzada.** O parágrafo acima é verdadeiro sobre a
+> *intenção* e insuficiente sobre o *texto*. O Princípio VII não proíbe genericamente "acoplamento":
+> ele **enumera** as superfícies permitidas — *"a API REST `/api/v1/`, o MCP server, e os webhooks"*
+> — e manda todo sistema externo consumir **essas**. Uma RPC PostgREST **não é nenhuma das três**.
+>
+> Logo o argumento "é uma API que por acaso é implementada em SQL" **não basta** para declarar
+> conformidade: por mais defensável que seja o desenho, ele usa uma quarta superfície que a
+> constituição não conhece.
+>
+> **O que a emenda tem de fazer, portanto, é mais do que afrouxar a palavra "banco": tem de nomear e
+> delimitar a quarta superfície** — função `security definer` versionada, papel dedicado sem grant
+> de tabela, tenant resolvido dentro do banco — e dizer quem pode usá-la e para quê. Afrouxar sem
+> nomear abre a porta para o acoplamento que o princípio existe para impedir.
+
+**E a emenda tem de tocar dois princípios, não um.** Além de VII, o **XIV** exige as duas pontas de
+durabilidade; a spec passou a cumpri-lo por FR-013 + FR-013a (§6), então aqui não há mais conflito —
+mas quem redigir a emenda MUST reler XIV antes de concluir que só VII muda.
+
+A regra que sobrevive: *o gateway nunca toca tabela do CRM; escreve só por função versionada, com
+papel próprio, e nunca decide tenant pelo corpo*. Redigir isso é `/speckit-constitution`, com número
+de versão próprio — e **não** foi feito aqui.
 
 ---
 
 ## 8. O que fica em aberto
 
-1. **A fila em disco do gateway vira crítica** (§6). Prova de sobrevivência a reinício, teto, alarme.
+1. **As duas pontas de durabilidade** (§6). Fila em disco do gateway com prova de reinício, teto e
+   alarme (FR-013) **e** reconciliação periódica do lado do CRM (FR-013a). Uma só não cumpre XIV.
 2. **Papel `gateway_writer`**: criar, com `EXECUTE` só nas funções do §4 e zero grant de tabela.
    Precisa de invariante que reprove se ele ganhar tabela.
 3. **Alcance de rede**: o gateway passa a precisar chegar ao Postgres/PostgREST do CRM. Endereço é
