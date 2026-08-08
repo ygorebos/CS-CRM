@@ -668,9 +668,27 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
     60+ caracteres reprova. Mesmo mecanismo da catraca do `lint-channels`.
   - **Prova:** `tests/unit/nenhum-envio-escapa-das-travas.test.ts` (3). Sabotagem (arquivo novo
     chamando `adapter.send` fora da cadeia): reprova nomeando o arquivo.
-- [ ] **T063** Conta **nova**, estado **vazio**: QR na tela em **≤ 15 s**, jornada login → primeira
-      conversa atendida **≤ 10 min**, contagem de passos **idêntica** à de antes. Evidência visual em
-      `.superpowers/evidence/`. `curl` não conta. **(SC-006, Princípio IV)**
+- [~] **T063** **2 de 5 casos verdes, e o 3º expôs um GAP REAL DO PRODUTO** — que é exatamente o que
+      esta task existe para achar. **(SC-006, Princípio IV)**
+  - **Verdes:** a pré-condição (gateway configurado) e o estado vazio (tela certa, sem nomear
+    provedor, sem mandar rodar comando) — este último **só** depois da âncora `toHaveURL`, porque
+    antes ele passava medindo a tela de login.
+  - **O gap:** clicar em "Conectar novo WhatsApp" cria a conexão no gateway (instância real nasce,
+    medido), mas **o QR nunca aparece na tela**. A linha de `channel_sessions` nasce `STARTING` e
+    **nada move o status para `SCAN_QR_CODE`** num canal do gateway: a tela espera esse estado para
+    pedir o material de pareamento, e nada sincroniza o estado do gateway de volta para a coluna. O
+    corretor fica em "Preparando o código…" para sempre.
+  - **Por que nenhum teste anterior pegou:** as Fases 3-5 provaram cada peça — a rota de pareamento
+    devolve QR (T040), o vocabulário traduz (T042), a conexão nasce tudo-ou-nada (T043). O que falta
+    é a **costura**: quem chama `GET /v1/connections/{id}` e grava `statusDeCanalPara(...)` na coluna.
+    Peça faltando entre peças corretas — a família de defeito que só a jornada inteira revela.
+  - **O que fecha a task:** um sincronizador de estado (cron curto ou poll na própria tela) que leve
+    o estado do gateway para `channel_sessions.status`. `statusDeCanalPara()` já existe e está
+    testado; falta o chamador. Depois disso, re-rodar a spec.
+  - **Harness resolvido no caminho** (3 bugs meus, todos medidos e corrigidos): senha truncada pelo
+    `#` no dotenv; condição de sucesso do MFA sendo a própria tela de desafio; e login por caso
+    mandando código TOTP repetido dentro da mesma janela de 30 s — agora **uma sessão para todos os
+    casos**, em `mode: serial`.
 - [X] **T064** ✅ Varredura executada — e ela achou **4**, não zero. Consertadas; agora zero, com o
       resultado congelado em teste. **(SC-007)**
   - **Duas famílias de defeito, e a segunda era pior:**

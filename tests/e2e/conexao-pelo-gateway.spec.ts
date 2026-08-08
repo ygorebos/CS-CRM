@@ -251,22 +251,37 @@ async function concluirWizard(): Promise<void> {
     .is("onboarded_at", null);
 }
 
+test.describe.configure({ mode: "serial" });
+
 test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)", () => {
-  test.beforeAll(async () => {
+  // UMA sessão para todos os casos, e é o que a doutrina do TOTP obriga: o
+  // servidor aceita cada código UMA vez (anti-replay), então logar por caso
+  // manda códigos repetidos dentro da mesma janela de 30 s e o 2º em diante é
+  // recusado. Medido nesta spec: 2 verdes seguidos de 3 vermelhos, sem nada do
+  // produto ter mudado.
+  //
+  // `mode: serial` + página compartilhada resolve os dois de uma vez — um login,
+  // um enrolamento, nenhum desafio.
+  let pagina: Page;
+
+  test.beforeAll(async ({ browser }) => {
     await zerarMfaDoDono();
     await concluirWizard();
+    pagina = await (await browser.newContext()).newPage();
+    await entrar(pagina);
   });
 
-  test.beforeEach(async ({ page }) => {
-    await entrar(page);
-    await page.goto("/app/connections");
+  test.afterAll(async () => {
+    await pagina?.close();
+  });
+
+  test.beforeEach(async () => {
+    await pagina.goto("/app/connections");
     // A âncora que impede o verde da página errada: se o redirecionamento levou
     // para outro lugar, o teste morre AQUI, dizendo isso.
-    await expect(page).toHaveURL(/\/app\/connections/);
+    await expect(pagina).toHaveURL(/\/app\/connections/);
   });
-
-  test("pré-condição: a instalação está mesmo no caminho do gateway", async ({ request, page }) => {
-    void page; // o beforeEach já autenticou; aqui só se consulta o health
+  test("pré-condição: a instalação está mesmo no caminho do gateway", async ({ request }) => {
     // Sem esta afirmação, todo o resto da spec pode passar medindo o canal
     // ANTIGO — verde, e provando outra coisa.
     const res = await request.get("/api/v1/health");
@@ -280,9 +295,8 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
     ).toBe("ok");
   });
 
-  test("estado vazio: a tela diz o que fazer, e não nomeia provedor (FR-030, SC-007)", async ({
-    page,
-  }) => {
+  test("estado vazio: a tela diz o que fazer, e não nomeia provedor (FR-030, SC-007)", async () => {
+    const page = pagina;
     // O estado vazio é o de 100% dos usuários novos, e é a tela que decide se
     // ele volta. Testar só com banco povoado esconde exatamente este defeito.
     // Afirmar que a tela é a certa ANTES de afirmar o que ela não diz: foi
@@ -294,7 +308,8 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
     await page.screenshot({ path: evidencia("01-estado-vazio.png"), fullPage: true });
   });
 
-  test("QR aparece em ≤ 15 s, e sem passo a mais (FR-030, FR-031)", async ({ page }) => {
+  test("QR aparece em ≤ 15 s, e sem passo a mais (FR-030, FR-031)", async () => {
+    const page = pagina;
     const t0 = Date.now();
 
     const cliques = await contarCliquesAte(page, async () => {
@@ -319,7 +334,8 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
     await page.screenshot({ path: evidencia("02-qr-na-tela.png"), fullPage: true });
   });
 
-  test("o QR não é refeito no escuro: o pedido segue a validade (FR-031)", async ({ page }) => {
+  test("o QR não é refeito no escuro: o pedido segue a validade (FR-031)", async () => {
+    const page = pagina;
     // A regressão que este caso impede: voltar ao refresh cego de 15 s. Com a
     // validade declarada, entre dois pedidos tem de haver MAIS que o intervalo
     // antigo quando o material vale mais que isso.
@@ -342,7 +358,8 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
     }
   });
 
-  test("estado desconhecido não vira tela vazia (FR-032)", async ({ page }) => {
+  test("estado desconhecido não vira tela vazia (FR-032)", async () => {
+    const page = pagina;
     // O desfecho proibido é a tela em branco: o corretor sem saber se está
     // conectado, se precisa escanear, ou se o produto quebrou.
     await page.getByRole("button", { name: /conectar (novo )?(whatsapp|n[úu]mero)/i }).click();
