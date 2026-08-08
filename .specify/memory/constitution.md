@@ -272,12 +272,76 @@ Seção preservada da 2.1.0 por ser a mais recente:
 
 Seções removidas: nenhuma.
 
+==================================================================================
+EMENDA — 2026-08-08 (terceira do dia — a quarta superfície)
+
+Version change: 2.2.0 → 2.3.0
+Bump rationale: MINOR — expansão material do Princípio VII (superfície nova, nomeada e
+delimitada por seis travas) e do Princípio XIV (a forma que a ponta de durabilidade do CRM
+assume quando não há fila de entrada). Nenhum princípio removido; nenhuma regra que valia
+deixa de valer, e nada que era conforme passa a ser não-conforme — daí MINOR e não MAJOR.
+
+Origem: a decisão do dono do produto em 2026-08-08 de forkar o `gateway_go`, mantendo duas
+versões — uma apontada para o banco do Cotador Simplificado e outra para o do CRM, esta
+gravando conexão, instância, mensagem, conversa e contato direto no banco do CRM. Registro e
+desenho em specs/004-envio-pelo-gateway/decisao-escrita-direta.md. O `/speckit-analyze` da
+spec 004 apontou que o desenho usava uma superfície que a constituição não enumerava, e que
+argumentar conformidade sem emendar seria dilução — proibida pelo próprio comando.
+
+Princípios modificados:
+  VII. Interoperável por Contrato, Nunca por Acoplamento — EXPANDIDO (título inalterado)
+       - "três superfícies" → "quatro superfícies"
+       - "Acesso direto ao banco" → "Acesso direto A TABELA", que é o que de fato acopla
+       - NOVO: bloco "A quarta superfície — função versionada", com seis travas que são
+         condição de existência: sem grant de tabela; papel dedicado, nunca service_role;
+         tenant resolvido dentro do banco; assinatura como contrato versionado; invariante
+         mecânico em CI; sem HTTP dentro da função
+       - NOVO: rationale próprio da quarta superfície
+  XIV. O Gateway é Serviço Único, Compartilhado e Sem Réplica — EXPANDIDO
+       - NOVO marcador: as duas pontas de durabilidade são obrigatórias, e a do CRM muda de
+         FORMA (fila com dreno quando a entrega é HTTP; reconciliação periódica quando o
+         gateway escreve por função). Uma ponta só é descumprimento, não escolha de custo.
+
+Correções de inconsistência interna (PATCH, embutidas nesta emenda). Reportadas em vez de
+resolvidas em silêncio, como o Princípio XII exige:
+  1. O parágrafo de abertura ainda dizia "self-hosted", contradizendo a própria seção "Missão e
+     Escopo" que a v2.2.0 reescreveu para SaaS de instância única.
+  2. "Missão e Escopo", alínea (a): "a ponte é contrato HTTP explícito, nada além" podia ser
+     lido como se aplicando à quarta superfície. Precisado — a alínea fala do COTADOR, e a
+     quarta superfície NÃO se estende a ele; ela existe para o gateway, que é serviço nosso.
+  3. "Fluxo de Desenvolvimento e Portões", rationale da cadência de commit: dizia que o leitor
+     do histórico é "o self-hoster". Não há mais self-hoster; é quem opera a instância.
+  As menções restantes a self-host são deliberadas: ou são histórico dentro de blocos de emenda
+  anteriores, ou contrastes explícitos ("antes o self-hoster X, agora Y"), ou a alínea que
+  declara a distribuição para instalação alheia FORA de escopo.
+
+Seções adicionadas: nenhuma. Seções removidas: nenhuma.
+
+Templates / artefatos dependentes:
+  ✅ .specify/templates/plan-template.md — o gate VII pergunta "sem acesso direto ao banco do
+     outro sistema" e "o gateway ... NÃO escreve no banco do CRM". A pergunta ficou mais
+     estreita que o princípio; ATUALIZAR para perguntar pelas seis travas.
+     TODO(PLAN_TEMPLATE_VII): ver "TODOs diferidos".
+  ⚠️ CLAUDE.md — seção Gateway ("O gateway NUNCA escreve no banco do CRM") e anti-pattern 15
+     divergem desta emenda. São documentos DERIVADOS; a emenda vence até serem alinhados.
+  ⚠️ AGENTS.md — mesmo caso do CLAUDE.md.
+  ✅ specs/004-envio-pelo-gateway/ — plan.md gate VII pode sair de FAIL para PASS depois de
+     provadas as seis travas; checklists/requirements.md idem.
+
+TODOs diferidos:
+  - TODO(PLAN_TEMPLATE_VII): a pergunta do gate VII no plan-template ainda reflete a redação
+    anterior. Não alterada aqui porque o Scope Guard deste comando limita o trabalho ao próprio
+    arquivo da constituição.
+  - TODO(DOUTRINA_DERIVADA): CLAUDE.md e AGENTS.md precisam da propagação. É a T002 da
+    spec 004.
+
 -->
 
 # DeskcommCRM Constitution
 
-Sistema operacional de vendas open source, multi-tenant, self-hosted, com agentes de IA
-nativos e WhatsApp como canal primário. Esta constituição é a lei de arquitetura do repositório.
+Sistema operacional de vendas open source, multi-tenant, entregue como **SaaS de instância
+única operada por nós**, com agentes de IA nativos e WhatsApp como canal primário. Esta
+constituição é a lei de arquitetura do repositório.
 `CLAUDE.md`, `docs/doctrine/sistema-vivo.md` e `README.md` a detalham; onde divergirem, esta
 constituição prevalece.
 
@@ -334,7 +398,9 @@ modelagem **considera** que um dia haverá importação de dados vindos de lá, 
 **adiada** por causa disso.
 
 **O que fica fora, e não é "por enquanto".** (a) Acoplamento ao Cotador em nível de schema, banco
-ou FK cruzada — a ponte é contrato HTTP explícito, nada além. (b) **Cobrança**: assinatura,
+ou FK cruzada — a ponte com o Cotador é contrato HTTP explícito, nada além. A quarta superfície
+do Princípio VII **não** se aplica a ele: ela existe para o `gateway_go`, que é serviço nosso, e
+estendê-la ao Cotador reintroduziria exatamente o acoplamento que esta alínea proíbe. (b) **Cobrança**: assinatura,
 plano, pagamento, cartão, nota fiscal e inadimplência não existem neste repositório
 (Princípio XIII). (c) Distribuição para instalação alheia: kit de self-host, `install.sh` do
 usuário e documentação de VPS deixam de ser produto.
@@ -450,22 +516,55 @@ credencial em query string vaza em log de proxy sem ninguém perceber.
 
 ### VII. Interoperável por Contrato, Nunca por Acoplamento
 
-O CRM MUST expor sua capacidade por três superfícies, e apenas por elas: a API REST `/api/v1/`,
-o MCP server, e os webhooks (entrada via fontes de captação, saída via automações). Sistema
-externo — incluindo o **Cotador Simplificado**, projeto irmão com o qual este CRM será
-integrado — MUST consumir essas superfícies. Acesso direto ao banco de um sistema pelo outro,
-FK cruzando fronteira de produto, e schema compartilhado por conveniência são proibidos.
+O CRM MUST expor sua capacidade por quatro superfícies, e apenas por elas: a API REST `/api/v1/`,
+o MCP server, os webhooks (entrada via fontes de captação, saída via automações), e a
+**superfície de função** definida abaixo. Sistema externo — incluindo o **Cotador
+Simplificado**, projeto irmão com o qual este CRM será integrado — MUST consumir essas
+superfícies. Acesso direto **a tabela** de um sistema pelo outro, FK cruzando fronteira de
+produto, e schema compartilhado por conveniência **seguem proibidos, sem exceção**.
 Toda entidade trocada MUST carregar `organization_id` e MUST ser rastreável de ponta a ponta:
 a cotação nasce ligada a um lead/contato, a atividade da cotação aparece na timeline do CRM, e
 o resultado (ganho/perdido) alimenta funil, métrica e relatório. Integração nova MUST responder
 o Living System Checklist (Princípio II) do lado do CRM — inclusive as arestas que atravessam
 a fronteira.
 
+**A quarta superfície — função versionada.** Um sistema externo MAY escrever no banco do CRM
+**somente** por função `security definer` versionada, e somente sob as seis travas abaixo. Todas
+são condição de existência da superfície: falhar em qualquer uma a torna proibida, não
+degradada.
+
+1. **Nenhum grant de tabela.** O papel que o sistema externo assume MUST ter `EXECUTE` nas
+   funções e **zero** privilégio em tabela — nem `select`. Um `select` direto parece inofensivo
+   e já é acoplamento ao schema, que é o que esta superfície existe para impedir.
+2. **Papel dedicado, nunca `service_role`.** O sistema externo MUST NOT receber chave que
+   bypassa RLS, nem segredo capaz de emitir outro papel.
+3. **Tenant resolvido dentro do banco.** A `organization_id` MUST ser derivada de registro de
+   propriedade do CRM (ex.: a conexão pela qual a mensagem chegou). Parâmetro de chamada
+   MUST NOT decidir tenant.
+4. **Assinatura é o contrato.** A superfície é o conjunto de assinaturas, e MUST ser versionada
+   e documentada como contrato — a tabela por baixo pode mudar sem o outro lado recompilar.
+5. **Trava mecânica, não zelo.** MUST existir invariante em CI que reprove se o papel ganhar
+   qualquer privilégio de tabela. Regra vigiada só por revisão humana não conta.
+6. **Sem HTTP dentro da função.** Vale o Princípio V integralmente: efeito colateral sai por
+   `event_log`, consumido por worker.
+
+Quando a quarta superfície substitui uma fronteira de rede que antes existia, o Princípio XIV
+segue valendo por inteiro — inclusive as **duas** pontas de durabilidade, na forma descrita lá.
+
 **Rationale**: a meta declarada é um sistema onde cotação, CRM, contatos, leads, vendas,
 relatórios de marketing e importação de leads são uma coisa só do ponto de vista do usuário —
 sem que isso signifique um monólito acoplado no nível do banco. Contrato explícito é o que deixa
 os dois lados evoluírem e ainda assim entregarem a experiência integrada; acoplamento no banco
 faz cada deploy de um quebrar o outro.
+
+**Rationale da quarta superfície**: a versão anterior enumerava três superfícies e proibia
+"acesso direto ao banco" como bloco único, misturando duas coisas de risco muito diferente —
+alcançar **tabela** alheia (que acopla ao schema e quebra a cada deploy do outro lado) e chamar
+**função versionada** do outro lado (que é contrato, e por acaso é implementada em SQL). A
+primeira continua proibida; a segunda passa a ser nomeada, com travas que a mantêm contrato: sem
+grant de tabela não há como acoplar ao schema, e com tenant resolvido no banco não há como o
+chamador decidir de quem é o dado. Deixar a superfície sem nome não impedia o desenho — só
+garantia que ele aparecesse como violação silenciosa, sem as seis travas que o tornam seguro.
 
 ### VIII. O Usuário é o Corretor, e Ele Tem 10 Minutos (NÃO NEGOCIÁVEL)
 
@@ -647,6 +746,15 @@ tenants**, e **não** é instalado junto com o CRM. Consequências que são regr
   sobreviver a ele estar fora do ar: entrega com retentativa durável e fila persistida em disco
   do lado do gateway, e dreno periódico do lado do CRM. Caminho que perde mensagem quando um
   dos dois lados reinicia MUST NOT ser aceito como pronto, ainda que passe nos testes.
+- **As duas pontas são obrigatórias, e a do CRM muda de forma conforme o caminho.** Quando o
+  gateway entrega por HTTP, a ponta do CRM é a fila de entrada com dreno periódico. Quando o
+  gateway escreve pela superfície de função (Princípio VII), não há o que enfileirar — e a ponta
+  do CRM MUST então tomar a forma de **reconciliação periódica**: o CRM pergunta ao gateway o que
+  foi entregue numa janela e grava o que faltar, pelo mesmo caminho idempotente. Divergência
+  encontrada MUST virar alerta; reconciliar em silêncio MUST NOT ser aceito. **Ficar com uma
+  ponta só não é escolha de custo, é descumprimento** — a ponta que empurra só protege contra o
+  CRM estar fora do ar, e a que puxa é a única capaz de enxergar mensagem que nunca chegou a
+  existir do lado do CRM.
 - A queda do gateway MUST ser **visível** — para nós, em alerta; e para o usuário afetado, na
   Central, dizendo que o canal parou de receber (Princípio II). Silêncio é proibido: o sintoma
   natural é "as mensagens pararam", sem lugar nenhum para olhar.
@@ -776,8 +884,8 @@ mensagem MUST nomear o **resultado observável** da fase, nunca a lista de arqui
 de IDs de task. E juntar tasks num commit MUST NOT adiar teste: o teste que prova a fase entra no
 commit da fase (Princípio XI).
 
-**Rationale**: quem lê este histórico é o revisor do PR e o self-hoster que precisa achar onde
-algo quebrou. Um commit por fase é a menor unidade que alguém consegue reverter inteira sem
+**Rationale**: quem lê este histórico é o revisor do PR e quem opera a instância precisando achar
+onde algo quebrou. Um commit por fase é a menor unidade que alguém consegue reverter inteira sem
 quebrar o meio; um commit por task é ruído com custo de bisect.
 
 **Portões obrigatórios na branch protection da `main`**:
@@ -836,4 +944,4 @@ aprofundamento por tipo de task, está no Princípio XII.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.3.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
