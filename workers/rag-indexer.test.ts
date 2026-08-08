@@ -20,6 +20,11 @@
  *      Fonte que não participou da rodada não é tocada — nem para dizer que "falhou", nem
  *      para zerar a contagem que a tela mostra.
  *
+ *   4. **Material que não é par pergunta/resposta também vira trecho** (T077/T084, FR-004).
+ *      O manual da operadora entra por `ai_source_passages` (migration 0127). Aceitar o
+ *      arquivo e não indexá-lo é o silêncio que FR-004 proíbe: a tela diz "pronto" e a busca
+ *      não acha nada. Falhar é permitido; falhar calado, não.
+ *
  * O dublê do client PostgREST modela só a fatia que o worker usa, e registra as chamadas
  * NA ORDEM. É a ordem que prova o item 2: `activate_kb_version` tem de vir depois do
  * último `ai_chunks`, ou não vir.
@@ -27,6 +32,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { EventRow } from "@/lib/event-log/dispatcher";
+import type * as ModuloDePolitica from "@/lib/ai/rag/ingest/policy";
 
 // ---------------------------------------------------------------------------
 // Dublês
@@ -37,11 +43,30 @@ const h = vi.hoisted(() => ({
   provedorConfigurado: true,
   debounce: true,
   embedar: null as null | ((texto: string, indice: number) => number[]),
+  /** Chamadas ao ingest de documento, e o que ele devolve. Ver `ingestFalso`. */
+  ingest: null as
+    | null
+    | ((args: { knowledgeSourceId: string; blobPath: string; ext: string }) => Promise<unknown>),
+  ingestChamado: [] as string[],
 }));
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => h.cliente,
 }));
+// Só `ingestPolicyFile` é dublado: `resolverExtensao` fica REAL, porque é ela que decide se
+// uma fonte é um documento. Dublá-la faria o teste concordar com uma regra que ele mesmo
+// inventou.
+vi.mock("@/lib/ai/rag/ingest/policy", async (importOriginal) => {
+  const real = await importOriginal<typeof ModuloDePolitica>();
+  return {
+    ...real,
+    ingestPolicyFile: async (args: { knowledgeSourceId: string; blobPath: string; ext: string }) => {
+      h.ingestChamado.push(args.knowledgeSourceId);
+      if (!h.ingest) throw new Error("o teste não previu materialização de documento");
+      return h.ingest(args);
+    },
+  };
+});
 vi.mock("@/lib/ai/gateway", () => ({
   isEmbeddingProviderConfigured: () => h.provedorConfigurado,
 }));
@@ -82,6 +107,8 @@ interface Fonte {
   name: string;
   scope_id: string | null;
   applies_to_all: boolean;
+  /** Onde mora o `blob_path` de uma fonte que é DOCUMENTO. */
+  source_metadata?: Record<string, unknown>;
 }
 
 interface Item {
@@ -92,9 +119,21 @@ interface Item {
   locale: string;
 }
 
+/** Uma linha de `ai_source_passages` (migration 0127) — texto de documento já gravado. */
+interface Passagem {
+  knowledge_source_id: string;
+  content: string;
+  position: number;
+  section_title: string | null;
+  page_number: number | null;
+  tags: string[];
+  locale: string;
+}
+
 interface Cenario {
   fontes: Fonte[];
   itens: Item[];
+  passagens?: Passagem[];
   /** Erro por posição de trecho: `null`/ausente = gravou. */
   erroAoGravarTrecho?: (posicao: number) => string | null;
 }
@@ -128,6 +167,9 @@ function clienteDuble(cenario: Cenario) {
       }
       if (tabela === "ai_faq_items") {
         return { data: cenario.itens, error: null };
+      }
+      if (tabela === "ai_source_passages" && op === "select") {
+        return { data: cenario.passagens ?? [], error: null };
       }
       if (tabela === "ai_knowledge_versions" && op === "select") {
         // `createKnowledgeVersion` pergunta o maior `version_number`; `activateVersion`
@@ -259,6 +301,8 @@ beforeEach(() => {
   h.provedorConfigurado = true;
   h.debounce = true;
   h.embedar = null;
+  h.ingest = null;
+  h.ingestChamado = [];
   chamadasDeEmbed = 0;
 });
 
@@ -562,18 +606,290 @@ describe("rag-indexer · carregar material não toca material não relacionado (
 // T077 · material que não é par pergunta/resposta
 // ---------------------------------------------------------------------------
 
-describe("rag-indexer · material que não é par pergunta/resposta (T077)", () => {
-  it("hoje, material que não é par pergunta/resposta é descartado em silêncio", async () => {
-    // Este é o estado ATUAL, não o desejado. Uma fonte `ready` cujo conteúdo não está em
-    // `ai_faq_items` (um PDF de política, por exemplo) faz o indexador encerrar com
-    // `no_content_to_index` — e a fonte fica `ready` na tela, sem nenhum trecho buscável.
-    // É exatamente o que FR-004 proíbe. O teste existe para que a correção (T084) tenha um
-    // ponto de partida medido, e para que ninguém confunda "passa verde" com "funciona".
+describe("rag-indexer · material que não é par pergunta/resposta (T077, FR-004)", () => {
+  it("aceita material que não é par pergunta/resposta e o torna buscável", async () => {
+    // Era o `it.todo` bloqueado por T140/T084: não havia tabela onde o texto de um documento
+    // morasse. Com `ai_source_passages` (migration 0127) e o indexador lendo dela, a fonte
+    // que NÃO é par pergunta/resposta termina a rodada com trecho indexado — e não mais com
+    // `skipped`.
     const chamadas = preparar({
       fontes: [
-        { id: "fonte-pdf", source_type: "policy", name: "manual", scope_id: ESCOPO_A, applies_to_all: false },
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual da operadora A",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+        },
       ],
       itens: [],
+      passagens: [
+        {
+          knowledge_source_id: "fonte-pdf",
+          content: "A carência para consultas é de 30 dias.",
+          position: 0,
+          section_title: "Carências",
+          page_number: 12,
+          tags: [],
+          locale: "pt-BR",
+        },
+      ],
+    });
+
+    const r = await processRagIndexer(evento());
+
+    expect(r.status, "material aceito que não vira trecho é o silêncio que FR-004 proíbe").toBe(
+      "ok",
+    );
+    const trechos = trechosDe(chamadas);
+    expect(trechos).toHaveLength(1);
+    const linha = trechos[0]?.valores as Record<string, unknown>;
+    expect(linha["content"]).toBe("A carência para consultas é de 30 dias.");
+    expect(linha["knowledge_source_id"]).toBe("fonte-pdf");
+    // Mesma regra de T085: o eixo de escopo é o da fonte, ou o material some da busca /
+    // responde pela operadora errada.
+    expect(linha["scope_id"]).toBe(ESCOPO_A);
+    expect(linha["applies_to_all"]).toBe(false);
+    // E a contagem aparece na tela: "pronto" sem número não prova nada.
+    const carimbo = carimbosDeFonte(chamadas).find((c) => c.filtros["eq:id"] === "fonte-pdf");
+    expect((carimbo?.valores as { chunks_count: number })?.chunks_count).toBe(1);
+  });
+
+  it("FR-022 · a âncora da passagem viaja até o trecho — 'seu manual, página 12, Carências'", async () => {
+    const chamadas = preparar({
+      fontes: [
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+        },
+      ],
+      itens: [],
+      passagens: [
+        {
+          knowledge_source_id: "fonte-pdf",
+          content: "A carência para consultas é de 30 dias.",
+          position: 0,
+          section_title: "Carências",
+          page_number: 12,
+          tags: ["carencia"],
+          locale: "pt-BR",
+        },
+      ],
+    });
+
+    await processRagIndexer(evento());
+
+    const meta = (trechosDe(chamadas)[0]?.valores as { metadata: Record<string, unknown> }).metadata;
+    expect(meta["section_title"]).toBe("Carências");
+    expect(meta["page_number"]).toBe(12);
+    expect(meta["tags"]).toEqual(["carencia"]);
+    expect(meta["source_type"]).toBe("policy");
+  });
+
+  it("passagem e par pergunta/resposta convivem na MESMA versão", async () => {
+    // Se cada origem criasse a própria versão, ativar uma desativaria a outra. As duas têm
+    // de entrar na mesma reconstrução, ou o acervo degrada em silêncio a cada upload.
+    const chamadas = preparar({
+      fontes: [
+        fonteComEscopo("fonte-faq", ESCOPO_A),
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+        },
+      ],
+      itens: [item("fonte-faq", 1)],
+      passagens: [
+        {
+          knowledge_source_id: "fonte-pdf",
+          content: "Texto do manual.",
+          position: 0,
+          section_title: null,
+          page_number: null,
+          tags: [],
+          locale: "pt-BR",
+        },
+      ],
+    });
+
+    const r = await processRagIndexer(evento());
+
+    expect(r.status).toBe("ok");
+    const versoes = new Set(
+      trechosDe(chamadas).map((c) => (c.valores as { kb_version_id: string }).kb_version_id),
+    );
+    expect(versoes).toEqual(new Set([VERSAO_NOVA]));
+    const porFonte = new Map(
+      carimbosDeFonte(chamadas).map((c) => [
+        c.filtros["eq:id"],
+        (c.valores as { chunks_count: number }).chunks_count,
+      ]),
+    );
+    expect(porFonte.get("fonte-faq")).toBe(1);
+    expect(porFonte.get("fonte-pdf")).toBe(1);
+  });
+
+  it("documento cujo texto ainda não foi gravado é materializado na rodada, não esquecido", async () => {
+    // A rota de upload chama o ingest ANTES de a fonte existir (usa a extração como
+    // validação), então nada é gravado ali. Se ninguém retomasse, o documento ficaria
+    // aceito e não-buscável para sempre — o defeito que FR-004 nomeia. Quem retoma é o
+    // worker, que roda por evento e é retentável.
+    const chamadas = preparar({
+      fontes: [
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+          source_metadata: { blob_path: `${ORG}/manual.pdf` },
+        },
+      ],
+      itens: [],
+      passagens: [],
+    });
+    h.ingest = async () => ({
+      chunkCount: 1,
+      naoPersistidoPorque: null,
+      passagens: [
+        {
+          position: 0,
+          content: "Texto extraído do PDF agora.",
+          sectionTitle: "Carências",
+          pageNumber: null,
+          tags: [],
+          locale: "pt-BR",
+        },
+      ],
+    });
+
+    const r = await processRagIndexer(evento());
+
+    expect(h.ingestChamado).toEqual(["fonte-pdf"]);
+    expect(r.status).toBe("ok");
+    const linha = trechosDe(chamadas)[0]?.valores as Record<string, unknown>;
+    expect(linha["content"]).toBe("Texto extraído do PDF agora.");
+    expect(linha["scope_id"]).toBe(ESCOPO_A);
+  });
+
+  it("documento que JÁ tem passagem não é reprocessado — o PDF não é baixado a cada FAQ salvo", async () => {
+    preparar({
+      fontes: [
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+          source_metadata: { blob_path: `${ORG}/manual.pdf` },
+        },
+      ],
+      itens: [],
+      passagens: [
+        {
+          knowledge_source_id: "fonte-pdf",
+          content: "Texto já gravado.",
+          position: 0,
+          section_title: null,
+          page_number: null,
+          tags: [],
+          locale: "pt-BR",
+        },
+      ],
+    });
+    // `h.ingest` fica `null`: se o worker chamar o ingest, o dublê estoura.
+
+    const r = await processRagIndexer(evento());
+
+    expect(r.status).toBe("ok");
+    expect(h.ingestChamado).toEqual([]);
+  });
+
+  it("documento do qual não sai texto FALHA VISÍVEL — não fica 'pronto' sem trecho", async () => {
+    const chamadas = preparar({
+      fontes: [
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual só de imagem",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+          source_metadata: { blob_path: `${ORG}/manual.pdf` },
+        },
+      ],
+      itens: [],
+      passagens: [],
+    });
+    h.ingest = async () => ({ chunkCount: 0, naoPersistidoPorque: null, passagens: [] });
+
+    await processRagIndexer(evento());
+
+    const carimbo = carimbosDeFonte(chamadas).find((c) => c.filtros["eq:id"] === "fonte-pdf");
+    expect(
+      carimbo,
+      "aceitar o arquivo e não dizer nada é o modo de falha que FR-004 proíbe pelo nome",
+    ).toBeDefined();
+    expect((carimbo?.valores as { last_index_status: string }).last_index_status).toBe("failed");
+    // O motivo é em português e diz o que fazer (FR-005).
+    expect(String((carimbo?.valores as { last_index_error: string }).last_index_error)).toMatch(
+      /imagem/i,
+    );
+  });
+
+  it("documento que estoura na extração não derruba o FAQ da outra operadora (FR-003)", async () => {
+    const chamadas = preparar({
+      fontes: [
+        fonteComEscopo("fonte-faq", ESCOPO_A),
+        {
+          id: "fonte-pdf",
+          source_type: "policy",
+          name: "manual corrompido",
+          scope_id: ESCOPO_A,
+          applies_to_all: false,
+          source_metadata: { blob_path: `${ORG}/manual.pdf` },
+        },
+      ],
+      itens: [item("fonte-faq", 1)],
+      passagens: [],
+    });
+    h.ingest = async () => {
+      throw new Error("Both pdf-parse and pdfjs-dist failed to extract text");
+    };
+
+    const r = await processRagIndexer(evento());
+
+    expect(r.status, "um material quebrado não pode impedir o acervo inteiro de ser indexado").toBe(
+      "ok",
+    );
+    expect(trechosDe(chamadas)).toHaveLength(1);
+    const carimbos = new Map(
+      carimbosDeFonte(chamadas).map((c) => [c.filtros["eq:id"], c.valores as Record<string, unknown>]),
+    );
+    expect(carimbos.get("fonte-pdf")?.["last_index_status"]).toBe("failed");
+    expect(carimbos.get("fonte-faq")?.["last_index_status"]).toBe("success");
+  });
+
+  it("fonte sem conteúdo E sem arquivo continua sendo pulada, sem carimbar ninguém", async () => {
+    // O que este teste media ANTES, e por que deixou de valer: ele afirmava que QUALQUER
+    // fonte que não fosse par pergunta/resposta terminava em `no_content_to_index`, sem
+    // trecho e sem carimbo — e o comentário dizia, com todas as letras, que aquilo era o
+    // estado atual e não o desejado (o defeito de FR-004, medido para que a correção
+    // tivesse ponto de partida). Com T083+T084 isso deixou de ser verdade para o caso que
+    // importa: fonte de documento agora vira trecho. O que sobrou de válido é o caso
+    // degenerado — fonte sem par, sem passagem e sem arquivo, isto é, sem nada a indexar.
+    // Aí pular continua certo, e carimbar seria mentir sobre uma rodada da qual ela não
+    // participou (T097).
+    const chamadas = preparar({
+      fontes: [
+        { id: "fonte-vazia", source_type: "policy", name: "sem nada", scope_id: ESCOPO_A, applies_to_all: false },
+      ],
+      itens: [],
+      passagens: [],
     });
 
     const r = await processRagIndexer(evento());
@@ -581,27 +897,7 @@ describe("rag-indexer · material que não é par pergunta/resposta (T077)", () 
     expect(r.status).toBe("skipped");
     expect(r.detail).toBe("no_content_to_index");
     expect(trechosDe(chamadas)).toEqual([]);
-    // E o silêncio é total: a fonte não recebe carimbo nenhum, então a tela continua
-    // dizendo o que dizia antes.
     expect(carimbosDeFonte(chamadas)).toEqual([]);
+    expect(h.ingestChamado).toEqual([]);
   });
-
-  /**
-   * ⚠️ BLOQUEADO POR T140/T084 — não há tabela onde o texto de um documento mora.
-   *
-   * `ingestPolicyFile` (`lib/ai/rag/ingest/policy.ts`) extrai o texto do PDF/Markdown só
-   * para validar e o devolve sem gravar; o indexador lê exclusivamente `ai_faq_items`. A
-   * decisão de modelagem (T140: tabela nova `ai_source_passages` versus afrouxar
-   * `ai_faq_items.question`) precede a migration, e a migration precede este teste.
-   *
-   * O que este teste vai exigir quando destravar: uma fonte cujo material seja texto
-   * corrido (sem pergunta) vira trecho buscável, com `scope_id`/`applies_to_all` da fonte
-   * — a mesma regra de T085 —, e o resultado é `ok`, não `skipped`.
-   *
-   * Escrevê-lo agora contra uma tabela inventada produziria o falso verde que o Princípio
-   * XI nomeia: um teste que passa exercitando um dublê de algo que não existe.
-   */
-  it.todo(
-    "aceita material que não é par pergunta/resposta e o torna buscável (destrava com T140+T084)",
-  );
 });

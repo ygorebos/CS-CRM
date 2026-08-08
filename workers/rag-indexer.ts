@@ -6,6 +6,10 @@
  *   - nuvemshop.product_synced  → fetches product, embeds chunks, activates version
  *   - knowledge_source.updated  → reconstrói UMA versão com todas as fontes `ready`
  *
+ * Duas origens de conteúdo alimentam a reconstrução (T084, FR-004): os pares
+ * pergunta/resposta de `ai_faq_items` e o texto de documento de `ai_source_passages`
+ * (migration 0127). Ler só a primeira era descartar em silêncio todo manual carregado.
+ *
  * Regra que atravessa os dois caminhos (FR-006): a versão nova só é ATIVADA quando
  * **todos** os trechos planejados entraram. Falha no meio deixa a versão anterior valendo
  * por inteiro — base pela metade responde errado onde a base velha recusaria.
@@ -20,6 +24,7 @@ import { acquireDebounce } from "@/lib/ai/rag/debounce";
 import { chunkText, computeContentHash } from "@/lib/ai/rag/chunker";
 import { estimateTokens } from "@/lib/ai/runtime/history";
 import { formatProductForRag, type NuvemshopProduct } from "@/lib/ai/rag/format-product";
+import { ingestPolicyFile, resolverExtensao } from "@/lib/ai/rag/ingest/policy";
 import {
   createKnowledgeVersion,
   markVersionReady,
@@ -49,6 +54,147 @@ type ProcessResult = SkipResult | ErrorResult | OkResult;
 
 function skip(reason: string): SkipResult {
   return { type: "skip", reason };
+}
+
+/** Uma fonte de conhecimento `ready` do agente, como o indexador precisa dela. */
+interface Fonte {
+  id: string;
+  source_type: string;
+  name: string;
+  scope_id: string | null;
+  applies_to_all: boolean;
+  source_metadata?: Record<string, unknown> | null;
+}
+
+/** Uma passagem de documento (`ai_source_passages`, migration 0127). */
+interface Passagem {
+  knowledge_source_id: string;
+  content: string;
+  position: number;
+  section_title: string | null;
+  page_number: number | null;
+  tags: string[] | null;
+  locale: string | null;
+}
+
+/**
+ * O caminho do arquivo de uma fonte que é DOCUMENTO, ou `null` quando ela não é.
+ *
+ * A pergunta não é "o `source_type` é `policy`?" e sim "existe arquivo legível atrás
+ * disto?". `source_type` é vocabulário aberto e cresce; o que decide se há texto a extrair
+ * é haver um blob com extensão que sabemos ler.
+ */
+function caminhoDoDocumento(fonte: Fonte): { blobPath: string; ext: "pdf" | "md" } | null {
+  const meta = fonte.source_metadata ?? {};
+  const blobPath = typeof meta["blob_path"] === "string" ? (meta["blob_path"] as string) : "";
+  if (!blobPath) return null;
+  const ext = resolverExtensao(blobPath);
+  return ext ? { blobPath, ext } : null;
+}
+
+async function carregarPassagens(
+  organizationId: string,
+  fonteIds: string[],
+): Promise<{ passagens: Passagem[]; erro: string | null }> {
+  if (fonteIds.length === 0) return { passagens: [], erro: null };
+  const admin = createAdminClient();
+  const { data, error } = await admin
+    .from("ai_source_passages")
+    .select("knowledge_source_id, content, position, section_title, page_number, tags, locale")
+    .eq("organization_id", organizationId)
+    .in("knowledge_source_id", fonteIds)
+    .order("position", { ascending: true });
+  if (error) return { passagens: [], erro: error.message };
+  return { passagens: (data ?? []) as Passagem[], erro: null };
+}
+
+/**
+ * Extrai e grava o texto das fontes-documento que ainda não têm passagem nenhuma (T083 +
+ * T084, FR-004).
+ *
+ * POR QUE ISTO VIVE NO WORKER. A rota de upload chama `ingestPolicyFile` ANTES de inserir a
+ * linha da fonte — ela usa a extração como validação, para poder recusar o arquivo sem
+ * deixar registro órfão. Naquele instante não existe `organization_id` confiável para a
+ * passagem, então nada é gravado. Se ninguém retomasse depois, o documento ficaria para
+ * sempre aceito e não-buscável: o defeito exato que FR-004 nomeia. O worker é o lugar certo
+ * para retomar — ele já roda por evento, já é retentável, e a fonte já existe quando ele
+ * chega. Extração pesada também sai do caminho da requisição de graça.
+ *
+ * Falha de UMA fonte não derruba a rodada (FR-003: carregar material não pode destruir
+ * material não relacionado) — ela é carimbada como falha, fica visível na tela, e as demais
+ * fontes seguem sendo indexadas.
+ */
+async function materializarDocumentos(
+  organizationId: string,
+  agentId: string,
+  sources: Fonte[],
+  jaTemPassagem: Set<string>,
+): Promise<Passagem[]> {
+  const novas: Passagem[] = [];
+
+  for (const fonte of sources) {
+    if (jaTemPassagem.has(fonte.id)) continue;
+    const doc = caminhoDoDocumento(fonte);
+    if (!doc) continue;
+
+    try {
+      const r = await ingestPolicyFile({
+        organizationId,
+        agentId,
+        knowledgeSourceId: fonte.id,
+        blobPath: doc.blobPath,
+        ext: doc.ext,
+      });
+
+      if (r.passagens.length === 0) {
+        // Documento aceito do qual não saiu texto nenhum. Deixar assim é o silêncio que
+        // FR-004 proíbe — a tela diria "pronto" para um material que nunca responderá nada.
+        await registrarEstadoDasFontes(organizationId, {
+          tipo: "falha",
+          fontes: [fonte.id],
+          motivo:
+            "não foi possível extrair texto deste arquivo. Verifique se ele não é só imagem " +
+            "(PDF digitalizado) e envie uma versão com texto selecionável.",
+        });
+        logger.warn("rag-indexer: documento sem texto extraível", {
+          organization_id: organizationId,
+          knowledge_source_id: fonte.id,
+        });
+        continue;
+      }
+
+      for (const p of r.passagens) {
+        novas.push({
+          knowledge_source_id: fonte.id,
+          content: p.content,
+          position: p.position,
+          section_title: p.sectionTitle,
+          page_number: p.pageNumber,
+          tags: p.tags,
+          locale: p.locale,
+        });
+      }
+      logger.info("rag-indexer: texto de documento materializado", {
+        organization_id: organizationId,
+        knowledge_source_id: fonte.id,
+        passagens: r.passagens.length,
+      });
+    } catch (err) {
+      const detalhe = err instanceof Error ? err.message : String(err);
+      await registrarEstadoDasFontes(organizationId, {
+        tipo: "falha",
+        fontes: [fonte.id],
+        motivo: `falha ao ler o arquivo deste material: ${detalhe}`,
+      });
+      logger.error("rag-indexer: falha ao materializar texto de documento", {
+        organization_id: organizationId,
+        knowledge_source_id: fonte.id,
+        erro: detalhe,
+      });
+    }
+  }
+
+  return novas;
 }
 
 /**
@@ -379,21 +525,20 @@ async function handleKnowledgeSourceUpdated(
   // nunca casa com o escopo resolvido), ou, se alguém "consertar" com
   // `applies_to_all = true`, passa a responder pergunta da operadora errada. Os dois
   // desfechos são o defeito que a spec inteira existe para evitar.
+  //
+  // T084 · `source_metadata` entra no SELECT porque é lá que mora o caminho do arquivo
+  // (`blob_path`) de uma fonte que é DOCUMENTO. Sem ele não dá para saber que aquela fonte
+  // tem texto a materializar — e uma fonte de documento sem passagem gravada é justamente o
+  // material que FR-004 proíbe deixar em silêncio.
   const { data: sourceRows, error: srcErr } = await admin
     .from("ai_knowledge_sources")
-    .select("id, source_type, name, scope_id, applies_to_all")
+    .select("id, source_type, name, scope_id, applies_to_all, source_metadata")
     .eq("organization_id", row.organization_id)
     .eq("agent_id", agentId)
     .eq("status", "ready");
   if (srcErr) return { type: "error", detail: `sources_query_failed: ${srcErr.message}` };
 
-  const sources = (sourceRows ?? []) as {
-    id: string;
-    source_type: string;
-    name: string;
-    scope_id: string | null;
-    applies_to_all: boolean;
-  }[];
+  const sources = (sourceRows ?? []) as Fonte[];
   if (sources.length === 0) return skip("no_sources");
 
   // `tags` e `locale` também: são do ITEM, não da fonte, e hoje morriam aqui — o trecho
@@ -413,7 +558,32 @@ async function handleKnowledgeSourceUpdated(
     tags: string[] | null;
     locale: string | null;
   }[];
-  if (items.length === 0) return skip("no_content_to_index");
+
+  // T084 · A SEGUNDA ORIGEM DE CONTEÚDO — material que não é par pergunta/resposta.
+  //
+  // Até aqui o indexador lia EXCLUSIVAMENTE `ai_faq_items` e encerrava com
+  // `no_content_to_index` para qualquer outra fonte. Quem subia o manual da operadora via a
+  // fonte `ready` na tela e nenhum trecho buscável no acervo — material aceito e descartado
+  // em silêncio, o modo de falha que FR-004 proíbe pelo nome.
+  const idsDasFontes = sources.map((s) => s.id);
+  const { passagens: passagensJaGravadas, erro: erroDasPassagens } = await carregarPassagens(
+    row.organization_id,
+    idsDasFontes,
+  );
+  if (erroDasPassagens) {
+    return { type: "error", detail: `passages_query_failed: ${erroDasPassagens}` };
+  }
+  const passagens = [
+    ...passagensJaGravadas,
+    ...(await materializarDocumentos(
+      row.organization_id,
+      agentId,
+      sources,
+      new Set(passagensJaGravadas.map((p) => p.knowledge_source_id)),
+    )),
+  ];
+
+  if (items.length === 0 && passagens.length === 0) return skip("no_content_to_index");
 
   // Um chunk por par pergunta/resposta: a unidade de recuperação é a resposta
   // inteira. `chunkText` só entra quando a resposta é longa demais para um
@@ -427,6 +597,8 @@ async function handleKnowledgeSourceUpdated(
     appliesToAll: boolean;
     tags: string[];
     locale: string | null;
+    sectionTitle?: string | null;
+    pageNumber?: number | null;
   }[] = [];
   // Quem PARTICIPOU desta rodada. É o conjunto que pode ter o estado reescrito no fim —
   // as demais fontes ficam intocadas (T097).
@@ -448,6 +620,31 @@ async function handleKnowledgeSourceUpdated(
       planejadosPorFonte.set(fonte.id, (planejadosPorFonte.get(fonte.id) ?? 0) + 1);
     }
   }
+
+  // A passagem NÃO passa por `chunkText` de novo: ela já saiu do ingest no tamanho de um
+  // trecho (~1600 chars, com sobreposição). Repicar aqui cortaria a sobreposição no meio e
+  // faria a mesma frase virar dois trechos quase idênticos.
+  for (const p of passagens) {
+    const fonte = porFonte.get(p.knowledge_source_id);
+    if (!fonte) continue;
+    pedacos.push({
+      content: p.content,
+      sourceId: fonte.id,
+      sourceType: fonte.source_type,
+      // Mesma regra de T085: o eixo de escopo é o da FONTE. Passagem sem eixo some da
+      // busca; passagem com `applies_to_all` indevido responde pela operadora errada.
+      scopeId: fonte.scope_id,
+      appliesToAll: fonte.applies_to_all,
+      tags: p.tags ?? [],
+      locale: p.locale,
+      // FR-022 · a âncora legível. É o que separa "está no seu manual, seção Carências" de
+      // "trecho 47" na hora de o corretor conferir de onde veio a resposta.
+      sectionTitle: p.section_title,
+      pageNumber: p.page_number,
+    });
+    planejadosPorFonte.set(fonte.id, (planejadosPorFonte.get(fonte.id) ?? 0) + 1);
+  }
+
   if (pedacos.length === 0) return skip("no_chunks_generated");
 
   const participantes = [...planejadosPorFonte.keys()];
@@ -512,6 +709,10 @@ async function handleKnowledgeSourceUpdated(
           source_type: p.sourceType,
           tags: p.tags,
           locale: p.locale,
+          // Só aparecem quando o formato disse qual é — chave ausente é "não sei", que é
+          // diferente de `null` gravado como se fosse resposta.
+          ...(p.sectionTitle ? { section_title: p.sectionTitle } : {}),
+          ...(p.pageNumber != null ? { page_number: p.pageNumber } : {}),
         },
       },
       // Ver comentario no caminho de produto: esta e a constraint que existe.
