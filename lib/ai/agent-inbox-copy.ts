@@ -62,6 +62,10 @@ export const KIND_LABEL = {
   // o de cima é deliberado — lá alguém precisa LIGAR algo; aqui não há nada que o
   // usuário possa fazer, e prometer ação a quem não pode agir é pior que calar.
   gateway_unreachable: "As mensagens estão paradas: o serviço de conexão não responde",
+  // Fala do que ACONTECEU com a conversa, não do mecanismo. "Reconciliação" e
+  // "divergência" são palavras nossas; o que o corretor precisa saber é que há
+  // mensagem nova em conversa antiga, e que pode ter gente esperando resposta.
+  gateway_reconciliation_gap: "Mensagens chegaram atrasadas ao histórico",
   // Diz o que FALTA, não o que o guardrail fez. "Recusa por ausência de lastro" é
   // verdade e é inútil para quem lê: o dono do negócio precisa entender que existe um
   // cliente esperando e que a solução está na mão dele — carregar o material. O motivo

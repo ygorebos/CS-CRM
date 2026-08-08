@@ -65,6 +65,9 @@ export type InboxKind =
   // para ligar: o processo está fora, e nem entra nem sai mensagem. O Princípio
   // XIV declara o serviço como SPOF e proíbe que a queda seja silenciosa.
   | 'gateway_unreachable'
+  // (0130) A reconciliação recuperou mensagem que o caminho normal perdeu.
+  // Recuperar calado esconderia o defeito que a produz.
+  | 'gateway_reconciliation_gap'
   | 'assistance_without_grounding'
   | 'other';
 

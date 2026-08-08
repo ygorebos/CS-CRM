@@ -455,10 +455,32 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       drenar** (pendência mais velha que N minutos = alerta; hoje só o descarte alarma, e o
       empilhamento silencioso é justamente o sintoma de CRM fora do ar). **(FR-013)**
 
-- [ ] **T050** Reconciliação periódica do lado do CRM: pergunta ao gateway (T028) o que ele entregou
-      numa janela, grava o que faltar pelo caminho idempotente, e **alarma** na divergência —
-      reconciliar em silêncio esconde o defeito que se queria medir. É a segunda ponta que o
-      Princípio XIV exige. **(FR-013a)**
+- [X] **T050** ✅ Reconciliação periódica do lado do CRM — a segunda ponta que o Princípio XIV
+      exige. **(FR-013a)**
+  - **O que a T028 devolvia não bastava, e isso só apareceu ao consumir:** a varredura da janela dá
+    `external_id` + direção + instante. Suficiente para DESCOBRIR o buraco, insuficiente para tapá-lo
+    — com três campos não se reconstrói uma mensagem. Por isso o gateway ganhou a **fase 2**
+    (`POST .../reconciliation/fetch`, commit `1fb22b1` no worktree): o CRM manda os ids que não tem e
+    recebe **envelope**.
+  - **Duas fases, e a razão é o caso comum:** a janela quase sempre está completa. Uma fase só, que
+    já devolvesse tudo, pagaria o preço do caso raro em todo tique — corpo, mídia e contato de cada
+    mensagem de uma hora de conversa.
+  - **A reingestão usa `ingerirEnvelope`**, o mesmo caminho da entrega normal. Não existe código de
+    exceção para "mensagem que entrou pela reconciliação" — atalho aqui gravaria diferente do
+    principal, e a diferença só apareceria no dia do incidente.
+  - **Recuperar em silêncio é proibido, e é o coração da task.** Se toda rodada recupera mensagens e
+    ninguém fica sabendo, a rede de segurança vira **tapa-buraco permanente**: o defeito de origem
+    continua lá, agora invisível porque alguém o conserta a cada minuto. Recuperação > 0 escreve
+    `logger.error` **e** abre `gateway_reconciliation_gap` na Central (migration 0130 + apêndice +
+    MANIFEST). `warn` e não `critical`: as mensagens já estão na conversa certa; o que se pede é
+    conferir se alguém ficou sem resposta.
+  - **Divergência SEM recuperação sai como erro mesmo sem aviso:** não há o que o corretor faça, mas
+    há o que nós temos de olhar.
+  - **Cron próprio, a cada 5 min** (`docker-compose.prod.yml`), não pendurado no dreno: o dreno roda
+    a cada minuto porque o trabalho dele é latência; a reconciliação varre uma janela de 1 h contra
+    um sistema externo, e 60 varreduras achariam o que uma acha.
+  - **Prova:** `tests/unit/reconciliacao-nao-e-silenciosa.test.ts` (5). Sabotagens: pedir a janela
+    inteira em vez de só o que falta (2 vermelhos) e nunca abrir o aviso (1).
 - [X] **T051** ✅ Reversibilidade por canal: migrar e voltar sem tocar nos demais e sem perder
       mensagem em voo. **(FR-041)**
   - `PATCH /api/v1/channel-sessions/[id]/ingest-path`. A coluna era por conexão desde a 0119 — o que

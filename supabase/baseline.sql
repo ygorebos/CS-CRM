@@ -9105,6 +9105,14 @@ alter table public.agent_inbox_items
     -- uma variável e o envio funcionando; aqui o processo está fora, e nem entra
     -- nem sai mensagem. Fundir os dois faria o aviso mentir em metade dos casos.
     'gateway_unreachable',
+    -- (migration 0130, spec 004 §T050 / FR-013a) A reconciliação — a ponta que
+    -- PUXA do Princípio XIV — achou e recuperou mensagem que o caminho normal
+    -- perdeu. "Reconciliar em silêncio é proibido": sem este aviso, a rede de
+    -- segurança vira tapa-buraco permanente, com o defeito de origem intacto e
+    -- agora invisível, porque alguém o conserta a cada minuto. `warn` e não
+    -- `critical` porque as mensagens JÁ estão na conversa certa — o que se pede
+    -- é conferir se alguém ficou sem resposta, não uma ação de emergência.
+    'gateway_reconciliation_gap',
     'other'
   ));
 
