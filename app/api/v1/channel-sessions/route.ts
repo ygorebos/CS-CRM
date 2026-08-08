@@ -15,6 +15,7 @@ import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { createChannelSchema } from "@/lib/schemas/channels";
+import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 
@@ -94,6 +95,22 @@ export async function POST(req: NextRequest): Promise<Response> {
   // Nome de sessão único por canal — o hardcode `org_<8>` era 1 número por org.
   const sessionName = `org_${activeOrg.orgId.slice(0, 8)}_${randomUUID().replace(/-/g, "").slice(0, 6)}`;
 
+  // Segredo REAL por conexão, cifrado at-rest. Antes daqui ia
+  // `Buffer.from([0])` — um byte de enfeite —, e a rota de entrega do gateway é
+  // fail-closed sem válvula: com o placeholder ela recusaria 100% das entregas
+  // desta conexão. Sem cifra disponível não se grava: conexão que nasce incapaz
+  // de verificar entrega é defeito que só aparece na primeira mensagem, longe
+  // daqui, onde ninguém liga uma coisa à outra.
+  const segredoCifrado = await provisionarSegredoDeWebhook(supabase);
+  if (!segredoCifrado) {
+    return fail(
+      "invalid_request",
+      "cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — a conexão não foi criada",
+      422,
+      { requestId },
+    );
+  }
+
   const { data: created, error: insErr } = await supabase
     .from("channel_sessions")
     .insert({
@@ -102,7 +119,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       display_name: parsed.data.display_name ?? null,
       engine: "NOWEB",
       webhook_path_token: randomUUID().replace(/-/g, ""),
-      webhook_secret_encrypted: Buffer.from([0]),
+      webhook_secret_encrypted: segredoCifrado,
       status: "STARTING",
       last_status_change_at: new Date().toISOString(),
       consecutive_health_fails: 0,

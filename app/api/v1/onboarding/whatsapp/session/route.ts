@@ -10,6 +10,7 @@ import {
   type ChannelReactivationActor,
 } from "@/lib/channels/reactivate";
 import { getWahaClient } from "@/lib/waha/client";
+import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -92,6 +93,16 @@ async function ensureChannelSession(
     if (reErr) throw new Error(`channel_session_reactivate_failed: ${reErr.message}`);
     return existing.id;
   }
+  // Segredo REAL por conexão (ver lib/webhooks/provisionar-segredo.ts). Este é
+  // o caminho do onboarding — o do corretor —, e era ele que gravava o
+  // placeholder de um byte que faria a entrega do gateway recusar tudo.
+  const segredoCifrado = await provisionarSegredoDeWebhook(supabase);
+  if (!segredoCifrado) {
+    throw new Error(
+      "channel_session_secret_unavailable: cifra indisponível (GUC app.nuvemshop_oauth_key ausente)",
+    );
+  }
+
   const { data: created, error } = await supabase
     .from("channel_sessions")
     .insert({
@@ -99,7 +110,7 @@ async function ensureChannelSession(
       waha_session_name: sessionName,
       engine: "NOWEB",
       webhook_path_token: crypto.randomUUID().replace(/-/g, ""),
-      webhook_secret_encrypted: Buffer.from([0]),
+      webhook_secret_encrypted: segredoCifrado,
       status: "STARTING",
       last_status_change_at: new Date().toISOString(),
       consecutive_health_fails: 0,
