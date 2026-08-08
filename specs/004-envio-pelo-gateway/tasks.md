@@ -817,3 +817,27 @@ deixaria a armadilha armada para o próximo caso negativo que alguém escrever.
 
 ⚠️ **A correção NÃO foi re-executada** — o ambiente foi derrubado antes. Ela é a primeira coisa a
 rodar na próxima sessão, e o custo agora é subir o ambiente, não descobrir o que fazer.
+
+### Segunda tentativa da T063 (2026-08-08, mesma sessão)
+
+**O ambiente virou UM script e subiu inteiro** (`worktree` + `pnpm install` + `supabase start` +
+extensões + `baseline.sql` + `bootstrap-owner` + `next build` + gateway + provedor falso). As três
+armadilhas documentadas acima não custaram nada desta vez — é a prova de que a receita funciona.
+
+**Avanço:** descoberto e tratado que **conta recém-bootstrapada cai no WIZARD**, não em `/app`.
+Esperar só por `/app` fazia todo caso morrer no login dizendo "navegação não aconteceu" em vez de
+"foi para outro lugar". A spec ganhou `concluirWizard()` — que marca **só** o `onboarded_at`, porque
+"estado vazio" (SC-006) é sobre o que o USUÁRIO ainda não fez (sem canal, sem conhecimento, sem
+lead), não sobre o wizard, que tem jornada e spec próprias.
+
+**Onde parou:** com o wizard resolvido, o `beforeAll` passa e o **login ainda não navega**. Não
+diagnostiquei — acabou o contexto da sessão, e diagnosticar por palpite é como se escreve o próximo
+verde falso. O ambiente foi derrubado (`supabase stop`, worktree removido, zero containers `f6004`,
+app da outra sessão intacto em 307).
+
+**Próximo passo, concreto:** rodar `bash` do script de ambiente (registrado no scratchpad da sessão),
+e então investigar o login — hipóteses na ordem: (a) a senha do `.env.local` não bate com a que o
+`bootstrap-owner` gravou; (b) MFA obrigatório para `admin` interceptando (as specs irmãs usam
+`tests/e2e/helpers/login-admin.ts` justamente por isso, e esta não usa); (c) o clique em "Entrar"
+não está encontrando o botão. A (b) é a mais provável — a doutrina exige MFA TOTP para `admin`, e o
+dono do bootstrap É admin.

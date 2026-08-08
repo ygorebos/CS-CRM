@@ -95,10 +95,40 @@ async function entrar(page: Page): Promise<void> {
   await page.locator("#email").fill(OWNER_EMAIL);
   await page.locator("#password").fill(OWNER_PASSWORD);
   await page.getByRole("button", { name: /entrar/i }).click();
-  await page.waitForURL(/\/app/, { timeout: 30_000 });
+  // Conta recém-bootstrapada cai no WIZARD, não em `/app` — medido em
+  // 2026-08-08, e é o comportamento certo (a `vps-fresh-onboarding` o congela
+  // no caso J1.1). Esperar só por `/app` fazia todo caso desta spec morrer no
+  // login, dizendo "navegação não aconteceu" em vez de "foi para outro lugar".
+  await page.waitForURL(/\/(app|onboarding)/, { timeout: 30_000 });
+}
+
+/**
+ * Marca o wizard como concluído — e SÓ ele.
+ *
+ * "Conta nova, estado vazio" (SC-006) é sobre o que o USUÁRIO ainda não fez:
+ * nenhum canal, nenhuma base de conhecimento, nenhum lead. Não é sobre o wizard,
+ * que é um passo de configuração inicial com tela própria. Passar por ele aqui
+ * mede a Central de Conexões no estado que interessa em vez de medir o wizard
+ * duas vezes — a jornada dele já tem spec (`vps-fresh-onboarding`).
+ */
+async function concluirWizard(): Promise<void> {
+  const { createClient } = await import("@supabase/supabase-js");
+  const svc = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    { auth: { persistSession: false } },
+  );
+  await svc
+    .from("organizations")
+    .update({ onboarded_at: new Date().toISOString() })
+    .is("onboarded_at", null);
 }
 
 test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)", () => {
+  test.beforeAll(async () => {
+    await concluirWizard();
+  });
+
   test.beforeEach(async ({ page }) => {
     await entrar(page);
     await page.goto("/app/connections");
