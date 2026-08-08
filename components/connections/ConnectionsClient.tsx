@@ -613,7 +613,19 @@ function QrDialog({
    * seria pior que não ter nenhuma.
    */
   useEffect(() => {
-    if (status !== "SCAN_QR_CODE") return;
+    // `STARTING` entra junto com `SCAN_QR_CODE`, e é o que destrava o canal do
+    // gateway (spec 004, T063 — medido).
+    //
+    // O impasse: a conexão nasce `created` do lado do gateway, que traduz para
+    // `STARTING`; e o material de pareamento só existe DEPOIS de alguém chamar
+    // `pair`. A tela esperava `SCAN_QR_CODE` para pedir o material, e o estado
+    // só vira `awaiting_scan` por causa desse mesmo pedido. Ninguém dava o
+    // primeiro passo, e o corretor ficava em "Preparando o código…" para sempre
+    // com a instância já criada do outro lado.
+    //
+    // Pedir em `STARTING` não faz mal ao canal antigo: lá a rota devolve o
+    // endereço da imagem, que é o que ela sempre devolveu.
+    if (status !== "SCAN_QR_CODE" && status !== "STARTING") return;
     let cancelado = false;
 
     const buscar = async () => {
@@ -648,7 +660,7 @@ function QrDialog({
   }, [status, sessionId, tick]);
 
   useEffect(() => {
-    if (status !== "SCAN_QR_CODE") return;
+    if (status !== "SCAN_QR_CODE" && status !== "STARTING") return;
     // A conta mora em `lib/channels/validade-do-qr.ts` para ser exercitável sem
     // montar diálogo, cliente HTTP e relógio.
     const t = setTimeout(() => setTick((n) => n + 1), proximoPedidoDeQrMs(material?.validade));
@@ -665,7 +677,7 @@ function QrDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex min-h-[16rem] flex-col items-center justify-center gap-3 py-2">
-          {status === "SCAN_QR_CODE" ? (
+          {status === "SCAN_QR_CODE" || (status === "STARTING" && material?.imagem) ? (
             // Sem `key={tick}`: trocar só o src reaproveita o mesmo <img>, e o
             // browser segura o frame anterior até decodificar o novo. Remontar o
             // elemento a cada refresh é o que causaria o flash branco.

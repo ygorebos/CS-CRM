@@ -1099,3 +1099,27 @@ do envio responde isso.**
 **Impacto declarado:** a T050 está correta por teste e **não está provada em campo para o lado
 outbound**. Para inbound, a premissa original continua de pé — a mensagem do cliente chega pelo
 webhook e o provedor a indexa.
+
+### T063 — o impasse do estado, encontrado e parcialmente corrigido (2026-08-08)
+
+Depois de o sincronismo entrar, a execução mostrou o **próximo** elo e ele é um impasse de desenho:
+
+1. a conexão nasce `created` no gateway → `statusDeCanalPara` traduz para **`STARTING`**;
+2. o material de pareamento **só existe depois** de alguém chamar `POST /pair`;
+3. a tela esperava **`SCAN_QR_CODE`** para pedir esse material;
+4. e o estado só vira `awaiting_scan` **por causa desse pedido**.
+
+Ninguém dá o primeiro passo. O corretor fica em "Preparando o código…" para sempre, com a instância
+**já criada e paga** do outro lado. Nenhum teste de peça pega isso: cada uma das quatro está certa.
+
+**Corrigido:** a tela passa a pedir o material em `STARTING` também. Não faz mal ao canal antigo —
+lá a rota devolve o endereço da imagem, que é o que ela sempre devolveu.
+
+**Ainda 2 de 5 depois disso.** O caso do QR segue vermelho e **não foi diagnosticado** — acabou o
+contexto da sessão. O próximo passo é ler
+`test-results/**/error-context.md`, que nesta sessão resolveu quatro diagnósticos em um minuto cada,
+enquanto cada suposição minha custou uma rodada inteira.
+
+**Higiene:** toda instância criada por estas execuções foi apagada (`DELETE` 204, registro do gateway
+vazio ao fim, verificado nas duas rodadas). Ambiente derrubado, zero containers `f6004`, app da
+outra sessão em 307.
