@@ -425,8 +425,26 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
     segredo guardado em módulo, env ou cache passaria por um teste que só comparasse dois valores
     diferentes na mesma rodada; não passa por este.
   - Prova: caso `T047/FR-037` em `tests/unit/portas-de-conexao-convergem.test.ts`.
-- [ ] **T048** [SABOTAGEM] Provar que os testes das Fases 3 e 4 vigiam: quebrar a resolução de
-      conexão e ver T032 vermelho; remover a checagem de papel e ver T045 vermelho. **(SC-012)**
+- [X] **T048** ✅ [SABOTAGEM] **Executada em 2026-08-08, as duas, com o resultado observado.** Não é
+      declaração de intenção: os arquivos foram editados, a suíte rodou, o vermelho foi lido e tudo
+      restaurado (typecheck zerado depois).
+
+      **Sabotagem A — resolução da conexão do gateway quebrada** (`resolveSessionRef` passando a ler
+      `waha_session_name` no ramo do gateway, que é NULO nessas linhas): **1 vermelho** —
+      `endereco-da-conexao-no-envio` › "todo provider que sabe enviar tem ramo de referência". É
+      exatamente o defeito que a T035 encontrou em produção-potencial: envio saindo sem
+      `connection_id`. Prova que o teste vigia a RESOLUÇÃO, e não só a existência da função.
+
+      **Sabotagem B — checagem de papel rebaixada** (`requireRole("admin")` → `"viewer"` nas rotas de
+      pareamento): **2 vermelhos** em `rbac-matrix` — a porta do onboarding para `manager` e para
+      `viewer`, esta última cobrando também o audit `authz.denied`. Prova que a rede pega o furo
+      exato que a T045 fechou.
+
+      **Sabotagens das fatias anteriores, todas executadas e registradas na task de cada uma:**
+      redrive forçado ao canal antigo (2 vermelhos), TTL de mídia de volta a 600 s (1), `error_code`
+      de grupo fixo (1), estado definitivo na resposta síncrona (6), legenda descartada (1), 502
+      contando como "no ar" (1), aviso que não fecha (1), `ingest_path` removido (1), compensação
+      removida (1), validade do QR ignorada (3).
 
 ---
 
