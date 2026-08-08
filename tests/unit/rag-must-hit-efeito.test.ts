@@ -85,6 +85,8 @@ describe("rag_must_hit tem efeito observável, não só persistência", () => {
             material_id: "m",
             layer: "tenant" as const,
             similarity: 0.9,
+            // Do assunto por construção — pertinência (T138) tem suíte própria.
+            categorias: ["cobranca", "acesso", "rede", "cobertura", "prazos", "canais", "regras"] as const,
           })),
         }),
       );

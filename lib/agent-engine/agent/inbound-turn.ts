@@ -37,6 +37,7 @@ import { getLeadContext, type LeadContext, type LeadContextResult } from '../edg
 import { citationsFromHits, searchKnowledge } from './search-knowledge';
 import { escalarAssistenciaSemLastro } from './escalar-sem-lastro';
 import type { Grounding } from '../guardrails/assistance-grounding';
+import { detectarAssuntoDeAssistencia } from '../guardrails/lexico-assistencia';
 import {
   blocoDePerguntaDeEscopo,
   carregarEscoposDoTenant,
@@ -1538,6 +1539,10 @@ export async function runAgentTurn(
               material_id: r.material_id,
               layer: r.layer,
               similarity: r.similarity,
+              // O ASSUNTO do trecho, pela mesma régua que classifica a afirmação (T138).
+              // Calculado aqui, onde o texto do trecho existe: o gate recebe categoria
+              // fechada e nunca o conteúdo — que não pode entrar no trace persistido.
+              categorias: detectarAssuntoDeAssistencia(r.content).categorias,
               ...(r.source_ref !== null ? { source_ref: r.source_ref } : {}),
             })),
           }));

@@ -42,6 +42,14 @@ export interface Grounding {
   readonly material_id: string | null;
   readonly layer: 'tenant' | 'catalog';
   readonly similarity: number;
+  /**
+   * Assuntos DO TRECHO, pela mesma régua que classifica a afirmação (T138).
+   *
+   * **Obrigatório de propósito.** Opcional, ele seria esquecido em algum produtor novo e
+   * o buraco voltaria em silêncio — com a suíte verde, que é como este defeito nasceu.
+   * Obrigatório, o compilador aponta cada lugar que constrói uma âncora.
+   */
+  readonly categorias: readonly CategoriaAssistencia[];
   /** Título, escopo e data de atualização — a cópia histórica que a tela mostra (FR-023). */
   readonly source_ref?: Record<string, unknown>;
 }
@@ -173,18 +181,76 @@ export const assistanceGroundingGate: Gate = {
     // `minCitations` vem do guardrail `rag_must_hit` da tela (FR-015). Ausente = 1: uma
     // âncora é o piso do requisito, não uma preferência configurável para baixo.
     const piso = Math.max(1, ctx.minCitations ?? 1);
-    if (ancoras.length >= piso) return { pass: true };
+
+    // ── Pertinência (T138): a âncora tem de falar DO QUE a afirmação diz ──────────────
+    //
+    // Contar âncora não basta, e isto foi MEDIDO, não temido: com embeddings reais no
+    // limiar do produto (0.40), "como funciona o reembolso" ancorou em "Como consultar a
+    // rede credenciada" com 0.460. Um texto de rede autorizava uma afirmação sobre
+    // reembolso — e a resposta saía COM citação, parecendo mais confiável.
+    //
+    // Não se conserta no limiar: a âncora correta mais fraca medida foi 0.495, colada na
+    // errada mais forte. Não há corte que as separe. Similaridade mede distância entre
+    // vetores; o que falta é ASSUNTO, e o assunto já existe aqui — a mesma classificação
+    // determinística que decide se a frase é afirmação de assistência.
+    //
+    // A régua é por FRASE, e não pela mensagem inteira, pelo mesmo motivo de FR-018: uma
+    // frase ancorada não empresta lastro para a de baixo. "O reembolso sai em 30 dias. A
+    // rede tem 40 hospitais." com âncora só de reembolso é meia mensagem inventada.
+    const assistivas = frasesDeTexto(ctx.body)
+      .map((f) => classificarAfirmacaoDeAssistencia(f))
+      .filter((c) => c.isAssistanceClaim);
+
+    const pertinente = (a: Grounding, cats: readonly CategoriaAssistencia[]): boolean =>
+      a.categorias.some((c) => cats.includes(c));
+
+    // Chamador afirmou que é assistência num corpo sem termo do léxico. Não há categoria
+    // para comparar, e inventar uma seria pior que declarar que não avaliou: o gate volta
+    // a contar, e o trace diz que a pertinência não foi julgada (T030 — o léxico é
+    // calibrado sobre medição, e um `pass` mudo apagaria o caso).
+    if (assistivas.length === 0) {
+      if (ancoras.length >= piso) return { pass: true };
+      return {
+        pass: false,
+        code: 'assistencia_sem_lastro',
+        reason: RECUSA_SEM_LASTRO,
+        detail: { ancoras: ancoras.length, piso, pertinencia: 'nao_avaliada' },
+      };
+    }
+
+    const categorias = [...new Set(assistivas.flatMap((c) => c.categorias))];
+    const pertinentes = ancoras.filter((a) => pertinente(a, categorias));
+    const frasesSemAncora = assistivas.filter(
+      (c) => !ancoras.some((a) => pertinente(a, c.categorias)),
+    ).length;
+
+    if (frasesSemAncora === 0 && pertinentes.length >= piso) return { pass: true };
 
     return {
       pass: false,
       code: 'assistencia_sem_lastro',
-      reason:
-        'esta mensagem afirma um procedimento da operadora sem nenhum trecho do acervo que a sustente. ' +
-        'Não invente o procedimento e não responda "com o que você já sabe": diga ao cliente, em ' +
-        'linguagem simples, que a informação será confirmada por uma pessoa, e encerre o turno.',
-      // Contagens e categorias fechadas. O corpo NUNCA entra no detail — é o texto que o
-      // modelo escreveu sobre um cliente, e detail é persistido em before_send_traces.
-      detail: { ancoras: ancoras.length, piso },
+      reason: pertinentes.length === 0 && ancoras.length > 0 ? RECUSA_SEM_PERTINENCIA : RECUSA_SEM_LASTRO,
+      // Contagens e categorias FECHADAS. O corpo e os termos casados NUNCA entram — o
+      // detail é persistido em `before_send_traces`, e o corpo é texto sobre um cliente.
+      detail: {
+        ancoras: ancoras.length,
+        pertinentes: pertinentes.length,
+        piso,
+        // Vocabulário fechado, seguro para o trace — os TERMOS casados nunca saem daqui.
+        categorias: categorias.join(','),
+        frases_sem_ancora: frasesSemAncora,
+      },
     };
   },
 };
+
+const RECUSA_SEM_LASTRO =
+  'esta mensagem afirma um procedimento da operadora sem nenhum trecho do acervo que a sustente. ' +
+  'Não invente o procedimento e não responda "com o que você já sabe": diga ao cliente, em ' +
+  'linguagem simples, que a informação será confirmada por uma pessoa, e encerre o turno.';
+
+const RECUSA_SEM_PERTINENCIA =
+  'os trechos recuperados do acervo falam de OUTRO assunto que não o desta afirmação — eles não a ' +
+  'sustentam, por mais parecidos que tenham parecido na busca. Não use trecho de um assunto para ' +
+  'afirmar sobre outro: diga ao cliente, em linguagem simples, que a informação será confirmada ' +
+  'por uma pessoa, e encerre o turno.';
