@@ -723,7 +723,7 @@ que Auth e Storage não entram em nada do que a T066 mede.
 | Task | Falta |
 |---|---|
 | T060, T061 | **Número de WhatsApp real** entregando, para medir p95 do clique à chegada e estado final |
-| T063 | **Auth (GoTrue) + Next servido + browser.** É a única que precisa do stack Supabase inteiro: login de conta nova não sai com PostgREST sozinho, e o prelúdio do `test-db.sh` cria um `auth.users` de STUB que o GoTrue não aceita. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
+| T063 | **TENTADA em 2026-08-08, e o ambiente FUNCIONOU.** O que falhou foi a minha spec — ver abaixo |
 | T067 | **Celular real** recebendo mídia. Não há substituto — o requisito é o anexo abrir no aparelho do destinatário |
 
 **Por que as de banco/app não foram executadas aqui:** esta máquina roda ambientes de outras sessões
@@ -772,3 +772,35 @@ Fase 3 + Fase 4                ──▶ Fase 5 ──▶ Fase 6
 placeholder no nível do banco, T071 cron de retenção nunca agendado (LGPD). Não bloqueiam esta spec,
 mas seguem contando — e T071 **não** é dispensada pela decisão: `webhook_events_log` continua em uso
 pelos demais provedores.
+
+---
+
+### T063 — tentada, com o ambiente de pé (2026-08-08)
+
+**O bloqueio de ambiente caiu.** Worktree próprio (`.next/` isolado, sem tocar no da outra sessão),
+`supabase start` com `project_id = deskcomm-f6004` e portas 553xx (nenhuma colisão com os dois stacks
+vivos), `baseline.sql` aplicado — 101 tabelas —, `bootstrap-owner.ts`, `next build` e `next start`.
+App respondendo **307** com `gateway: ok` no health. **A receita das 5 etapas funciona.**
+
+**Duas armadilhas medidas no caminho, que a próxima sessão não precisa redescobrir:**
+
+1. O `supabase start` sobe um Postgres **sem** `vector`/`citext`/`pg_trgm` no schema `public`, e o
+   `baseline.sql` falha na linha 911 com `type public.vector does not exist`. Criar as três extensões
+   ANTES resolve.
+2. `pkill -f "next start"` **mata o próprio shell** que o executa (a string casa com a linha de
+   comando dele). Matar por porta (`fuser -k 3999/tcp`) é o caminho.
+3. O Playwright **gerencia o próprio `webServer`**: um `next start` já rodando na porta faz o run
+   abortar. Deixe o Playwright subir o servidor, e forneça o `.env.e2e`.
+
+**O que falhou foi a spec, não o produto: 2 passaram, 3 falharam por FALTA DE LOGIN.** Os três casos
+navegam para `/app/connections` sem sessão autenticada, caem no redirecionamento para o login, e o
+botão "Conectar número" não existe naquela tela. As specs irmãs resolvem isso com `storageState`
+(ver `vps-fresh-onboarding.spec.ts`, que loga e salva o estado em `.e2e-owner.json`) — a minha não
+carrega esse passo.
+
+**Consequência que vale registrar:** o caso 2 ("estado vazio não nomeia provedor") **passou**, e
+passou medindo a **tela de login**. Um verde que não prova nada, exatamente do tipo que a T062 quase
+me deu com o 95,9%. A correção é o `storageState`, e ela vem junto com a próxima execução.
+
+**Ambiente derrubado ao fim:** `supabase stop`, portas liberadas, worktree removido, zero containers
+`f6004`, e o app da outra sessão intacto em 307.
