@@ -57,8 +57,13 @@ export interface ClassificacaoDeAssistencia {
  * Divide em frases preservando o terminador. Quebra de linha conta como fim de frase:
  * mensagem de WhatsApp costuma listar passos em linhas soltas, sem ponto final, e cada
  * passo é uma afirmação independente.
+ *
+ * **Exportada** porque FR-018 (veto por AFIRMAÇÃO, não por mensagem) precisa da mesma
+ * régua: `lastro-por-escopo.ts` decide frase a frase o que pode sair, e duas definições de
+ * "frase" fariam a classificação e a partição discordarem sobre o mesmo texto — a
+ * divergência apareceria como afirmação recusada que o gate deixaria passar, ou o inverso.
  */
-function frases(texto: string): string[] {
+export function frasesDeTexto(texto: string): string[] {
   return texto
     .split(/(?<=[.!?])\s+|\n+/)
     .map((f) => f.trim())
@@ -83,7 +88,7 @@ export function classificarAfirmacaoDeAssistencia(texto: string): ClassificacaoD
     return { isAssistanceClaim: false, categorias: [], motivo: 'sem_assunto' };
   }
 
-  const comAssunto = frases(texto).filter((f) => detectarAssuntoDeAssistencia(f).achou);
+  const comAssunto = frasesDeTexto(texto).filter((f) => detectarAssuntoDeAssistencia(f).achou);
   // `comAssunto` vazio só acontece se o termo cruzar fronteira de frase — e nesse caso
   // o texto contém o assunto sem que nenhuma frase isolada o contenha. Bias: afirmação.
   const todasPerguntas = comAssunto.length > 0 && comAssunto.every((f) => f.endsWith('?'));
