@@ -72,6 +72,14 @@ export const gatewayAdapter: ChannelAdapter = {
       corpo.midia_url = envelope.media.url;
       corpo.midia_mime = envelope.media.mime ?? undefined;
       corpo.nome_arquivo = envelope.media.filename ?? undefined;
+      // A LEGENDA viaja em `texto`, o mesmo campo do envio de texto — é assim
+      // que o gateway a repassa ao provedor (`sender/dispatch.go:63`, `Texto`
+      // ao lado de `MidiaURL`). Medido na análise da Fase 3: a primeira versão
+      // deste arquivo simplesmente não mandava a legenda, e o envio de imagem
+      // com texto chegava mudo ao cliente — sem erro, sem log, sem nada. Os
+      // dois adapters que já existiam mandam (`lib/waha/media-send.ts:24`,
+      // `meta-cloud.ts:51`); só o novo esquecia.
+      if (envelope.media.caption) corpo.texto = envelope.media.caption;
     }
 
     const resposta = await fetch(`${baseUrl()}/v1/messages`, {

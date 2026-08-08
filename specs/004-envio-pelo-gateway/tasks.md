@@ -257,6 +257,19 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
   - **O typecheck cobrou a tela:** `Record<InboxKind, string>` em `lib/ai/agent-inbox-copy.ts`
     reprovou o kind sem cópia. Peça nova sem porta de saída não compila — é o mapa vivo funcionando.
   - Verde: `pnpm test:unit` 3106/3106, `pnpm test:db` 555/555, typecheck e `lint-channels` zerados.
+
+### Análise de fim da Fase 3 (2026-08-08) — um achado, corrigido antes de seguir
+
+Conferido o corpo do `POST /v1/messages` **contra a struct Go de verdade**
+(`internal/handlers/messages.go:33-56`), campo por campo: `connection_id`, `to`, `tipo`, `texto`,
+`midia_url`, `midia_mime`, `nome_arquivo` e a resposta `message_id` batem.
+
+**O que NÃO batia: a legenda.** O adapter montava a mídia sem `media.caption`. O gateway repassa a
+legenda em `texto`, ao lado de `midia_url` (`sender/dispatch.go:63` — `Texto` viaja junto com
+`MidiaURL`), e os **dois** adapters que já existiam mandam (`lib/waha/media-send.ts:24`,
+`meta-cloud.ts:51`). Só o novo esquecia — e o desfecho é da mesma família dos outros defeitos desta
+fase: a foto chegava ao cliente **sem uma palavra**, sem erro, sem log, e com o CRM registrando
+envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda) reprova.
 - [X] **T038** ✅ Mídia entregue por referência de endereço, com validade **≥ 1 h** — cobre a
       retentativa do gateway mais a busca do provedor, com margem para reinício. **(FR-024)**
   - **Defeito medido:** o handler assinava a URL por **600 s**. Dez minutos cobrem o canal que baixa

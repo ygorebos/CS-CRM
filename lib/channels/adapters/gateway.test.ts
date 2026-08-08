@@ -77,6 +77,27 @@ describe("gatewayAdapter.send", () => {
     expect(corpo.midia_mime).toBe("image/png");
   });
 
+  it("a legenda da mídia viaja — imagem com texto não chega muda", async () => {
+    // Achado na análise de fim da Fase 3: a primeira versão do adapter ignorava
+    // `media.caption`. O gateway repassa a legenda no campo `texto`, ao lado da
+    // mídia (`sender/dispatch.go:63`), e os dois adapters antigos já mandavam —
+    // só o novo esquecia. O cliente recebia a foto sem uma palavra, e nada no
+    // CRM indicava que faltou algo: para ele o envio deu certo.
+    fetchMock.mockResolvedValue(respostaOk({ message_id: "wamid-l" }));
+    await gatewayAdapter.send({
+      sessionRef: "conn-1",
+      to: "+55",
+      kind: "image",
+      media: {
+        url: "https://storage/assinada.png",
+        mime: "image/png",
+        caption: "olha a proposta que preparei",
+      },
+    });
+    const corpo = JSON.parse((fetchMock.mock.calls[0] as [string, RequestInit])[1].body as string);
+    expect(corpo.texto).toBe("olha a proposta que preparei");
+  });
+
   it("resposta sem message_id devolve null — nunca inventa id (FR-019)", async () => {
     fetchMock.mockResolvedValue(respostaOk({}));
     const res = await gatewayAdapter.send({ sessionRef: "c", to: "+55", kind: "text", body: "x" });
