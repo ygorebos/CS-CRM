@@ -33,7 +33,9 @@ import {
   ACAO_CRIADO,
   COLUNAS_DO_ESCOPO,
   ENDPOINT_DA_CRIACAO,
+  TETO_DE_ESCRITA,
   acharColisaoDeNome,
+  aplicarTetoDaOrganizacao,
   codificarCursor,
   contarMateriais,
   criarEscopoSchema,
@@ -127,17 +129,27 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!authz.ok) return authz.response;
   const { user, org } = authz;
 
+  // ── teto (item 6 do Definition of Done) ───────────────────────────────────
+  // DEPOIS do papel, para que o 403 de quem não pode escrever não gaste orçamento de quem
+  // pode; ANTES de ler o corpo, para que o pedido barrado não custe nem o parse.
+  const teto = await aplicarTetoDaOrganizacao(org.orgId, TETO_DE_ESCRITA, requestId);
+  if (teto.excedido) return teto.excedido;
+
   let bruto: unknown;
   try {
     bruto = await req.json();
   } catch {
-    return fail("invalid_request", "Body JSON inválido.", 400, { requestId });
+    return fail("invalid_request", "Body JSON inválido.", 400, {
+      requestId,
+      headers: teto.headers,
+    });
   }
 
   const parsed = criarEscopoSchema.safeParse(bruto);
   if (!parsed.success) {
     return fail("validation_failed", "Dados inválidos.", 422, {
       requestId,
+      headers: teto.headers,
       details: parsed.error.flatten().fieldErrors as Record<string, unknown>,
     });
   }
@@ -168,10 +180,14 @@ export async function POST(req: NextRequest): Promise<Response> {
           "idempotency_conflict",
           "Esta Idempotency-Key já foi usada com outro conteúdo.",
           409,
-          { requestId },
+          { requestId, headers: teto.headers },
         );
       }
-      return ok(guardada.response_body as EscopoDoTenant, { requestId, status: 201 });
+      return ok(guardada.response_body as EscopoDoTenant, {
+        requestId,
+        status: 201,
+        headers: teto.headers,
+      });
     }
   }
 
@@ -185,7 +201,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     .select("id, display_name, catalog_scope_id, is_active")
     .eq("organization_id", org.orgId);
   if (erroDeLeitura) {
-    return fail("internal_error", "Erro ao verificar os escopos existentes.", 500, { requestId });
+    return fail("internal_error", "Erro ao verificar os escopos existentes.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
   }
 
   const colisao = acharColisaoDeNome(
@@ -206,6 +225,7 @@ export async function POST(req: NextRequest): Promise<Response> {
         : `${rotulo.singular} "${colisao.display_name}" já existe nesta conta. Abra o registro existente ou escolha outro nome.`;
     return fail("escopo_ja_existe", mensagem, 409, {
       requestId,
+      headers: teto.headers,
       details: { existing_id: colisao.id },
     });
   }
@@ -227,7 +247,10 @@ export async function POST(req: NextRequest): Promise<Response> {
     .single();
 
   if (erroDeInsert || !criado) {
-    return fail("internal_error", "Erro ao criar o escopo de conhecimento.", 500, { requestId });
+    return fail("internal_error", "Erro ao criar o escopo de conhecimento.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
   }
 
   const linha = criado as unknown as LinhaDeEscopo;
@@ -268,5 +291,5 @@ export async function POST(req: NextRequest): Promise<Response> {
       .then(() => undefined);
   }
 
-  return ok(corpo, { requestId, status: 201 });
+  return ok(corpo, { requestId, status: 201, headers: teto.headers });
 }

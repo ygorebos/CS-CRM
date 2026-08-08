@@ -16,8 +16,11 @@
  * a quem cobrar a correção de um material, e são pessoas diferentes nas duas camadas.
  */
 import { createHash } from "node:crypto";
+import type { NextResponse } from "next/server";
 import { z } from "zod";
 
+import { checkRateLimit } from "@/lib/ai/dispatcher/rate-limit";
+import { fail, type ApiError } from "@/lib/api/wrappers";
 import type { AuditAction } from "@/lib/audit/actions";
 import {
   ROTULO_PADRAO,
@@ -59,6 +62,20 @@ export const ACAO_ATUALIZADO: AuditAction = "knowledge_scope.updated";
 export const ACAO_ATIVADO: AuditAction = "knowledge_scope.activated";
 /** Trava 4 (FR-008): o material daquele escopo ficou inerte para este tenant. */
 export const ACAO_DESATIVADO: AuditAction = "knowledge_scope.deactivated";
+/**
+ * Material próprio carregado (T088, FR-004).
+ *
+ * ⚠️ `as AuditAction` pelo MESMO motivo declarado acima, e é dívida com prazo: o literal
+ * ainda não está na união de `lib/audit/actions.ts`, que é arquivo compartilhado e está
+ * fora do conjunto de escrita desta rota. Quem integrar acrescenta a linha lá e apaga o
+ * cast. A coluna `api_audit_log.action` é `text` sem CHECK, então a trilha É gravada
+ * enquanto isso — o que falta é a união reconhecer o código, não o banco aceitá-lo.
+ *
+ * Ação PRÓPRIA, e não um `knowledge_scope.updated` com o material escondido no metadata:
+ * quem for investigar "de onde saiu essa resposta" procura pelo material que entrou, e um
+ * código genérico somaria isso a "renomearam o escopo" no mesmo balde.
+ */
+export const ACAO_MATERIAL_CRIADO: AuditAction = "knowledge_scope.material_added";
 
 // ---------------------------------------------------------------------------
 // Formas
@@ -268,6 +285,100 @@ export type CriarEscopo = z.infer<typeof criarEscopoSchema>;
 export type AtualizarEscopo = z.infer<typeof atualizarEscopoSchema>;
 
 // ---------------------------------------------------------------------------
+// Teto de requisições (Definition of Done, item 6)
+// ---------------------------------------------------------------------------
+
+export interface TetoDoEscopo {
+  /** Prefixo do balde no Redis. A organização é acrescentada a ele em `aplicarTeto`. */
+  balde: string;
+  limite: number;
+  janelaSeg: number;
+}
+
+/**
+ * Escrita de escopo: criar e renomear/ligar/desligar. 30/min é largo para o gesto humano
+ * (o corretor liga um punhado de operadoras e para) e estreito para laço de script.
+ */
+export const TETO_DE_ESCRITA: TetoDoEscopo = {
+  balde: "knowledge_scopes:write",
+  limite: 30,
+  janelaSeg: 60,
+};
+
+/**
+ * Carga de material é mais apertada que o resto da escrita porque cada pedido pode trazer
+ * até 20 MB e disparar extração de PDF — o custo de um pedido aqui não se compara ao de um
+ * PATCH de interruptor, e um teto único obrigaria a escolher entre proteger o servidor e
+ * estorvar quem só está ligando escopo.
+ */
+export const TETO_DE_MATERIAL: TetoDoEscopo = {
+  balde: "knowledge_scopes:material",
+  limite: 12,
+  janelaSeg: 60,
+};
+
+export interface ResultadoDoTeto {
+  /** Resposta 429 pronta quando o teto estourou; `null` quando pode seguir. */
+  excedido: NextResponse<ApiError> | null;
+  /** `X-RateLimit-*` para acompanhar TODA resposta da mutação, estourando ou não. */
+  headers: Record<string, string>;
+}
+
+/**
+ * Aplica `checkRateLimit` (`lib/ai/dispatcher/rate-limit.ts`) às MUTAÇÕES desta superfície.
+ *
+ * ## O balde é por ORGANIZAÇÃO, e isso não é detalhe
+ *
+ * Global faria uma corretora movimentada calar as outras — num banco compartilhado por
+ * todos os clientes, é vazamento de disponibilidade entre tenants. Por IP não separa nada:
+ * duas pessoas da mesma empresa saem pelo mesmo NAT, e um usuário atrás de proxy rotativo
+ * escaparia. A organização vem de `requireRole` (cookie validado com `getUser()`), **nunca
+ * do body** — é a mesma fonte confiável que o Princípio I exige para `organization_id`.
+ *
+ * ## Por que não reusar `aplicarTeto` de `app/api/v1/catalog/_plataforma.ts`
+ *
+ * Aquele conta por USUÁRIO, porque o catálogo é da instalação e não tem tenant onde
+ * contar, e a frase do 429 dele fala do catálogo. Contar por usuário aqui deixaria a
+ * organização com dez gestores comprando dez vezes o orçamento. A peça compartilhada de
+ * verdade — o contador — é `checkRateLimit`, e ela é a mesma nos dois lados.
+ */
+export async function aplicarTetoDaOrganizacao(
+  organizationId: string,
+  teto: TetoDoEscopo,
+  requestId: string,
+): Promise<ResultadoDoTeto> {
+  const resultado = await checkRateLimit(
+    `${teto.balde}:${organizationId}`,
+    teto.limite,
+    teto.janelaSeg,
+  );
+
+  // Janela FIXA (`INCR` + `EXPIRE`): o reset é o início da PRÓXIMA janela, não
+  // "agora + janela". Dizer o segundo errado no `Retry-After` faz o cliente bem-comportado
+  // voltar cedo demais e levar outro 429 — que é como um teto ensina a ignorar o teto.
+  const agoraSeg = Math.floor(Date.now() / 1000);
+  const resetSeg = (Math.floor(agoraSeg / teto.janelaSeg) + 1) * teto.janelaSeg;
+
+  const headers: Record<string, string> = {
+    "X-RateLimit-Limit": String(teto.limite),
+    "X-RateLimit-Remaining": String(Math.max(0, teto.limite - resultado.count)),
+    "X-RateLimit-Reset": String(resetSeg),
+  };
+
+  if (resultado.allowed) return { excedido: null, headers };
+
+  return {
+    excedido: fail(
+      "rate_limited",
+      "Muitas alterações seguidas nesta conta. Aguarde alguns instantes e tente de novo.",
+      429,
+      { requestId, headers: { ...headers, "Retry-After": String(Math.max(1, resetSeg - agoraSeg)) } },
+    ),
+    headers,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Idempotência (Princípio V)
 // ---------------------------------------------------------------------------
 
@@ -401,4 +512,265 @@ export async function contarMateriais(
   }
 
   return contagens;
+}
+
+// ---------------------------------------------------------------------------
+// Material próprio (T088) — a declaração de FR-001
+// ---------------------------------------------------------------------------
+
+/**
+ * A palavra reservada que, no lugar do id do escopo, declara "vale para TODAS".
+ *
+ * ⚠️ Ela é um segmento de URL, **não** uma linha em `knowledge_scopes`. O `data-model.md`
+ * recusou o "escopo fictício todos" porque ele apareceria na lista do corretor e no filtro
+ * do contato, e alguém acabaria vinculando um cliente a ele — uma palavra na rota não tem
+ * esse caminho. O banco continua guardando a declaração onde ela mora: a coluna
+ * `applies_to_all`, sob o CHECK `ai_knowledge_sources_scope_xor_all`.
+ */
+export const ESCOPO_TODAS = "todas";
+
+export type DeclaracaoDeEscopo =
+  | { readonly tipo: "escopo"; readonly id: string }
+  | { readonly tipo: "todas" };
+
+const FORMA_DE_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * O segmento `{id}` da rota de materiais → a declaração de FR-001, ou `null` quando não
+ * declara nada.
+ *
+ * **A declaração vive no PATH, nunca no corpo** — mesma regra que faz `organization_id`
+ * chegar do cookie: o identificador que decide a que conjunto o conteúdo pertence não pode
+ * vir por onde o cliente escolhe. O corpo é `strictObject` sem `scope_id` nem
+ * `applies_to_all`, então tentar declará-lo ali é 422, não é ignorado em silêncio.
+ *
+ * `null` é o caso que FR-001 manda recusar, e ele é REAL: a tela monta a URL com a
+ * operadora escolhida, e sem escolha o segmento vira `undefined`/vazio. O CHECK do banco
+ * também barraria — mas com "new row violates check constraint
+ * ai_knowledge_sources_scope_xor_all", que não diz ao corretor o que fazer em seguida.
+ */
+export function declararEscopo(segmento: string): DeclaracaoDeEscopo | null {
+  const bruto = decodeURIComponent(segmento ?? "").trim();
+  if (bruto.toLowerCase() === ESCOPO_TODAS) return { tipo: "todas" };
+  if (FORMA_DE_UUID.test(bruto)) return { tipo: "escopo", id: bruto };
+  return null;
+}
+
+/** As colunas que a declaração vira na linha — o lado do XOR que o banco entende. */
+export function colunasDaDeclaracao(d: DeclaracaoDeEscopo): {
+  scope_id: string | null;
+  applies_to_all: boolean;
+} {
+  return d.tipo === "todas"
+    ? { scope_id: null, applies_to_all: true }
+    : { scope_id: d.id, applies_to_all: false };
+}
+
+// ---------------------------------------------------------------------------
+// FR-007 — o que cabe, dito ANTES do envio
+// ---------------------------------------------------------------------------
+
+/** 20 MB, o mesmo teto de `POST /api/v1/ai/knowledge/sources/upload`. */
+export const TAMANHO_MAXIMO_BYTES = 20 * 1024 * 1024;
+
+/** Teto do texto colado. Igual ao do material curado, para as duas telas não divergirem. */
+export const TEXTO_MAXIMO_CARACTERES = 200_000;
+
+/**
+ * Os formatos que o ingest LÊ de verdade (`lib/ai/rag/extractors/`), não os que seria
+ * simpático aceitar. Declarar `.docx` aqui e recusá-lo depois é pior que não declarar.
+ */
+export const FORMATOS_ACEITOS = ["pdf", "md"] as const;
+
+export const MIMES_ACEITOS: readonly string[] = [
+  "application/pdf",
+  "text/markdown",
+  "text/x-markdown",
+  // Sistema operacional que não conhece `.md` manda `text/plain`; a extensão desempata.
+  "text/plain",
+];
+
+/**
+ * O anúncio de FR-007: "quais formatos e qual tamanho máximo são aceitos", entregue ANTES
+ * do envio.
+ *
+ * Viaja no `meta` do GET da lista de materiais — que é a tela em que o corretor está quando
+ * decide arrastar o arquivo — e no `details` de toda recusa, para quem integra pela API
+ * descobrir o teto pela primeira resposta em vez de por tentativa. Sem isto o requisito
+ * viraria uma frase no HTML, que nenhum cliente de API enxerga e que ninguém consegue
+ * verificar mecanicamente.
+ */
+export function declaracaoDeAceite(): {
+  accepted_formats: readonly string[];
+  accepted_mime_types: readonly string[];
+  max_bytes: number;
+  max_chars: number;
+} {
+  return {
+    accepted_formats: FORMATOS_ACEITOS,
+    accepted_mime_types: MIMES_ACEITOS,
+    max_bytes: TAMANHO_MAXIMO_BYTES,
+    max_chars: TEXTO_MAXIMO_CARACTERES,
+  };
+}
+
+/** Extensão canônica do arquivo, ou `null` quando não é um formato que o ingest lê. */
+export function formatoDoArquivo(nome: string, mime: string): "pdf" | "md" | null {
+  const ext = nome.split(".").pop()?.toLowerCase();
+  if (ext === "pdf") return "pdf";
+  if (ext === "md" || ext === "markdown") return "md";
+  // Sem extensão utilizável, o MIME desempata — mas só os dois que temos extrator.
+  if (mime === "application/pdf") return "pdf";
+  if (mime === "text/markdown" || mime === "text/x-markdown") return "md";
+  return null;
+}
+
+// ---------------------------------------------------------------------------
+// Material próprio — corpo, linha e projeção
+// ---------------------------------------------------------------------------
+
+const itemDeFaqSchema = z.strictObject({
+  question: z.string().trim().min(1).max(2_000),
+  answer: z.string().trim().min(1).max(20_000),
+  tags: z.array(z.string().trim().min(1).max(40)).max(20).optional(),
+  locale: z.string().trim().min(2).max(20).optional(),
+});
+
+/**
+ * Texto colado (FR-004): ou pares pergunta/resposta prontos, ou o markdown que os contém.
+ *
+ * `strictObject` sem `scope_id`, sem `applies_to_all` e sem `organization_id`: as três
+ * coisas que o cliente não escolhe. O `refine` recusa o pedido que não traz conteúdo
+ * nenhum — aceitar e deixar o indexador descobrir depois é exatamente o "aceitar e
+ * descartar em silêncio" que FR-004 proíbe.
+ */
+export const materialColadoSchema = z
+  .strictObject({
+    agent_id: z.string().uuid(),
+    name: z.string().trim().min(2).max(120),
+    source_type: z.enum(["faq", "policy"]).optional(),
+    items: z.array(itemDeFaqSchema).min(1).max(500).optional(),
+    markdown_blob: z.string().trim().min(1).max(TEXTO_MAXIMO_CARACTERES).optional(),
+    valid_until: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/, "Use o formato AAAA-MM-DD.")
+      .nullish(),
+  })
+  .refine((v) => (v.items?.length ?? 0) > 0 || (v.markdown_blob ?? "").length > 0, {
+    message: "Envie o conteúdo em `items` (pergunta/resposta) ou em `markdown_blob`.",
+  });
+
+export type MaterialColado = z.infer<typeof materialColadoSchema>;
+
+/** A linha de `ai_knowledge_sources` como esta superfície a lê. */
+export const COLUNAS_DO_MATERIAL =
+  "id, agent_id, scope_id, applies_to_all, source_type, name, status, chunks_count, last_index_status, last_index_error, last_indexed_at, valid_until, is_active, source_metadata, created_at, updated_at";
+
+export interface LinhaDeMaterial {
+  id: string;
+  agent_id: string;
+  scope_id: string | null;
+  applies_to_all: boolean;
+  source_type: string;
+  name: string;
+  status: string;
+  chunks_count: number;
+  last_index_status: string | null;
+  last_index_error: string | null;
+  last_indexed_at: string | null;
+  valid_until: string | null;
+  is_active: boolean;
+  source_metadata: unknown;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Os quatro estados que FR-005 exige por material. */
+export const ESTADO_DO_MATERIAL = {
+  building: "building",
+  ready: "ready",
+  failed: "failed",
+  archived: "archived",
+} as const;
+
+export type EstadoDoMaterial = (typeof ESTADO_DO_MATERIAL)[keyof typeof ESTADO_DO_MATERIAL];
+
+/**
+ * O estado que o corretor lê — DERIVADO, não copiado da coluna `status`.
+ *
+ * As duas coisas se chamam "status" e são grandezas diferentes, e confundi-las é o defeito
+ * que este mapeamento existe para impedir:
+ *
+ * - `ai_knowledge_sources.status` diz se a FONTE está viva. `workers/rag-indexer.ts` só
+ *   enxerga `ready`, então gravar `building` ali tiraria o material da fila do indexador —
+ *   ele ficaria eternamente "processando" sem ninguém processando.
+ * - `last_index_status` diz o que aconteceu na última rodada de indexação, e é isso que
+ *   FR-005 pede que a tela mostre.
+ *
+ * `partial` sai como `ready` porque parte do conteúdo ENTROU e a busca já o alcança; a
+ * nuance continua legível em `last_index_status`, que a projeção também devolve. Chamá-lo
+ * de `failed` esconderia acervo que está funcionando.
+ */
+export function estadoDoMaterial(linha: {
+  status: string;
+  last_index_status: string | null;
+}): EstadoDoMaterial {
+  if (linha.status === "archived") return ESTADO_DO_MATERIAL.archived;
+  if (linha.status === "failed" || linha.last_index_status === "failed") {
+    return ESTADO_DO_MATERIAL.failed;
+  }
+  if (linha.last_index_status === "success" || linha.last_index_status === "partial") {
+    return ESTADO_DO_MATERIAL.ready;
+  }
+  // Sem rodada de indexação ainda: aceito e a caminho. É o estado com que todo material
+  // nasce, e é o que a resposta 202 do POST devolve.
+  return ESTADO_DO_MATERIAL.building;
+}
+
+/** O objeto do contrato para `GET /api/v1/knowledge-scopes/{id}/materials` (FR-005). */
+export interface MaterialDoTenant {
+  id: string;
+  agent_id: string;
+  name: string;
+  source_type: string;
+  /** `building | ready | failed | archived` — o estado que a tela traduz (FR-005). */
+  status: EstadoDoMaterial;
+  /** Só faz sentido quando `status === "ready"`; fora disso é o que já entrou. */
+  chunks_count: number;
+  last_index_status: string | null;
+  /** Em português, vindo do indexador. É o "motivo acionável" de FR-005. */
+  last_index_error: string | null;
+  last_indexed_at: string | null;
+  scope_id: string | null;
+  applies_to_all: boolean;
+  valid_until: string | null;
+  is_active: boolean;
+  /** Nome do arquivo, quando veio por upload. `null` para texto colado. */
+  filename: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export function projetarMaterial(linha: LinhaDeMaterial): MaterialDoTenant {
+  const meta = (linha.source_metadata ?? {}) as Record<string, unknown>;
+  return {
+    id: linha.id,
+    agent_id: linha.agent_id,
+    name: linha.name,
+    source_type: linha.source_type,
+    status: estadoDoMaterial(linha),
+    chunks_count: linha.chunks_count,
+    last_index_status: linha.last_index_status,
+    last_index_error: linha.last_index_error,
+    last_indexed_at: linha.last_indexed_at,
+    scope_id: linha.scope_id,
+    applies_to_all: linha.applies_to_all,
+    valid_until: linha.valid_until,
+    is_active: linha.is_active,
+    // `source_metadata` inteiro NÃO sai: guarda o caminho do blob no Storage, e devolvê-lo
+    // entregaria ao cliente um endereço interno que ele não tem por que conhecer.
+    filename: typeof meta.filename === "string" ? meta.filename : null,
+    created_at: linha.created_at,
+    updated_at: linha.updated_at,
+  };
 }

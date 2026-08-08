@@ -248,4 +248,5 @@ export type AuditAction =
   | "knowledge_scope.created"
   | "knowledge_scope.updated"
   | "knowledge_scope.activated"
-  | "knowledge_scope.deactivated";
+  | "knowledge_scope.deactivated"
+  | "knowledge_scope.material_added";

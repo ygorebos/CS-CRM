@@ -34,7 +34,9 @@ import {
   ACAO_ATUALIZADO,
   ACAO_DESATIVADO,
   COLUNAS_DO_ESCOPO,
+  TETO_DE_ESCRITA,
   acharColisaoDeNome,
+  aplicarTetoDaOrganizacao,
   atualizarEscopoSchema,
   camposBloqueadosNoEspelho,
   contarMateriais,
@@ -68,17 +70,28 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
     return fail("not_found", "Escopo de conhecimento não encontrado.", 404, { requestId });
   }
 
+  // ── teto (item 6 do Definition of Done) ───────────────────────────────────
+  // O interruptor desta rota é a trava 4: um laço aqui liga e desliga o acervo do tenant
+  // dezenas de vezes por segundo, e cada volta é uma linha de auditoria. O teto é por
+  // ORGANIZAÇÃO — nunca global, que faria uma corretora calar as outras.
+  const teto = await aplicarTetoDaOrganizacao(org.orgId, TETO_DE_ESCRITA, requestId);
+  if (teto.excedido) return teto.excedido;
+
   let bruto: unknown;
   try {
     bruto = await req.json();
   } catch {
-    return fail("invalid_request", "Body JSON inválido.", 400, { requestId });
+    return fail("invalid_request", "Body JSON inválido.", 400, {
+      requestId,
+      headers: teto.headers,
+    });
   }
 
   const parsed = atualizarEscopoSchema.safeParse(bruto);
   if (!parsed.success) {
     return fail("validation_failed", "Dados inválidos.", 422, {
       requestId,
+      headers: teto.headers,
       details: parsed.error.flatten().fieldErrors as Record<string, unknown>,
     });
   }
@@ -96,10 +109,16 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
     .eq("organization_id", org.orgId)
     .maybeSingle();
   if (erroDeLeitura) {
-    return fail("internal_error", "Erro ao carregar o escopo de conhecimento.", 500, { requestId });
+    return fail("internal_error", "Erro ao carregar o escopo de conhecimento.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
   }
   if (!atualBruto) {
-    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, { requestId });
+    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, {
+      requestId,
+      headers: teto.headers,
+    });
   }
   const antes = atualBruto as unknown as LinhaDeEscopo;
   const eEspelho = antes.catalog_scope_id !== null;
@@ -113,7 +132,7 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
         "escopo_do_catalogo_nao_editavel",
         `${rotulo.singular} "${antes.display_name}" vem do catálogo desta instalação. Aqui dá para ligar, desligar e renomear; ${descreverCampos(bloqueados)} é mantido por quem cura o catálogo.`,
         403,
-        { requestId, details: { fields: bloqueados } },
+        { requestId, headers: teto.headers, details: { fields: bloqueados } },
       );
     }
   }
@@ -129,7 +148,10 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
       .eq("organization_id", org.orgId)
       .neq("id", id);
     if (erroDosNomes) {
-      return fail("internal_error", "Erro ao verificar os escopos existentes.", 500, { requestId });
+      return fail("internal_error", "Erro ao verificar os escopos existentes.", 500, {
+        requestId,
+        headers: teto.headers,
+      });
     }
     const colisao = acharColisaoDeNome(
       (existentes ?? []) as { id: string; display_name: string }[],
@@ -141,7 +163,7 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
         "escopo_ja_existe",
         `${rotulo.singular} "${colisao.display_name}" já existe nesta conta. Escolha outro nome.`,
         409,
-        { requestId, details: { existing_id: colisao.id } },
+        { requestId, headers: teto.headers, details: { existing_id: colisao.id } },
       );
     }
   }
@@ -163,12 +185,18 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
     .select(COLUNAS_DO_ESCOPO)
     .maybeSingle();
   if (erroDeUpdate) {
-    return fail("internal_error", "Erro ao atualizar o escopo de conhecimento.", 500, { requestId });
+    return fail("internal_error", "Erro ao atualizar o escopo de conhecimento.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
   }
   // `maybeSingle` + checagem: um UPDATE barrado pela RLS afeta zero linhas sem erro, e
   // devolver 200 ali gravaria uma auditoria de mutação que não aconteceu.
   if (!depoisBruto) {
-    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, { requestId });
+    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, {
+      requestId,
+      headers: teto.headers,
+    });
   }
   const depois = depoisBruto as unknown as LinhaDeEscopo;
 
@@ -196,5 +224,8 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
   });
 
   const contagens = await contarMateriais(supabase, org.orgId, [depois]);
-  return ok(projetarEscopo(depois, contagens.get(depois.id)), { requestId });
+  return ok(projetarEscopo(depois, contagens.get(depois.id)), {
+    requestId,
+    headers: teto.headers,
+  });
 }

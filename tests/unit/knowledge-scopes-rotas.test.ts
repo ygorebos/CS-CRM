@@ -27,6 +27,14 @@ import { createClient } from "@/lib/supabase/server";
 vi.mock("@/lib/auth/require-role", () => ({ requireRole: vi.fn() }));
 vi.mock("@/lib/supabase/server", () => ({ createClient: vi.fn() }));
 vi.mock("@/lib/audit", () => ({ audit: vi.fn(async () => undefined) }));
+// O teto de escrita entrou nestas rotas depois que este arquivo nasceu. Sem o mock, e
+// com `UPSTASH_REDIS_REST_URL` no `.env.local`, cada execução gasta ~16 fichas de um
+// balde REAL de 30/min: rodar duas vezes no mesmo minuto deixava o arquivo vermelho por
+// motivo nenhum. No CI não aparecia (sem Upstash, o contador é de memória e reseta por
+// arquivo) — falha que só existe na máquina de quem desenvolve é a pior de diagnosticar.
+vi.mock("@/lib/ai/dispatcher/rate-limit", () => ({
+  checkRateLimit: vi.fn(async () => ({ allowed: true, remaining: 99, limit: 100, reset: 0 })),
+}));
 
 import { GET, POST } from "@/app/api/v1/knowledge-scopes/route";
 import { PATCH } from "@/app/api/v1/knowledge-scopes/[id]/route";
