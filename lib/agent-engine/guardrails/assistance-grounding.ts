@@ -50,8 +50,43 @@ export interface Grounding {
    * Obrigatório, o compilador aponta cada lugar que constrói uma âncora.
    */
   readonly categorias: readonly CategoriaAssistencia[];
+  /**
+   * O trecho veio de conhecimento gerado AUTOMATICAMENTE a partir de conversas (FR-040)?
+   *
+   * **Obrigatório pelo mesmo motivo de `categorias`**: opcional, algum produtor novo o
+   * esqueceria, o `undefined` seria lido como "não" e o buraco voltaria em silêncio.
+   */
+  readonly aprendidoDeConversa: boolean;
   /** Título, escopo e data de atualização — a cópia histórica que a tela mostra (FR-023). */
   readonly source_ref?: Record<string, unknown>;
+}
+
+/**
+ * Os `source_type` que significam "isto foi extraído de conversa, sozinho".
+ *
+ * Constante compartilhada, nunca literal espalhada: o CHECK do banco aceita as duas grafias
+ * (`conversations` e `conversation`), e uma lista escrita à mão em cada lugar erraria uma
+ * delas — a falha seria o gate deixando passar exatamente o que FR-040 proíbe.
+ */
+const ORIGENS_APRENDIDAS = new Set(['conversations', 'conversation']);
+
+/**
+ * A âncora nasceu de aprendizado automático? (FR-040)
+ *
+ * ═══ POR QUE ISTO É UMA REGRA E NÃO UMA PREFERÊNCIA ═══
+ *
+ * O acervo indexa conversas passadas. Isso é ótimo para tom, jeito de responder e as
+ * dúvidas que os clientes realmente têm — e é veneno como fonte de fato de assistência:
+ * o que um atendente humano disse sobre carência há oito meses vira "material", e o agente
+ * o repete com a mesma cara de certeza que teria o manual da operadora. Um erro humano
+ * pontual vira regra institucional, com citação para provar.
+ *
+ * O trecho continua entrando na busca e ajudando o modelo a escrever. O que ele não pode
+ * é SUSTENTAR a afirmação — que é a diferença entre aprender a falar e aprender a mentir.
+ */
+export function ehAprendizadoDeConversa(sourceRef: Record<string, unknown> | undefined): boolean {
+  const tipo = sourceRef?.source_type;
+  return typeof tipo === 'string' && ORIGENS_APRENDIDAS.has(tipo);
 }
 
 export interface ClassificacaoDeAssistencia {
@@ -177,7 +212,13 @@ export const assistanceGroundingGate: Gate = {
     const isClaim = ctx.isAssistanceClaim ?? classificarAfirmacaoDeAssistencia(ctx.body).isAssistanceClaim;
     if (!isClaim) return { pass: true };
 
-    const ancoras = ctx.groundings ?? [];
+    // FR-040 · T123: o que foi aprendido de conversa NÃO ancora afirmação de assistência.
+    // O corte é aqui em cima, antes de qualquer contagem, e não num `if` lá embaixo: o que
+    // não pode sustentar a afirmação também não pode ENGROSSAR o número que a libera.
+    // Ver `ehAprendizadoDeConversa` para o porquê.
+    const todasAsAncoras = ctx.groundings ?? [];
+    const ancoras = todasAsAncoras.filter((a) => !a.aprendidoDeConversa);
+    const descartadasPorOrigem = todasAsAncoras.length - ancoras.length;
     // `minCitations` vem do guardrail `rag_must_hit` da tela (FR-015). Ausente = 1: uma
     // âncora é o piso do requisito, não uma preferência configurável para baixo.
     const piso = Math.max(1, ctx.minCitations ?? 1);
@@ -214,7 +255,14 @@ export const assistanceGroundingGate: Gate = {
         pass: false,
         code: 'assistencia_sem_lastro',
         reason: RECUSA_SEM_LASTRO,
-        detail: { ancoras: ancoras.length, piso, pertinencia: 'nao_avaliada' },
+        detail: {
+          ancoras: ancoras.length,
+          piso,
+          pertinencia: 'nao_avaliada',
+          // Sem isto, uma recusa com citações na tela pareceria defeito do gate. É o
+          // número que explica "havia âncora, mas era de conversa" (FR-040).
+          descartadas_por_origem: descartadasPorOrigem,
+        },
       };
     }
 
@@ -239,6 +287,7 @@ export const assistanceGroundingGate: Gate = {
         // Vocabulário fechado, seguro para o trace — os TERMOS casados nunca saem daqui.
         categorias: categorias.join(','),
         frases_sem_ancora: frasesSemAncora,
+        descartadas_por_origem: descartadasPorOrigem,
       },
     };
   },

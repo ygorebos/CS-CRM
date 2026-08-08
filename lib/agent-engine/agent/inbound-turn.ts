@@ -37,7 +37,7 @@ import { getLeadContext, type LeadContext, type LeadContextResult } from '../edg
 import { registrarGroundings } from './grounding-registry';
 import { citationsFromHits, searchKnowledge } from './search-knowledge';
 import { escalarAssistenciaSemLastro } from './escalar-sem-lastro';
-import type { Grounding } from '../guardrails/assistance-grounding';
+import { ehAprendizadoDeConversa, type Grounding } from '../guardrails/assistance-grounding';
 import { detectarAssuntoDeAssistencia } from '../guardrails/lexico-assistencia';
 import {
   blocoDePerguntaDeEscopo,
@@ -1544,6 +1544,10 @@ export async function runAgentTurn(
               // Calculado aqui, onde o texto do trecho existe: o gate recebe categoria
               // fechada e nunca o conteúdo — que não pode entrar no trace persistido.
               categorias: detectarAssuntoDeAssistencia(r.content).categorias,
+              // FR-040: trecho tirado de conversa passada não sustenta afirmação de
+              // assistência. Ele continua entrando na busca e ajudando o modelo a
+              // escrever — o que não pode é virar a PROVA de um procedimento.
+              aprendidoDeConversa: ehAprendizadoDeConversa(r.source_ref ?? undefined),
               ...(r.source_ref !== null ? { source_ref: r.source_ref } : {}),
             })),
           }));

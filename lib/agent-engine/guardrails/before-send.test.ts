@@ -34,6 +34,7 @@ const ancora: Grounding = {
   // Âncora do assunto por construção: este arquivo exercita OUTRO eixo, e a pertinência
   // (T138) tem suíte própria em assistance-grounding.test.ts.
   categorias: ['cobranca', 'acesso', 'rede', 'cobertura', 'prazos', 'canais', 'regras'],
+  aprendidoDeConversa: false,
 };
 
 function chamaCadeiaReal(args: {

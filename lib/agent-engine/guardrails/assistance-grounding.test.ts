@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   assistanceGroundingGate,
   classificarAfirmacaoDeAssistencia,
+  ehAprendizadoDeConversa,
   type Grounding,
 } from './assistance-grounding';
 import type { CategoriaAssistencia } from './lexico-assistencia';
@@ -40,12 +41,16 @@ const ancora = (
   id: string,
   categorias: readonly CategoriaAssistencia[] = ['prazos'],
   similarity = 0.8,
+  // FR-040: default `false` porque a esmagadora maioria dos casos é material carregado
+  // pelo corretor. O caso do aprendizado automático é explícito, e tem describe próprio.
+  aprendidoDeConversa = false,
 ): Grounding => ({
   chunk_id: id,
   material_id: 'mat-1',
   layer: 'tenant',
   similarity,
   categorias,
+  aprendidoDeConversa,
 });
 
 describe('classificação de afirmação de assistência', () => {
@@ -315,5 +320,90 @@ describe('pertinência da âncora — similaridade não é aboutness (T138)', ()
       }),
     );
     expect(v.pass).toBe(true);
+  });
+});
+
+/**
+ * FR-040 · T123 — o que foi aprendido de conversa não sustenta afirmação de assistência.
+ *
+ * ## Por que a regra existe
+ *
+ * O acervo indexa conversas passadas, e isso é bom para tom, jeito de responder e as
+ * dúvidas que os clientes realmente têm. É veneno como fonte de FATO: o que um atendente
+ * humano disse sobre carência há oito meses vira "material", e o agente o repete com a
+ * mesma cara de certeza que teria o manual da operadora. Um erro humano pontual vira regra
+ * institucional — com citação para provar.
+ *
+ * ## Por que isto é teste unitário e não invariante de banco
+ *
+ * A tarefa pedia `tests/invariants/aprendizado-nao-ancora-assistencia.test.ts`. A regra
+ * não vive no banco: `fn_buscar_lastro` devolve o trecho normalmente (e deve — ele ajuda o
+ * modelo a escrever), e quem recusa é o gate, em TypeScript. Um invariante de Postgres
+ * mediria a busca, que não é onde a decisão está — passaria verde com o gate quebrado.
+ */
+describe('FR-040 — aprendizado de conversa não ancora assistência', () => {
+  const corpo = 'A carência para parto é de 180 dias, conforme o seu contrato.';
+
+  it('âncora aprendida de conversa NÃO libera a afirmação', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        groundings: [ancora('c1', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(v.pass).toBe(false);
+    expect(!v.pass && v.code).toBe('assistencia_sem_lastro');
+  });
+
+  it('a recusa DIZ que havia âncora descartada por origem', () => {
+    // Sem este número, uma recusa com citações na tela pareceria defeito do gate — e o
+    // próximo a investigar concluiria que o veto está quebrado.
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        groundings: [ancora('c1', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(!v.pass && v.detail?.descartadas_por_origem).toBe(1);
+  });
+
+  it('a aprendida não ENGROSSA o número que libera a afirmação', () => {
+    // O defeito que este caso pega: filtrar só na hora de escolher a âncora, mas contar
+    // todas para bater o piso. Com piso 2, uma boa + uma aprendida passaria — e metade da
+    // prova seria conversa antiga.
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        minCitations: 2,
+        groundings: [ancora('c1', ['prazos'], 0.9, false), ancora('c2', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(v.pass).toBe(false);
+  });
+
+  it('material de verdade ao lado da aprendida continua liberando', () => {
+    // A regra corta a origem errada, não o assunto: quem tem material próprio sobre o
+    // assunto responde normalmente, mesmo com uma conversa antiga no mesmo balde.
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        groundings: [ancora('c1', ['prazos'], 0.9, false), ancora('c2', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(v.pass).toBe(true);
+  });
+
+  it('ehAprendizadoDeConversa reconhece as DUAS grafias que o banco aceita', () => {
+    // O CHECK de `ai_knowledge_sources.source_type` aceita 'conversations' e 'conversation'.
+    // Uma lista escrita à mão que esquecesse a segunda deixaria passar exatamente o que o
+    // requisito proíbe — e ninguém veria, porque a grafia rara é a mais antiga.
+    expect(ehAprendizadoDeConversa({ source_type: 'conversations' })).toBe(true);
+    expect(ehAprendizadoDeConversa({ source_type: 'conversation' })).toBe(true);
+    expect(ehAprendizadoDeConversa({ source_type: 'policy' })).toBe(false);
+    expect(ehAprendizadoDeConversa(undefined)).toBe(false);
   });
 });
