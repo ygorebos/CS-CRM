@@ -144,10 +144,16 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
 - [X] **T024** ✅ **FEITA** — `STORE_ALVO=cotador|crm` (default cotador: todo deploy existente segue
       igual), `CRM_POSTGREST_URL` + `CRM_GATEWAY_WRITER_TOKEN` obrigatórias no alvo crm. Typo ou
       config incompleta **recusam o boot** — testado. Endereço é configuração pura.
-- [ ] **T025** Fila em disco: sobrevive a reinício, teto de tamanho declarado, alarme quando para de
-      drenar. **Não é polimento** — é metade do que XIV exige. **(FR-013)**
-- [ ] **T026** [TEST] Matar o gateway com a fila cheia, subir de novo, provar que **nada** se perdeu
-      e nada duplicou. **(FR-013, SC-011)**
+- [X] **T025** ✅ **FEITA** (commit `ebc1ba7` no worktree) — `store.ComFila`: falha transitória de
+      escrita enfileira em disco (subdir `escrita/` do `ENTREGA_FILA_DIR`), retentativa com recuo e
+      teto pela máquina de política que a fila de entrega já tinha; definitivo (GW***) não enfileira
+      — descarta com registro; descarte abre o `AoMorrer` (o gancho do aviso visível). ⚠️ **Resta da
+      FR-013**: teto de TAMANHO da fila e alarme de dreno lento — a fila herdada tem teto de
+      tentativas, não de tamanho. Vai como task própria na Fase 5 (T056). **(FR-013 parcial)**
+- [X] **T026** ✅ **FEITA** — `TestEscritaSobreviveAoReinicio`: enfileira com o banco fora, REABRE a
+      fila no mesmo diretório (o reinício), drena com o banco de volta — 3/3, zero perda. O "nada
+      duplicou" é do lado do CRM (idempotência por `external_id`, provada na Fase 1). A versão com
+      processo real morto no meio é a §6 do quickstart (T068). **(FR-013, SC-011 parcial)**
 - [ ] **T027** Teto de taxa **por conexão** (não global, não por IP — todas as entregas vêm do mesmo
       endereço). Um tenant não pode degradar outro. **(Princípio XIV)**
 - [ ] **T028** Endpoint de reconciliação: dado uma janela, devolver o que foi entregue naquela
@@ -222,6 +228,11 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
 ---
 
 ## Fase 5 — Transversais
+
+- [ ] **T056** Completar a FR-013 na fila: **teto de tamanho** (hoje só há teto de tentativas — fila
+      sem teto de tamanho enche o disco na indisponibilidade longa) e **alarme quando parar de
+      drenar** (pendência mais velha que N minutos = alerta; hoje só o descarte alarma, e o
+      empilhamento silencioso é justamente o sintoma de CRM fora do ar). **(FR-013)**
 
 - [ ] **T050** Reconciliação periódica do lado do CRM: pergunta ao gateway (T028) o que ele entregou
       numa janela, grava o que faltar pelo caminho idempotente, e **alarma** na divergência —
