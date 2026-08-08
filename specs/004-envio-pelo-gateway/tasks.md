@@ -624,8 +624,42 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
       **(SC-010)**
 - [ ] **T068** Gateway derrubado: **100%** das tentativas terminam em estado reagendável e **um**
       aviso aparece na Central — nenhuma mensagem perdida em silêncio. **(SC-011)**
-- [ ] **T069** Atualizar `docs/testing/user-journey-map.md`, `docs/migracao-para-o-gateway.md` e
-      `docs/current-state.md` com o estado real ao fim.
+- [X] **T069** ✅ Os três docs atualizados com o estado **real**, incluindo o que NÃO foi provado.
+  - `docs/testing/user-journey-map.md`: tabela das 16 promessas com a sabotagem que derruba cada uma,
+    mais as 8 provas que dependem de ambiente. A soma delas é uma frase que nenhuma task diz sozinha
+    — *a jornada de envio nunca foi percorrida inteira por uma pessoa*.
+  - `docs/migracao-para-o-gateway.md`: onde a 004 chegou, as duas pontas de durabilidade fechadas, e
+    a variável nova do deploy (`GATEWAY_ADMIN_TOKEN`, diferente do interno de propósito).
+  - `docs/current-state.md`: "pronto e coberto" separado de "incompleto, e é execução — não código",
+    com o aviso antes de prometer prazo.
+
+---
+
+## ⛔ O que a Fase 6 NÃO conseguiu executar, e exatamente o que falta
+
+**Feito nesta fase:** T062 (metade mecânica), T064 e T069. Os três eram verificáveis sem ambiente —
+e a T064 **achou defeito real**, não confirmou expectativa.
+
+**Bloqueado, com o motivo medido:**
+
+| Task | Falta |
+|---|---|
+| T060, T061, T062 (rajada), T065, T066, T068 | Gateway de pé com `STORE_ALVO=crm` **e** `GATEWAY_ADMIN_TOKEN` no `.env` do CRM. Medido nesta máquina: `/api/v1/health` responde `gateway: not_enabled` e a variável não existe em `.env` nenhum |
+| T063 | O acima **mais** banco fresco do `baseline.sql` + `next build`/`next start`. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
+| T067 | **Celular real** recebendo mídia. Não há substituto — o requisito é o anexo abrir no aparelho do destinatário |
+
+**Por que não foram executadas aqui, e não é falta de vontade:** esta máquina roda ambientes de
+outras sessões (dois stacks Supabase e um app na porta 3000, com Supabase e WAHA saudáveis). Subir um
+ambiente paralelo exigiria `next build` na MESMA árvore, sobrescrevendo o `.next/` de quem está
+usando — a doutrina de higiene de branches proíbe mexer no que é de outra sessão, e derrubar o
+trabalho alheio para rodar um teste é o oposto do que a Fase 6 quer provar.
+
+**O que a próxima sessão precisa, em ordem:** (1) `GATEWAY_ADMIN_TOKEN` gerado e posto nos dois
+lados; (2) gateway rodando com `STORE_ALVO=crm` apontado para um Supabase local pg17 com o
+`baseline.sql`; (3) `scripts/bootstrap-owner.ts`; (4) `next build && next start`; (5)
+`pnpm exec playwright test conexao-pelo-gateway.spec.ts`. O primeiro caso da spec **afirma a
+pré-condição** — se o gateway não estiver configurado ela reprova dizendo isso, em vez de passar
+medindo o canal errado.
 
 ---
 

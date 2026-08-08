@@ -240,3 +240,34 @@ violação de CHECK em produção.
 | Mapa vivo do recebimento | [`docs/architecture/recebimento-pelo-gateway.architecture.json`](architecture/recebimento-pelo-gateway.architecture.json) |
 | Doutrina de canal (nenhuma feature nomeia provider) | [`docs/doctrine/restricao-de-canal.md`](doctrine/restricao-de-canal.md) |
 | Princípios XIII e XIV | [`.specify/memory/constitution.md`](../.specify/memory/constitution.md) |
+
+---
+
+## Onde a 004 chegou (2026-08-08)
+
+**Implementado e coberto por teste automatizado**, com sabotagem executada em cada fatia:
+
+- **F1 — escrita direta**: papel `gateway_writer` sem grant de tabela, as duas funções
+  `security definer`, taxonomia de erro em duas classes, invariantes das seis travas do Princípio VII.
+- **F2 — envio**: adapter no seam, aceite provisório, mídia por referência com validade ≥ 1 h, grupo
+  impedido com motivo verdadeiro, recuperação automática falando o dialeto do canal certo.
+- **F3 — conexão**: provisionamento tudo-ou-nada com compensação de dono único, pareamento com
+  validade declarada, vocabulário de estado traduzido, papel `admin` nas duas portas, migrar e voltar
+  por canal com trilha.
+- **Transversais**: reconciliação periódica (a segunda ponta do XIV) que **alarma** ao recuperar,
+  catraca que enxerga a forma crua do payload, fila com teto de tamanho e alarme de dreno parado.
+
+**As duas pontas de durabilidade estão fechadas.** A que empurra é a fila em disco do gateway — agora
+com teto de tamanho e alarme de empilhamento, não só teto de tentativas. A que puxa é
+`/api/v1/cron/gateway-reconciliation`, a cada 5 min, contra a janela de 1 h do gateway.
+
+**O que falta é execução medida, não código.** Oito provas dependem de número de WhatsApp real,
+gateway de pé e app servido — estão listadas em
+[`docs/testing/user-journey-map.md`](testing/user-journey-map.md), na seção da spec 004, e a spec de
+tela (`tests/e2e/conexao-pelo-gateway.spec.ts`) já existe esperando ambiente.
+
+**Variável nova que o deploy precisa saber:** `GATEWAY_ADMIN_TOKEN`. Deliberadamente **diferente** do
+`GATEWAY_INTERNAL_TOKEN` — o interno autoriza *enviar mensagem* e circula no `.env` do app; este
+autoriza *criar e apagar instância* no provedor, o que custa dinheiro e é irreversível. O gateway
+**recusa** o interno nessas rotas, então trocar um pelo outro falha alto em vez de degradar em
+silêncio.

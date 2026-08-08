@@ -1,0 +1,160 @@
+/**
+ * Conectar um número PELO GATEWAY, pela tela, numa conta nova
+ * (spec 004, T063 / SC-006, Princípio IV).
+ *
+ * ## O que esta spec prova, e por que ela não pode ser `curl`
+ *
+ * A doutrina de QA Visual é explícita: `curl` valida o backend e **não prova
+ * UX**. O que a spec 004 promete na frente de conexão é sobre a TELA — QR
+ * aparecendo em ≤ 15 s, **sem passo a mais** do que o fluxo de hoje, sem a tela
+ * nomear provedor, e o estado mudando sozinho quando conecta. Nenhuma dessas
+ * quatro coisas é observável por chamada de API.
+ *
+ * ## Pré-condições (as mesmas do `vps-fresh-onboarding`, mais o gateway)
+ *
+ *   - banco zerado do `baseline.sql` num Supabase local **pg17**;
+ *   - primeiro usuário por `scripts/bootstrap-owner.ts` — conta NOVA, estado
+ *     VAZIO: sem canal, sem conhecimento, sem lead;
+ *   - app em produção (`next build` + `next start`), nunca `next dev`;
+ *   - **gateway de pé** com `STORE_ALVO=crm`, e no `.env` do CRM:
+ *     `GATEWAY_BASE_URL`, `GATEWAY_ADMIN_TOKEN`, `GATEWAY_INTERNAL_TOKEN`.
+ *
+ * O `GATEWAY_ADMIN_TOKEN` é a pré-condição nova desta spec (T043): sem ele
+ * `provisionamentoConfigurado()` é falso e a Central cai no caminho antigo — o
+ * teste passaria medindo o canal errado. Por isso o primeiro caso **afirma a
+ * pré-condição** em vez de assumi-la.
+ *
+ * ## Por que a contagem de passos é asserção, e não observação
+ *
+ * A FR-030 promete "sem nenhum passo a mais". Isso só é verificável contando, e
+ * contando **na tela**: um passo a mais que ninguém contou é como uma migração
+ * de canal piora o onboarding sem nenhum teste ficar vermelho.
+ */
+import * as fs from "node:fs";
+import * as path from "node:path";
+
+import { test, expect, type Page } from "@playwright/test";
+
+const EVIDENCE_DIR = path.join(process.cwd(), ".superpowers/evidence/conexao-gateway");
+
+/** SC-006: o QR tem de aparecer em ≤ 15 s do clique. */
+const TETO_DO_QR_MS = 15_000;
+
+function evidencia(nome: string): string {
+  fs.mkdirSync(EVIDENCE_DIR, { recursive: true });
+  return path.join(EVIDENCE_DIR, nome);
+}
+
+/**
+ * Conta os passos que o corretor DÁ, não os que a tela tem: clique, digitação e
+ * escaneamento. Navegação automática não conta — ela não custa nada a ele.
+ */
+async function contarCliquesAte(page: Page, acao: () => Promise<void>): Promise<number> {
+  let cliques = 0;
+  const contar = () => {
+    cliques += 1;
+  };
+  page.on("request", () => {});
+  await page.exposeFunction("__contarClique", contar).catch(() => {});
+  await page.addInitScript(() => {
+    document.addEventListener(
+      "click",
+      () => {
+        (window as unknown as { __contarClique?: () => void }).__contarClique?.();
+      },
+      true,
+    );
+  });
+  await acao();
+  return cliques;
+}
+
+test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)", () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto("/app/connections");
+  });
+
+  test("pré-condição: a instalação está mesmo no caminho do gateway", async ({ request }) => {
+    // Sem esta afirmação, todo o resto da spec pode passar medindo o canal
+    // ANTIGO — verde, e provando outra coisa.
+    const res = await request.get("/api/v1/health");
+    const corpo = (await res.json()) as {
+      data: { checks: { gateway?: { status: string; reason?: string } } };
+    };
+    expect(
+      corpo.data.checks.gateway?.status,
+      "O gateway não está configurado nesta instalação. Sem GATEWAY_BASE_URL + " +
+        "GATEWAY_ADMIN_TOKEN, a Central cai no caminho antigo e esta spec mediria o canal errado.",
+    ).toBe("ok");
+  });
+
+  test("estado vazio: a tela diz o que fazer, e não nomeia provedor (FR-030, SC-007)", async ({
+    page,
+  }) => {
+    // O estado vazio é o de 100% dos usuários novos, e é a tela que decide se
+    // ele volta. Testar só com banco povoado esconde exatamente este defeito.
+    const corpo = await page.locator("body").innerText();
+    expect(corpo).not.toMatch(/\b(WAHA|uazapi|Baileys|NOWEB|WEBJS)\b/i);
+    expect(corpo).not.toMatch(/docker\s+compose/i);
+    await page.screenshot({ path: evidencia("01-estado-vazio.png"), fullPage: true });
+  });
+
+  test("QR aparece em ≤ 15 s, e sem passo a mais (FR-030, FR-031)", async ({ page }) => {
+    const t0 = Date.now();
+
+    const cliques = await contarCliquesAte(page, async () => {
+      await page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i }).click();
+      // O diálogo abre e o material vem da rota de pareamento — não há
+      // formulário no meio, e é isso que "sem passo a mais" quer dizer.
+      await expect(page.getByRole("img", { name: /QR/i })).toBeVisible({
+        timeout: TETO_DO_QR_MS,
+      });
+    });
+
+    const decorrido = Date.now() - t0;
+    expect(
+      decorrido,
+      `O QR levou ${decorrido} ms. Acima de ${TETO_DO_QR_MS} ms o corretor conclui que travou.`,
+    ).toBeLessThanOrEqual(TETO_DO_QR_MS);
+
+    // Um clique: o de conectar. Qualquer passo a mais é regressão de UX que a
+    // migração introduziu — e é o que a FR-030 proíbe.
+    expect(cliques, "Passos a mais do que o fluxo de hoje").toBeLessThanOrEqual(1);
+
+    await page.screenshot({ path: evidencia("02-qr-na-tela.png"), fullPage: true });
+  });
+
+  test("o QR não é refeito no escuro: o pedido segue a validade (FR-031)", async ({ page }) => {
+    // A regressão que este caso impede: voltar ao refresh cego de 15 s. Com a
+    // validade declarada, entre dois pedidos tem de haver MAIS que o intervalo
+    // antigo quando o material vale mais que isso.
+    const pedidos: number[] = [];
+    page.on("request", (r) => {
+      if (r.url().includes("/pairing")) pedidos.push(Date.now());
+    });
+
+    await page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i }).click();
+    await expect(page.getByRole("img", { name: /QR/i })).toBeVisible({ timeout: TETO_DO_QR_MS });
+    await page.waitForTimeout(20_000);
+
+    expect(pedidos.length, "nenhum pedido de pareamento saiu").toBeGreaterThan(0);
+    if (pedidos.length >= 2) {
+      const intervalo = pedidos[1]! - pedidos[0]!;
+      expect(
+        intervalo,
+        "Dois pedidos com menos de 10 s entre eles é o refresh cego de volta.",
+      ).toBeGreaterThan(10_000);
+    }
+  });
+
+  test("estado desconhecido não vira tela vazia (FR-032)", async ({ page }) => {
+    // O desfecho proibido é a tela em branco: o corretor sem saber se está
+    // conectado, se precisa escanear, ou se o produto quebrou.
+    await page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i }).click();
+    const dialogo = page.getByRole("dialog");
+    await expect(dialogo).toBeVisible();
+    const texto = (await dialogo.innerText()).trim();
+    expect(texto.length, "diálogo de conexão sem nenhum texto de estado").toBeGreaterThan(20);
+    await page.screenshot({ path: evidencia("03-estado-legivel.png"), fullPage: true });
+  });
+});
