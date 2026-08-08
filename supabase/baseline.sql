@@ -10926,3 +10926,36 @@ revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, in
 grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) to service_role;
 
 notify pgrst, 'reload schema';
+
+-- ---- lastro de fábrica no agente (migration 0129) ----
+--
+-- `ai_agents.guardrails` era `default '[]'`, e lista vazia desarma o gate
+-- `assistance_grounding`. Resultado: todo agente que não fosse o do onboarding nascia
+-- podendo afirmar procedimento de operadora sem material nenhum (spec 002 · FR-014, FR-030).
+-- O conserto mora no DEFAULT da coluna, e não em cada `insert`, porque foi assim que o buraco
+-- nasceu: um caminho de criação lembrava e os outros não. O default é o único ponto por onde
+-- todos passam. Cópia declarada de GUARDRAILS_DO_AGENTE_PADRAO
+-- (lib/ai/agents/guardrails-padrao.ts), vigiada por tests/invariants/agente-nasce-com-lastro.test.ts.
+alter table public.ai_agents
+  alter column guardrails set default
+    '[{"kind": "rag_must_hit", "min_citations": 1, "reason": "não afirmar procedimento, cobertura, carência ou rede sem material carregado que sustente"}]'::jsonb;
+
+-- Auto-curativo e idempotente: acrescenta em vez de substituir (guardrails que o admin
+-- configurou sobrevivem) e só toca em quem não tem `rag_must_hit`. `@>` devolve false sem
+-- erro em jsonb não-array; `jsonb_array_elements` levantaria erro e derrubaria o modo update.
+update public.ai_agents
+   set guardrails = case
+         when jsonb_typeof(guardrails) = 'array'
+           then guardrails || '{"kind": "rag_must_hit", "min_citations": 1, "reason": "não afirmar procedimento, cobertura, carência ou rede sem material carregado que sustente"}'::jsonb
+         else '[{"kind": "rag_must_hit", "min_citations": 1, "reason": "não afirmar procedimento, cobertura, carência ou rede sem material carregado que sustente"}]'::jsonb
+       end
+ where jsonb_typeof(guardrails) is distinct from 'array'
+    or not (guardrails @> '[{"kind": "rag_must_hit"}]'::jsonb);
+
+comment on column public.ai_agents.guardrails is
+  'Guardrails do agente (lib/ai/guardrails-schema.ts). O DEFAULT carrega rag_must_hit '
+  '(migration 0129, spec 002 · FR-014/FR-030): recusar afirmação de assistência sem material '
+  'que a sustente é comportamento de FÁBRICA, não opção avançada. O default é cópia declarada '
+  'de GUARDRAILS_DO_AGENTE_PADRAO (lib/ai/agents/guardrails-padrao.ts), vigiada por '
+  'tests/invariants/agente-nasce-com-lastro.test.ts. Lista vazia desarma o gate '
+  'assistance_grounding — o que agora só acontece por decisão explícita na tela.';
