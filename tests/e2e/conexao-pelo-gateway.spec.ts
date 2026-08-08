@@ -37,6 +37,13 @@ import { test, expect, type Page } from "@playwright/test";
 
 const EVIDENCE_DIR = path.join(process.cwd(), ".superpowers/evidence/conexao-gateway");
 
+/**
+ * Credenciais do dono criado por `scripts/bootstrap-owner.ts` — a MESMA conta
+ * nova, recém-bootstrapada, de que a `vps-fresh-onboarding` parte.
+ */
+const OWNER_EMAIL = process.env.OWNER_EMAIL ?? "dono@qa.local";
+const OWNER_PASSWORD = process.env.OWNER_PASSWORD ?? "QaVps!2026#Dono";
+
 /** SC-006: o QR tem de aparecer em ≤ 15 s do clique. */
 const TETO_DO_QR_MS = 15_000;
 
@@ -69,12 +76,39 @@ async function contarCliquesAte(page: Page, acao: () => Promise<void>): Promise<
   return cliques;
 }
 
+/**
+ * O passo que faltava, e o defeito que ele causou (medido em 2026-08-08).
+ *
+ * A primeira versão desta spec ia direto para `/app/connections`. Sem sessão, o
+ * app redireciona para o login — e três casos falharam por não achar o botão.
+ * Isso é o esperado.
+ *
+ * **O que NÃO é esperado, e é a lição:** o caso do estado vazio **passou** — ele
+ * afirmava "o corpo da página não nomeia provedor", e a tela de LOGIN de fato
+ * não nomeia. Um verde medindo a página errada. Uma asserção negativa sobre "o
+ * corpo da página" passa em qualquer página que não tenha o termo, inclusive numa
+ * que o teste nunca quis abrir — por isso os casos abaixo agora **afirmam onde
+ * estão** antes de afirmar o que veem.
+ */
+async function entrar(page: Page): Promise<void> {
+  await page.goto("/login");
+  await page.locator("#email").fill(OWNER_EMAIL);
+  await page.locator("#password").fill(OWNER_PASSWORD);
+  await page.getByRole("button", { name: /entrar/i }).click();
+  await page.waitForURL(/\/app/, { timeout: 30_000 });
+}
+
 test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)", () => {
   test.beforeEach(async ({ page }) => {
+    await entrar(page);
     await page.goto("/app/connections");
+    // A âncora que impede o verde da página errada: se o redirecionamento levou
+    // para outro lugar, o teste morre AQUI, dizendo isso.
+    await expect(page).toHaveURL(/\/app\/connections/);
   });
 
-  test("pré-condição: a instalação está mesmo no caminho do gateway", async ({ request }) => {
+  test("pré-condição: a instalação está mesmo no caminho do gateway", async ({ request, page }) => {
+    void page; // o beforeEach já autenticou; aqui só se consulta o health
     // Sem esta afirmação, todo o resto da spec pode passar medindo o canal
     // ANTIGO — verde, e provando outra coisa.
     const res = await request.get("/api/v1/health");
@@ -93,6 +127,9 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
   }) => {
     // O estado vazio é o de 100% dos usuários novos, e é a tela que decide se
     // ele volta. Testar só com banco povoado esconde exatamente este defeito.
+    // Afirmar que a tela é a certa ANTES de afirmar o que ela não diz: foi
+    // exatamente isso que faltou na primeira versão.
+    await expect(page.getByRole("button", { name: /conectar (novo )?n[úu]mero/i })).toBeVisible();
     const corpo = await page.locator("body").innerText();
     expect(corpo).not.toMatch(/\b(WAHA|uazapi|Baileys|NOWEB|WEBJS)\b/i);
     expect(corpo).not.toMatch(/docker\s+compose/i);

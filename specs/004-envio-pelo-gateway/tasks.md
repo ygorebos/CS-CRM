@@ -804,3 +804,16 @@ me deu com o 95,9%. A correção é o `storageState`, e ela vem junto com a pró
 
 **Ambiente derrubado ao fim:** `supabase stop`, portas liberadas, worktree removido, zero containers
 `f6004`, e o app da outra sessão intacto em 307.
+
+**Correção aplicada (não re-executada):** a spec ganhou `entrar()` — login com as credenciais do
+`bootstrap-owner`, no mesmo padrão da `vps-fresh-onboarding` — e, mais importante, **âncoras de
+lugar**: o `beforeEach` afirma `toHaveURL(/\/app\/connections/)` e o caso do estado vazio afirma que
+o botão "Conectar número" está visível **antes** de afirmar o que a tela não diz.
+
+A âncora é a lição, não o login. Uma asserção **negativa** sobre "o corpo da página" (`not.toMatch`)
+passa em **qualquer** página que não contenha o termo — inclusive numa que o teste nunca quis abrir.
+Foi assim que o caso do estado vazio ficou verde medindo a tela de login. Corrigir só o login
+deixaria a armadilha armada para o próximo caso negativo que alguém escrever.
+
+⚠️ **A correção NÃO foi re-executada** — o ambiente foi derrubado antes. Ela é a primeira coisa a
+rodar na próxima sessão, e o custo agora é subir o ambiente, não descobrir o que fazer.
