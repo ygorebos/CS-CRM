@@ -33,7 +33,7 @@ import { join } from "node:path";
 
 // O padrão vive em módulo próprio para poder ser testado sem executar o lint —
 // ver a justificativa das duas fronteiras (issue #118) lá.
-import { nomeiaProvider } from "./lint-channels.pattern";
+import { leFormaCruaDeProvedor, nomeiaProvider } from "./lint-channels.pattern";
 
 const ROOTS = ["app", "lib", "components", "workers"];
 const ALLOWED = [
@@ -190,9 +190,23 @@ function walk(dir: string): string[] {
   });
 }
 
-const offenders = ROOTS.flatMap(walk)
-  .filter((f) => !ALLOWED.some((re) => re.test(f)))
-  .filter((f) => nomeiaProvider(readFileSync(f, "utf8")));
+const arquivos = ROOTS.flatMap(walk).filter((f) => !ALLOWED.some((re) => re.test(f)));
+const offenders = arquivos.filter((f) => nomeiaProvider(readFileSync(f, "utf8")));
+
+/**
+ * Invariante 2 (spec 004, T052 / FR-042): ninguém lê a FORMA crua do payload do
+ * provedor fora do transporte. `lib/gateway/` entra na isenção junto com
+ * `lib/channels/` e `lib/waha/` — os três SÃO o transporte; é lá que a forma
+ * crua tem de morrer.
+ *
+ * Nasce com ZERO dívida (medido na main de 2026-08-08), e por isso não tem lista
+ * de exceção: catraca que nasce limpa não precisa de anistia, e criar a lista
+ * "para o caso de" é o que faz a primeira entrada parecer normal.
+ */
+const ISENTOS_DA_FORMA = [/^lib\/gateway\//];
+const cruzeiros = arquivos
+  .filter((f) => !ISENTOS_DA_FORMA.some((re) => re.test(f)))
+  .filter((f) => leFormaCruaDeProvedor(readFileSync(f, "utf8")));
 
 const novos = offenders.filter((f) => !DEBT.has(f));
 const stale = [...DEBT].filter((f) => !offenders.includes(f)).sort();
@@ -216,6 +230,21 @@ if (stale.length) {
   for (const f of stale) console.error(`  ${f}`);
 }
 
-if (novos.length || stale.length) process.exit(1);
+if (cruzeiros.length) {
+  console.error(
+    "\nForma CRUA de payload de provedor fora do transporte (anti-pattern 15, FR-042):",
+  );
+  for (const f of cruzeiros.sort()) console.error(`  ${f}`);
+  console.error(
+    "\nNa entrada, leia o ENVELOPE do gateway. Na saída, use o contrato do\n" +
+      "`ChannelAdapter` (`adapter.send` devolve `externalId`) — cavar o id na resposta\n" +
+      "do provedor é o mesmo acoplamento, escrito com outra palavra.",
+  );
+}
 
-console.info(`lint-channels: ok (${DEBT.size} arquivos de dívida conhecida, nenhum novo)`);
+if (novos.length || stale.length || cruzeiros.length) process.exit(1);
+
+console.info(
+  `lint-channels: ok (${DEBT.size} arquivos de dívida conhecida, nenhum novo; ` +
+    "forma crua de payload: zero)",
+);

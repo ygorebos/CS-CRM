@@ -461,8 +461,24 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       Princípio XIV exige. **(FR-013a)**
 - [ ] **T051** Reversibilidade por canal: migrar e voltar sem tocar nos demais e sem perder mensagem
       em voo. **(FR-041)**
-- [ ] **T052** Estender o vigia mecânico de payload cru — hoje cobre só o caminho de **recebimento**
-      — para o caminho de **envio**. **(FR-042, anti-pattern 15)**
+- [X] **T052** ✅ Estender o vigia mecânico de payload cru para o caminho de **envio**.
+      **(FR-042, anti-pattern 15)**
+  - **Invariante 2** em `scripts/lint-channels.pattern.ts` (`leFormaCruaDeProvedor`), ligado à mesma
+    catraca do `gov:verify`. O invariante 1 pega o **nome** do provider; este pega o que é pior de
+    achar depois: código lendo a **forma** crua da resposta dele sem citar o nome — `data.key.id`,
+    `msg._serialized`, `resp.messageid`. Nada ali diz "WAHA", e a catraca antiga passava batido.
+  - **A lista é CURTA, e isso é a decisão.** A primeira versão incluía `fromMe`, `chatId`, `pushName`
+    e `participant`: medido na main, 8 arquivos ofensores e **nenhum** lia payload cru — `chatId` é o
+    nome que o handler de envio dá ao destinatário resolvido **pelo adapter**. Regra que reprova
+    código correto ensina a contorná-la, e vira a catraca com furo que a #118 já custou caro.
+    Ficaram só as formas sem outro dono possível.
+  - **Nasce com ZERO dívida** (medido), então **não tem lista de exceção**: catraca que nasce limpa
+    não precisa de anistia, e criar a lista "para o caso de" é o que faz a primeira entrada parecer
+    normal. `lib/gateway/` entra na isenção junto de `lib/channels/` e `lib/waha/` — os três SÃO o
+    transporte, é lá que a forma crua tem de morrer.
+  - **Prova:** 3 casos em `tests/unit/lint-channels-fronteira.test.ts`, incluindo o que afirma que o
+    código CERTO passa. Sabotagem (introduzir `_serialized` no caminho de envio): o lint reprova
+    nomeando o arquivo.
 - [ ] **T053** Auditoria de toda mudança de canal: criar, migrar, reverter, apagar. **(FR-043)**
 - [X] **T054** ✅ **JÁ ENTREGUE pela spec 001** — verificado, não reimplementado. `GATEWAY_BASE_URL`,
       `GATEWAY_INTERNAL_TOKEN`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e
