@@ -14,7 +14,7 @@ de plano de saúde (multi-nicho é capacidade, não prioridade). WhatsApp como c
 primário, com **todo tráfego de entrada chegando pelo `gateway_go`**. Multi-tenant com
 RLS desde o dia 1, LGPD nativa. **Entrega: SaaS de instância única, operada por nós** —
 ninguém instala nada. **Cobrança é gerenciada no Cotador Simplificado, não aqui.**
-Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.0.0).
+Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.2.0).
 
 **Consequência que muda como você trabalha:** existe **uma** instância e **um** banco.
 Bug em produção atinge todos os tenants ao mesmo tempo, e **não há versão de escape** —

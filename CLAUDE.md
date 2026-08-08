@@ -9,7 +9,7 @@
 - [`docs/current-state.md`](docs/current-state.md) — o que está pronto, incompleto e quebrado. **Leia antes de estimar ou prometer qualquer coisa.**
 - [`docs/harness-audit.md`](docs/harness-audit.md) — onde a verificação tem buraco. Importante: `pnpm gov:verify` **não** cobre `test:db` nem `test:e2e` — verde ali não é prova para mudança de schema ou de UI.
 - [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real da instância.
-- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.0.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
+- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.2.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
 
 ---
 
