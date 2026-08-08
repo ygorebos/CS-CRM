@@ -616,14 +616,47 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
     JSX, prop de cópia, toast) e não o arquivo inteiro — os dois arquivos legitimamente leem
     `WAHA_API_BASE_URL` do env para decidir se mostram o aviso, e já estão na `KNOWN_DEBT` do
     `lint-channels`. Sabotagem (devolver o nome à cópia): reprova.
-- [ ] **T065** Falha de provisionamento forçada **10 de 10**: nenhum canal órfão no CRM, nenhuma
-      instância órfã no provedor. **(SC-008)**
+- [X] **T065** ✅ **EXECUTADA em 2026-08-08**, com os **dois processos reais**: o binário do
+      `gateway_go` compilado desta branch (`STORE_ALVO=crm`, registro em disco, provisionamento atrás
+      do token de admin) e o CRM chamando-o por HTTP. Só o **provedor** ficou dublê — criar instância
+      de verdade custa dinheiro por instância, e o que esta task mede não é o provedor: é o contrato
+      entre as **nossas** duas peças. **(SC-008)**
+  - Forçadas 10 falhas de gravação no CRM **depois** de o gateway ter criado a instância — a janela
+    exata em que a órfã nasce:
+
+    ```json
+    { "rodadas": 10, "falhas_forcadas": 10, "linhas_orfas_no_crm": 0,
+      "instancias_vivas_antes": 0, "instancias_vivas_depois": 0, "orfas_no_provedor": 0 }
+    ```
+
+  - **A sabotagem é o que dá sentido ao número.** Com a compensação removida, a MESMA execução:
+
+    ```json
+    { "rodadas": 10, "falhas_forcadas": 10, "linhas_orfas_no_crm": 0,
+      "instancias_vivas_antes": 0, "instancias_vivas_depois": 10, "orfas_no_provedor": 10 }
+    ```
+
+    Dez instâncias vivas que nenhum dos dois lados reconhece como suas, e que continuariam sendo
+    cobradas todo mês. Sem esta segunda medição, o zero de cima poderia ser o zero de "nada foi
+    criado" — e o teste estaria medindo a própria inércia.
 - [ ] **T066** Reverter canal no meio de tráfego: **100%** das mensagens em voo preservadas, **zero**
       duplicatas, provado por contagem antes/depois. **(SC-009)**
 - [ ] **T067** Imagem, documento e áudio abrindo **no aparelho** do destinatário, **3 de 3**.
       **(SC-010)**
-- [ ] **T068** Gateway derrubado: **100%** das tentativas terminam em estado reagendável e **um**
-      aviso aparece na Central — nenhuma mensagem perdida em silêncio. **(SC-011)**
+- [X] **T068** ✅ **EXECUTADA em 2026-08-08.** O processo do gateway foi **morto** (health passou a
+      responder `000`), e então 20 tentativas de envio pelo adapter mais dois tiques da sondagem.
+      **(SC-011)**
+
+    ```json
+    { "tentativas": 20, "reagendaveis": 20, "perdidas_em_silencio": 0, "pct_reagendavel": "100%",
+      "gateway_alcancavel": false, "avisos_no_primeiro_tique": 1, "avisos_no_segundo_tique": 0,
+      "avisos_na_central_total": 1, "kind": "gateway_unreachable" }
+    ```
+
+  - **As duas metades do Princípio XIV apareceram:** `logger.error` nos dois tiques (o alerta da
+    operação, que vira Sentry) e **um** item na Central — o segundo tique não duplicou.
+  - **`perdidas_em_silencio: 0` é a asserção que importa.** Nenhuma tentativa voltou "ok sem id",
+    que é o desfecho em que o chamador gravaria "enviada" para uma mensagem que não saiu.
 - [X] **T069** ✅ Os três docs atualizados com o estado **real**, incluindo o que NÃO foi provado.
   - `docs/testing/user-journey-map.md`: tabela das 16 promessas com a sabotagem que derruba cada uma,
     mais as 8 provas que dependem de ambiente. A soma delas é uma frase que nenhuma task diz sozinha
@@ -640,19 +673,27 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
 **Feito nesta fase:** T062 (metade mecânica), T064 e T069. Os três eram verificáveis sem ambiente —
 e a T064 **achou defeito real**, não confirmou expectativa.
 
+**Feito depois, ao reexaminar o bloqueio:** T065 e T068 **não precisavam de banco nem de app
+servido** — provisionamento e sondagem falam HTTP com o gateway e mais nada. O binário foi compilado,
+o gateway subiu com `STORE_ALVO=crm` numa porta própria, e as duas medições rodaram contra ele. O
+bloqueio inicial estava certo para seis tasks e **errado para estas duas**: eu tinha agrupado tudo
+sob "precisa de ambiente" sem separar o que cada uma exige de fato.
+
 **Bloqueado, com o motivo medido:**
 
 | Task | Falta |
 |---|---|
-| T060, T061, T062 (rajada), T065, T066, T068 | Gateway de pé com `STORE_ALVO=crm` **e** `GATEWAY_ADMIN_TOKEN` no `.env` do CRM. Medido nesta máquina: `/api/v1/health` responde `gateway: not_enabled` e a variável não existe em `.env` nenhum |
-| T063 | O acima **mais** banco fresco do `baseline.sql` + `next build`/`next start`. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
+| T060, T061 | **Número de WhatsApp real** entregando, para medir p95 do clique à chegada e estado final |
+| T062 (rajada) | Supabase de pé: a cadeia de vazão lê `channel_session_warmup` e `daily_message_limit`. **A metade mecânica já está verde** |
+| T066 | Banco com tráfego atravessando a virada — contagem antes/depois exige mensagens reais em voo |
+| T063 | Banco fresco do `baseline.sql` + `next build`/`next start` + gateway. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
 | T067 | **Celular real** recebendo mídia. Não há substituto — o requisito é o anexo abrir no aparelho do destinatário |
 
-**Por que não foram executadas aqui, e não é falta de vontade:** esta máquina roda ambientes de
-outras sessões (dois stacks Supabase e um app na porta 3000, com Supabase e WAHA saudáveis). Subir um
-ambiente paralelo exigiria `next build` na MESMA árvore, sobrescrevendo o `.next/` de quem está
-usando — a doutrina de higiene de branches proíbe mexer no que é de outra sessão, e derrubar o
-trabalho alheio para rodar um teste é o oposto do que a Fase 6 quer provar.
+**Por que as de banco/app não foram executadas aqui:** esta máquina roda ambientes de outras sessões
+(dois stacks Supabase e um app na porta 3000). Subir um paralelo exigiria `next build` na MESMA
+árvore, sobrescrevendo o `.next/` de quem está usando — derrubar o trabalho alheio para rodar um
+teste é o oposto do que a Fase 6 quer provar. Verificado ao fim: o app da outra sessão continua
+respondendo 307, e os dois processos que subi foram encerrados.
 
 **O que a próxima sessão precisa, em ordem:** (1) `GATEWAY_ADMIN_TOKEN` gerado e posto nos dois
 lados; (2) gateway rodando com `STORE_ALVO=crm` apontado para um Supabase local pg17 com o
