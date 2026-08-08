@@ -36,6 +36,19 @@ export interface ChannelSendInput {
     /** Valor por slot, chaveado por `slotKey` — a mesma chave da tela. */
     values: Record<string, string>;
   };
+  /**
+   * Metadados que nascem JUNTO com a linha da mensagem (spec 002, FR-024).
+   *
+   * Existe por causa de um defeito de ordem, não de conteúdo: as citações eram
+   * carimbadas por um `update` DEPOIS do envio, com um `catch` cujo comentário dizia
+   * *"citação é enriquecimento, não invariante — falha só loga"*. Quando esse update
+   * falhava, a mensagem já estava no telefone do cliente e ninguém conseguia mais dizer
+   * de onde ela veio. FR-024 inverte: ou a resposta é rastreável, ou não é enviada — e a
+   * única forma de garantir isso é a âncora entrar no MESMO insert.
+   *
+   * O adapter que ignorar o campo continua válido: perde a rastreabilidade, não o envio.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /**

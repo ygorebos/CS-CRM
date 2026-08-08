@@ -101,11 +101,22 @@ export async function searchKnowledge(
 
     return { ok: true, results };
   } catch {
+    // FR-013 (spec 002): indisponibilidade da busca é **ausência de lastro**, não licença
+    // para improvisar. A mensagem anterior aqui mandava o agente "responder com o que já
+    // sabe" — exatamente a instrução que produz procedimento de operadora inventado, e
+    // ela saía justamente no momento em que o sistema tinha MENOS como conferir.
+    //
+    // O veto de verdade é do gate `assistance_grounding`: sem âncora a afirmação não sai,
+    // e a busca que falhou não devolve âncora nenhuma. Esta mensagem é o ensino que volta
+    // ao modelo, para que ele escolha o desfecho certo antes de tentar.
     return {
       ok: false,
       error: {
         code: 'knowledge_unavailable',
-        message: 'a base de conhecimento está indisponível agora — responda com o que você já sabe e não invente fatos.',
+        message:
+          'não foi possível consultar o material do corretor agora. Trate isto como ausência de material: ' +
+          'não afirme nada sobre procedimento, cobertura, carência, rede ou prazos da operadora. ' +
+          'Diga ao cliente, em linguagem simples, que a informação será confirmada por uma pessoa.',
       },
     };
   }

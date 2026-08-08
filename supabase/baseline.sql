@@ -9028,6 +9028,12 @@ alter table public.agent_inbox_items
     -- uma promessa sem dono precisa aparecer onde o humano olha — não no log do
     -- worker. Entra NESTA lista pela mesma razão que a de cima.
     'promise_unfulfilled',
+    -- (migration 0116, spec 002 FR-012) O agente recusou uma afirmação de assistência
+    -- por falta de trecho âncora no acervo do corretor. Não é erro do sistema: é a
+    -- resposta correta do princípio IX, e o aviso existe para que ela vire trabalho
+    -- (carregar o material que falta) em vez de virar silêncio. Entra NESTA lista pela
+    -- mesma razão das duas de cima.
+    'assistance_without_grounding',
     'other'
   ));
 
@@ -9327,5 +9333,370 @@ comment on function public.fn_liberar_leads_do_agente() is
   'Sem isto o SET NULL da FK zera owner_agent_id e deixa owner_kind=''ai'', '
   'violando crm_leads_owner_kind_coherence — e um agente que já atendeu alguém '
   'não podia ser removido.';
+
+notify pgrst, 'reload schema';
+
+
+-- ---- partição curada do catálogo (migration 0117) ----
+--
+-- Spec 002 (RAG por operadora), fatia F2. Três tabelas SEM `organization_id`: o conteúdo
+-- é do fabricante, compartilhado por todas as organizações da instalação (Princípio X).
+-- A ausência da coluna é, por si só, a trava 2 — não existe onde guardar dado de cliente.
+-- A trava 1 é a RLS: leitura para `authenticated`, escrita só com `fn_is_platform_admin()`.
+--
+-- `unique (slug, version)` é a chave do `on conflict do nothing` da semeadura. Sem ela o
+-- `update.sh` de um clone ou duplicaria material ou sobrescreveria correção local.
+
+create table if not exists public.catalog_scopes (
+  id            uuid primary key default gen_random_uuid(),
+  slug          text not null unique,
+  display_name  text not null,
+  official_code text,
+  is_active     boolean not null default true,
+  created_at    timestamptz not null default now(),
+  updated_at    timestamptz not null default now()
+);
+
+create table if not exists public.catalog_materials (
+  id               uuid primary key default gen_random_uuid(),
+  catalog_scope_id uuid references public.catalog_scopes(id) on delete restrict,
+  applies_to_all   boolean not null default false,
+  slug             text not null,
+  version          integer not null,
+  title            text not null,
+  body             text not null,
+  valid_until      date,
+  published_at     timestamptz not null default now(),
+  origin           text not null default 'seed',
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now(),
+  constraint catalog_materials_origin_check check (origin in ('seed', 'local')),
+  constraint catalog_materials_scope_xor_all check (
+    (applies_to_all and catalog_scope_id is null)
+    or (not applies_to_all and catalog_scope_id is not null)
+  ),
+  constraint catalog_materials_version_positive check (version >= 1)
+);
+
+create unique index if not exists catalog_materials_slug_version_key
+  on public.catalog_materials (slug, version);
+create index if not exists catalog_materials_scope_idx
+  on public.catalog_materials (catalog_scope_id) where catalog_scope_id is not null;
+create index if not exists catalog_materials_applies_to_all_idx
+  on public.catalog_materials (applies_to_all) where applies_to_all;
+
+create table if not exists public.catalog_chunks (
+  id                  uuid primary key default gen_random_uuid(),
+  catalog_material_id uuid not null references public.catalog_materials(id) on delete cascade,
+  catalog_scope_id    uuid references public.catalog_scopes(id) on delete restrict,
+  applies_to_all      boolean not null default false,
+  position            integer not null,
+  content             text not null,
+  content_hash        text not null,
+  token_count         integer not null,
+  embedding           public.vector(1536) not null,
+  embedding_model     text not null,
+  metadata            jsonb not null default '{}'::jsonb,
+  created_at          timestamptz not null default now()
+);
+
+create index if not exists catalog_chunks_material_idx
+  on public.catalog_chunks (catalog_material_id);
+create index if not exists catalog_chunks_scope_idx
+  on public.catalog_chunks (catalog_scope_id) where catalog_scope_id is not null;
+create index if not exists catalog_chunks_applies_to_all_idx
+  on public.catalog_chunks (applies_to_all) where applies_to_all;
+create index if not exists catalog_chunks_embedding_ivfflat_idx
+  on public.catalog_chunks using ivfflat (embedding public.vector_cosine_ops) with (lists = 100);
+
+-- A cópia denormalizada do escopo no trecho é mantida por TRIGGER, não por cron
+-- (anti-pattern nº 5). A busca filtra por escopo antes de qualquer join.
+create or replace function public.fn_sincronizar_escopo_do_trecho_do_catalogo()
+returns trigger language plpgsql security definer set search_path to 'public' as $$
+begin
+  select m.catalog_scope_id, m.applies_to_all
+    into new.catalog_scope_id, new.applies_to_all
+    from public.catalog_materials m
+   where m.id = new.catalog_material_id;
+  return new;
+end $$;
+
+revoke execute on function public.fn_sincronizar_escopo_do_trecho_do_catalogo() from public, anon, authenticated;
+grant  execute on function public.fn_sincronizar_escopo_do_trecho_do_catalogo() to service_role;
+
+drop trigger if exists trg_catalog_chunks_escopo on public.catalog_chunks;
+create trigger trg_catalog_chunks_escopo
+  before insert or update of catalog_material_id on public.catalog_chunks
+  for each row execute function public.fn_sincronizar_escopo_do_trecho_do_catalogo();
+
+create or replace function public.fn_propagar_escopo_do_material_do_catalogo()
+returns trigger language plpgsql security definer set search_path to 'public' as $$
+begin
+  update public.catalog_chunks
+     set catalog_scope_id = new.catalog_scope_id,
+         applies_to_all   = new.applies_to_all
+   where catalog_material_id = new.id
+     and (catalog_scope_id is distinct from new.catalog_scope_id
+          or applies_to_all is distinct from new.applies_to_all);
+  return new;
+end $$;
+
+revoke execute on function public.fn_propagar_escopo_do_material_do_catalogo() from public, anon, authenticated;
+grant  execute on function public.fn_propagar_escopo_do_material_do_catalogo() to service_role;
+
+drop trigger if exists trg_catalog_materials_propaga_escopo on public.catalog_materials;
+create trigger trg_catalog_materials_propaga_escopo
+  after update of catalog_scope_id, applies_to_all on public.catalog_materials
+  for each row execute function public.fn_propagar_escopo_do_material_do_catalogo();
+
+drop trigger if exists catalog_scopes_updated_at on public.catalog_scopes;
+create trigger catalog_scopes_updated_at before update on public.catalog_scopes
+  for each row execute function public.fn_set_updated_at();
+drop trigger if exists catalog_materials_updated_at on public.catalog_materials;
+create trigger catalog_materials_updated_at before update on public.catalog_materials
+  for each row execute function public.fn_set_updated_at();
+
+-- TRAVA 1. O `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON TABLES TO anon` deste mesmo
+-- arquivo alcança toda tabela criada depois dele — inclusive estas. O revoke é a
+-- segunda tranca: privilégio que não existe não depende de policy escrita certa.
+revoke all on table public.catalog_scopes    from anon;
+revoke all on table public.catalog_materials from anon;
+revoke all on table public.catalog_chunks    from anon;
+
+alter table public.catalog_scopes    enable row level security;
+alter table public.catalog_materials enable row level security;
+alter table public.catalog_chunks    enable row level security;
+
+drop policy if exists catalog_scopes_read_authenticated on public.catalog_scopes;
+create policy catalog_scopes_read_authenticated on public.catalog_scopes
+  for select to authenticated using (true);
+drop policy if exists catalog_materials_read_authenticated on public.catalog_materials;
+create policy catalog_materials_read_authenticated on public.catalog_materials
+  for select to authenticated using (true);
+drop policy if exists catalog_chunks_read_authenticated on public.catalog_chunks;
+create policy catalog_chunks_read_authenticated on public.catalog_chunks
+  for select to authenticated using (true);
+
+-- Uma policy por comando, e não um `for all`: um `for all` com USING =
+-- fn_is_platform_admin() governaria o SELECT também e fecharia a leitura para o
+-- corretor, que é o oposto do que o catálogo existe para fazer.
+drop policy if exists catalog_scopes_write_platform_admin_insert on public.catalog_scopes;
+create policy catalog_scopes_write_platform_admin_insert on public.catalog_scopes
+  for insert to authenticated with check (public.fn_is_platform_admin());
+drop policy if exists catalog_scopes_write_platform_admin_update on public.catalog_scopes;
+create policy catalog_scopes_write_platform_admin_update on public.catalog_scopes
+  for update to authenticated using (public.fn_is_platform_admin()) with check (public.fn_is_platform_admin());
+drop policy if exists catalog_scopes_write_platform_admin_delete on public.catalog_scopes;
+create policy catalog_scopes_write_platform_admin_delete on public.catalog_scopes
+  for delete to authenticated using (public.fn_is_platform_admin());
+
+drop policy if exists catalog_materials_write_platform_admin_insert on public.catalog_materials;
+create policy catalog_materials_write_platform_admin_insert on public.catalog_materials
+  for insert to authenticated with check (public.fn_is_platform_admin());
+drop policy if exists catalog_materials_write_platform_admin_update on public.catalog_materials;
+create policy catalog_materials_write_platform_admin_update on public.catalog_materials
+  for update to authenticated using (public.fn_is_platform_admin()) with check (public.fn_is_platform_admin());
+drop policy if exists catalog_materials_write_platform_admin_delete on public.catalog_materials;
+create policy catalog_materials_write_platform_admin_delete on public.catalog_materials
+  for delete to authenticated using (public.fn_is_platform_admin());
+
+drop policy if exists catalog_chunks_write_platform_admin_insert on public.catalog_chunks;
+create policy catalog_chunks_write_platform_admin_insert on public.catalog_chunks
+  for insert to authenticated with check (public.fn_is_platform_admin());
+drop policy if exists catalog_chunks_write_platform_admin_update on public.catalog_chunks;
+create policy catalog_chunks_write_platform_admin_update on public.catalog_chunks
+  for update to authenticated using (public.fn_is_platform_admin()) with check (public.fn_is_platform_admin());
+drop policy if exists catalog_chunks_write_platform_admin_delete on public.catalog_chunks;
+create policy catalog_chunks_write_platform_admin_delete on public.catalog_chunks
+  for delete to authenticated using (public.fn_is_platform_admin());
+
+
+-- ---- escopos por tenant, vínculo do contato e eixo no acervo (migration 0118) ----
+--
+-- `knowledge_scopes` é o escopo COMO AQUELE TENANT O VÊ — todo escopo visível ao
+-- corretor tem linha aqui, inclusive os que vieram do catálogo. Paga duas coisas:
+-- renomear sem tocar no catálogo, e a trava 4 (desligar torna o material inerte só para
+-- este tenant, FR-008).
+--
+-- ⚠️ O `drop index ai_knowledge_sources_unique_per_agent` no fim deste bloco é
+-- OBRIGATÓRIO aqui e não só na migration: o snapshot acima recria o índice em toda
+-- instalação nova, e este apêndice roda depois dele. Sem o drop aqui, instalação fresca
+-- nasceria com o índice e clone atualizado não — duas realidades saindo deste arquivo.
+
+create table if not exists public.knowledge_scopes (
+  id               uuid primary key default gen_random_uuid(),
+  organization_id  uuid not null references public.organizations(id) on delete cascade,
+  catalog_scope_id uuid references public.catalog_scopes(id) on delete cascade,
+  display_name     text not null,
+  official_code    text,
+  is_active        boolean not null default true,
+  created_at       timestamptz not null default now(),
+  updated_at       timestamptz not null default now()
+);
+
+create unique index if not exists knowledge_scopes_org_catalog_scope_key
+  on public.knowledge_scopes (organization_id, catalog_scope_id)
+  where catalog_scope_id is not null;
+create index if not exists knowledge_scopes_org_active_idx
+  on public.knowledge_scopes (organization_id, is_active);
+
+drop trigger if exists knowledge_scopes_updated_at on public.knowledge_scopes;
+create trigger knowledge_scopes_updated_at before update on public.knowledge_scopes
+  for each row execute function public.fn_set_updated_at();
+
+alter table public.knowledge_scopes enable row level security;
+
+drop policy if exists tenant_isolation_knowledge_scopes_all on public.knowledge_scopes;
+create policy tenant_isolation_knowledge_scopes_all on public.knowledge_scopes
+  using ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin())
+  with check ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin());
+
+-- A-20 como TRAVA, não como convenção: "espelho do catálogo nasce desligado" precisaria
+-- ser lembrado pela função de sincronização, pela rota de curadoria, pelo onboarding e
+-- por todo script futuro. Um deles esquece — e o sintoma é o agente falando de operadora
+-- que o corretor não vende, que nenhum teste de linha detecta. Só no INSERT: ligar é
+-- UPDATE, e é o passo que SC-011 cronometra.
+create or replace function public.fn_espelho_de_catalogo_nasce_desligado()
+returns trigger language plpgsql as $$
+begin
+  if new.catalog_scope_id is not null then
+    new.is_active := false;
+  end if;
+  return new;
+end $$;
+
+revoke execute on function public.fn_espelho_de_catalogo_nasce_desligado() from public, anon, authenticated;
+grant  execute on function public.fn_espelho_de_catalogo_nasce_desligado() to service_role;
+
+drop trigger if exists trg_knowledge_scopes_espelho_desligado on public.knowledge_scopes;
+create trigger trg_knowledge_scopes_espelho_desligado
+  before insert on public.knowledge_scopes
+  for each row execute function public.fn_espelho_de_catalogo_nasce_desligado();
+
+-- Vínculo do contato: FK, nunca texto (anti-pattern nº 1). Nulo = escopo desconhecido,
+-- que é estado tratado, não erro. `cadastro` vence `conversa` (FR-017), e é a coluna
+-- `knowledge_scope_source` que torna essa precedência verificável.
+alter table public.contacts
+  add column if not exists knowledge_scope_id uuid references public.knowledge_scopes(id) on delete set null;
+alter table public.contacts
+  add column if not exists knowledge_scope_source text;
+alter table public.contacts
+  add column if not exists knowledge_scope_confirmed_at timestamptz;
+
+alter table public.contacts drop constraint if exists contacts_knowledge_scope_source_check;
+alter table public.contacts add constraint contacts_knowledge_scope_source_check
+  check (knowledge_scope_source is null or knowledge_scope_source in ('cadastro', 'conversa'));
+
+create index if not exists contacts_knowledge_scope_idx
+  on public.contacts (organization_id, knowledge_scope_id) where knowledge_scope_id is not null;
+
+-- Eixo de escopo no acervo QUE JÁ EXISTE. Sem ele a busca de lastro filtra o catálogo e
+-- deixa o acervo do corretor passar inteiro — o vazamento entre operadoras aconteceria
+-- justamente na camada que tem precedência.
+alter table public.ai_knowledge_sources
+  add column if not exists scope_id uuid references public.knowledge_scopes(id) on delete set null;
+alter table public.ai_knowledge_sources
+  add column if not exists applies_to_all boolean not null default false;
+alter table public.ai_knowledge_sources
+  add column if not exists valid_until date;
+
+-- BACKFILL ANTES DO CHECK e AUTO-CURATIVO. Linha existente em qualquer clone nasceu sem
+-- eixo: é acervo único, vale para qualquer cliente. A condição é exatamente o estado que
+-- o CHECK proíbe — re-aplicar em clone correto não toca em nada; em clone meio-migrado,
+-- conserta.
+update public.ai_knowledge_sources
+   set applies_to_all = true
+ where scope_id is null and applies_to_all = false;
+
+alter table public.ai_knowledge_sources drop constraint if exists ai_knowledge_sources_scope_xor_all;
+alter table public.ai_knowledge_sources add constraint ai_knowledge_sources_scope_xor_all
+  check ((applies_to_all and scope_id is null) or (not applies_to_all and scope_id is not null));
+
+create index if not exists ai_knowledge_sources_scope_idx
+  on public.ai_knowledge_sources (organization_id, scope_id) where scope_id is not null;
+
+-- O índice que tornava a segunda operadora IMPOSSÍVEL: unique (agent_id, source_type)
+-- where is_active. O corretor que carregasse o manual da segunda operadora receberia
+-- violação de unicidade. Ver o aviso no cabeçalho deste bloco.
+drop index if exists public.ai_knowledge_sources_unique_per_agent;
+
+alter table public.ai_chunks
+  add column if not exists scope_id uuid references public.knowledge_scopes(id) on delete set null;
+alter table public.ai_chunks
+  add column if not exists applies_to_all boolean not null default false;
+
+update public.ai_chunks c
+   set applies_to_all = s.applies_to_all,
+       scope_id       = s.scope_id
+  from public.ai_knowledge_sources s
+ where s.id = c.knowledge_source_id
+   and (c.scope_id is distinct from s.scope_id or c.applies_to_all is distinct from s.applies_to_all);
+
+create index if not exists ai_chunks_org_scope_idx
+  on public.ai_chunks (organization_id, scope_id) where scope_id is not null;
+
+create or replace function public.fn_sincronizar_escopo_do_trecho()
+returns trigger language plpgsql security definer set search_path to 'public' as $$
+begin
+  select s.scope_id, s.applies_to_all
+    into new.scope_id, new.applies_to_all
+    from public.ai_knowledge_sources s
+   where s.id = new.knowledge_source_id;
+  return new;
+end $$;
+
+revoke execute on function public.fn_sincronizar_escopo_do_trecho() from public, anon, authenticated;
+grant  execute on function public.fn_sincronizar_escopo_do_trecho() to service_role;
+
+drop trigger if exists trg_ai_chunks_escopo on public.ai_chunks;
+create trigger trg_ai_chunks_escopo
+  before insert or update of knowledge_source_id on public.ai_chunks
+  for each row execute function public.fn_sincronizar_escopo_do_trecho();
+
+create or replace function public.fn_propagar_escopo_da_fonte()
+returns trigger language plpgsql security definer set search_path to 'public' as $$
+begin
+  update public.ai_chunks
+     set scope_id       = new.scope_id,
+         applies_to_all = new.applies_to_all
+   where knowledge_source_id = new.id
+     and (scope_id is distinct from new.scope_id or applies_to_all is distinct from new.applies_to_all);
+  return new;
+end $$;
+
+revoke execute on function public.fn_propagar_escopo_da_fonte() from public, anon, authenticated;
+grant  execute on function public.fn_propagar_escopo_da_fonte() to service_role;
+
+drop trigger if exists trg_ai_knowledge_sources_propaga_escopo on public.ai_knowledge_sources;
+create trigger trg_ai_knowledge_sources_propaga_escopo
+  after update of scope_id, applies_to_all on public.ai_knowledge_sources
+  for each row execute function public.fn_propagar_escopo_da_fonte();
+
+-- Materialização dos espelhos. Idempotente e SEM HTTP (Princípio V). Chamada (a) na
+-- criação da organização e (b) no fim do bloco de semeadura, para toda organização
+-- existente — é (b) que faz escopo curado NOVO alcançar clone ANTIGO no update.sh. Sem
+-- ela, a semeadura escreveria no catálogo e nenhum corretor veria diferença: evento sem
+-- consumidor, com o agravante de parecer que funcionou.
+create or replace function public.fn_sincronizar_escopos_do_catalogo(p_organization_id uuid)
+returns integer language plpgsql security definer set search_path to 'public' as $$
+declare
+  v_criados integer;
+begin
+  insert into public.knowledge_scopes (organization_id, catalog_scope_id, display_name, official_code)
+  select p_organization_id, cs.id, cs.display_name, cs.official_code
+    from public.catalog_scopes cs
+   where cs.is_active
+     and not exists (
+       select 1 from public.knowledge_scopes ks
+        where ks.organization_id = p_organization_id and ks.catalog_scope_id = cs.id
+     );
+  get diagnostics v_criados = row_count;
+  return v_criados;
+end $$;
+
+-- `is_active` não é passado no insert acima de propósito: o trigger acima o força a
+-- false. Passá-lo aqui daria a impressão de que este é o lugar que decide.
+revoke execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) from public, anon, authenticated;
+grant  execute on function public.fn_sincronizar_escopos_do_catalogo(uuid) to service_role;
 
 notify pgrst, 'reload schema';

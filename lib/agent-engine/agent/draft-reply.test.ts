@@ -43,6 +43,8 @@ const AGENT: PublishedAgentConfig = {
   casesEnabled: false,
   toolIds: [],
   activeKbVersionId: null,
+  exigeLastro: false,
+  minCitations: 1,
   ragTopK: 5,
   ragSimilarityThreshold: 0.72,
   versionCreatedBy: null,

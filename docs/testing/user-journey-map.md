@@ -180,6 +180,42 @@ Bugs desta jornada estão detalhados em `HANDOFF-ia-360.md` (BUG-01 a BUG-05).
 
 ---
 
+## J9 — A instalação não inventa procedimento de operadora `[P0]`
+
+Contexto do código (spec 002, fatia F1): o gate `assistance_grounding` entra na cadeia
+`before_send` na posição 2.5 (versão da cadeia 6 → 7). Ele **nasce desarmado** — quem o
+arma é o caminho do agente, e só quando o guardrail `rag_must_hit` está ligado. O agente
+que o onboarding cria já nasce com ele ligado (`GUARDRAILS_DO_AGENTE_PADRAO`); sem essa
+segunda metade, a instalação fresca teria o guarda instalado e desligado.
+
+Quando o veto acontece quem fala com o cliente é o **sistema**
+(`FRASE_DE_RECUSA_SEM_LASTRO`), não o modelo: se dependesse de o modelo reescrever, o
+turno em que ele insistisse acabaria sem mensagem nenhuma e o cliente ficaria no vácuo.
+
+> ⚠️ **Esta jornada não é vigiada por gate nenhum.** O check `e2e` **não é obrigatório** na
+> branch protection, e a spec da mesma família (`vps-fresh-onboarding`, a `[P0]` de
+> instalação fresca) está entre as 4 que **não rodam no CI** — issue #63. A evidência é
+> manual; nenhum job vai reprovar a regressão dela.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J9.1 | Instalação fresca, agente do onboarding, cliente pergunta sobre carência | recusa: nenhuma afirmação factual sai | coberto por unidade (`agente-padrao-nasce-com-lastro`), **falta prova pela tela** |
+| J9.2 | A mesma pergunta, com material carregado que a cobre | responde ancorado, e a origem fica na conversa | **falta prova pela tela** |
+| J9.3 | O cliente recebe uma resposta, não silêncio | a frase do sistema chega ao WhatsApp | coberto por unidade (cadeia real), **falta prova pela tela** |
+| J9.4 | O aviso aparece na Central com a pergunta original | `kind='assistance_without_grounding'`, pergunta + motivo + o que fazer | **falta prova pela tela** |
+| J9.5 | Duas recusas seguidas do mesmo contato geram UM aviso | dedup por episódio aberto | coberto por código (insert-if-not-exists), **falta prova pela tela** |
+| J9.6 | Conversa de venda continua funcionando em tenant sem acervo | qualificação e condução intactas (FR-020) | PASS por unidade (`before-send.test.ts`) |
+| J9.7 | Busca de conhecimento derrubada de propósito | mesmo desfecho de "sem material" — nunca "responda com o que já sabe" | PASS por unidade (`search-knowledge.test.ts`) |
+| J9.8 | Desligar "Exigir citação da base" muda o comportamento | a mesma resposta passa a sair | PASS por unidade (`rag-must-hit-efeito.test.ts`) |
+
+**Pendente**: J9.1 a J9.5 exigem ambiente fresco estilo VPS (Supabase local pg17 +
+`baseline.sql` + `bootstrap-owner.ts` + WAHA + Redis, com `RESEND_API_KEY` ausente) e
+Playwright dirigindo o frontend. Enquanto isso não roda, a fatia está provada **por
+unidade e por sabotagem**, não pela tela — e a doutrina de QA Visual diz que curl e teste
+unitário não substituem a prova pela tela.
+
+---
+
 ## J7 — Exploração completa `[P2]`
 
 Andar por TODAS as rotas navegáveis logado como admin e como agent: settings, contacts,

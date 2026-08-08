@@ -42,6 +42,11 @@ export const KIND_LABEL = {
   // "Promessa não cumprida" é a única frase que faz o dono do negócio agir: do
   // lado de lá existe uma pessoa que ouviu um compromisso e está aguardando.
   promise_unfulfilled: "O assistente prometeu algo a um cliente e ninguém cumpriu ainda",
+  // Diz o que FALTA, não o que o guardrail fez. "Recusa por ausência de lastro" é
+  // verdade e é inútil para quem lê: o dono do negócio precisa entender que existe um
+  // cliente esperando e que a solução está na mão dele — carregar o material. O motivo
+  // técnico fica no corpo do aviso, junto com a pergunta original.
+  assistance_without_grounding: "Uma pergunta de cliente ficou sem resposta por falta de material",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 
