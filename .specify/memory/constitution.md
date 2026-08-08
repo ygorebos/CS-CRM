@@ -288,6 +288,29 @@ derivado, fora deste PR.
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES), TODO(CLAUDE_MD_CADENCIA).
+
+==================================================================================
+EMENDA — 2026-08-08 (quarta do dia)
+
+Version change: 2.2.0 -> 2.2.1
+Bump rationale: PATCH - esclarecimento da condicao 3 de "Trabalho em paralelo", sem efeito
+semantico sobre o que a regra proibe de fato. Nenhum principio tocado.
+
+O que muda: a condicao 3 dizia "nenhum portao de banco", e isso e largo demais. O impedimento
+real e o RECURSO COMPARTILHADO, nao o portao. `pnpm test:db` sobe um Postgres efemero PROPRIO e
+so colide por usar porta padrao; com `TEST_DB_PORT` exclusivo atribuido pelo orquestrador, deixa
+de haver recurso compartilhado e o portao pode rodar no agente. O banco de desenvolvimento e o de
+producao continuam intocaveis por agente paralelo, sem excecao - esses sao unicos de verdade.
+
+Por que corrigir no mesmo dia: a regra na forma anterior obrigaria os agentes a entregarem teste
+escrito e nunca executado, e teste nunca executado volta quebrado. A depuracao serial de todos
+eles no fim anula exatamente o ganho que a emenda 2.2.0 existe para capturar. Corrigir a regra e
+melhor que contorna-la - contorno vira precedente.
+
+Secoes removidas: nenhuma. Artefato dependente: rodape (Version 2.2.1).
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES), TODO(CLAUDE_MD_CADENCIA), TODO(CLAUDE_MD_PARALELO).
 -->
 
 # DeskcommCRM Constitution
@@ -707,9 +730,15 @@ antes de lançar, não descobri-las depois:
    arquivos a ORDEM carrega significado: um apêndice de baseline pode ser `create or replace` de
    outro anterior, e invertido ele desaparece **em silêncio**, com o banco aparentemente correto.
    Duas escritas concorrentes ou perdem uma ou trocam a ordem.
-3. **Nenhum portão de banco e nenhuma migration aplicada.** `pnpm test:db` sobe um Postgres
-   efêmero em porta fixa, e o banco de desenvolvimento é recurso único — concorrência ali é
-   colisão, não paralelismo.
+3. **Nenhum recurso de banco compartilhado.** O banco de desenvolvimento e o de produção são
+   recurso único e MUST NOT ser tocados por agente paralelo — migration aplicada em paralelo é
+   corrida, não paralelismo. O portão `pnpm test:db` é caso diferente: ele sobe um Postgres
+   efêmero próprio, e só colide por usar porta padrão (medido:
+   `Bind for 127.0.0.1:54329 failed: port is already allocated`). O orquestrador MAY autorizar o
+   portão num agente paralelo **atribuindo a ele um `TEST_DB_PORT` exclusivo**; sem porta
+   atribuída, o agente MUST NOT rodá-lo. Teste escrito e nunca executado volta quebrado, e a
+   depuração serial de todos eles no fim anula o ganho — foi o motivo de refinar esta condição
+   no mesmo dia em que ela nasceu.
 4. **Nenhum commit, push ou troca de branch.** O índice do git é do orquestrador; a árvore de
    trabalho é compartilhada com outras sessões e worktrees.
 
@@ -782,4 +811,4 @@ aprofundamento por tipo de task, está no Princípio XII.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.2.1 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
