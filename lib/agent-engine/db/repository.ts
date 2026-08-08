@@ -38,6 +38,11 @@ export type InboxKind =
   | 'capabilities_missing'
   | 'message_send_stuck'
   | 'promise_unfulfilled'
+  // (0117) Conexão sem chave de verificação: a entrega do gateway é fail-closed
+  // sem válvula, então toda mensagem daquela conexão é recusada. Nenhuma se
+  // perde (o gateway retenta 5xx), mas nenhuma entra — e sem este aviso o
+  // sintoma é "as mensagens pararam", sem lugar nenhum para olhar.
+  | 'channel_secret_missing'
   | 'other';
 
 export interface InboxItemRow {

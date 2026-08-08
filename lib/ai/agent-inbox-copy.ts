@@ -42,6 +42,11 @@ export const KIND_LABEL = {
   // "Promessa não cumprida" é a única frase que faz o dono do negócio agir: do
   // lado de lá existe uma pessoa que ouviu um compromisso e está aguardando.
   promise_unfulfilled: "O assistente prometeu algo a um cliente e ninguém cumpriu ainda",
+  // Diz a CONSEQUÊNCIA, não a causa: quem lê a Central não sabe (nem precisa
+  // saber) o que é chave de verificação de webhook. O que ele precisa entender
+  // em um segundo é que existe um número por onde nada está entrando — o resto
+  // fica no corpo do aviso, com o que fazer.
+  channel_secret_missing: "Uma conexão não está recebendo mensagens",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 

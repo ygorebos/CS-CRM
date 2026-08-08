@@ -109,12 +109,23 @@ desta fase fechar.**
   > **onde**, porque este dado depende de uma chave que o SQL ainda não tem.
 
 - [x] T017d **Sabotagem**: devolver o `Buffer.from([0])` em um dos dois caminhos e confirmar que T017a fica vermelho; restaurar
-- [ ] T017e Recusar com motivo próprio quando o segredo ainda for placeholder: a rota nova responde `gateway_secret_nao_provisionado` (não um `401` genérico) e abre aviso na Central — sem isso, uma conexão não curada vira silêncio, que é o que o Princípio II proíbe
+- [x] T017e Recusar com motivo próprio quando o segredo ainda for placeholder: a rota nova responde `gateway_secret_nao_provisionado` (não um `401` genérico) e abre aviso na Central — sem isso, uma conexão não curada vira silêncio, que é o que o Princípio II proíbe
+
+  > **Como saiu, e as duas escolhas que fugiram da letra da tarefa.** O código é
+  > `gateway_secret_not_provisioned` — mesma coisa, em inglês, porque `lib/api/errors.ts` é um
+  > vocabulário público inteiramente em inglês e um código em português ali seria uma verruga
+  > permanente na API. E o status é **503**, não 401: pelo contrato (§5), o gateway DESCARTA 401 e
+  > RETENTA 5xx; classificar como falha de autenticação faria o histórico do período quebrado nunca
+  > entrar, quando ele entra sozinho assim que a chave existir. O aviso é **um por conexão** enquanto
+  > houver um `open` — a conexão quebrada recusa toda entrega, e sem deduplicar um número movimentado
+  > enterraria a Central em minutos. O kind `channel_secret_missing` saiu como migration 0117 +
+  > apêndice do baseline + linha no MANIFEST, e entrou em `InboxKind` (o par TS×banco é cobrado por
+  > `tests/invariants/vocabulario-banco-x-typescript.test.ts`).
 
 ### Gateway — poder subir sem banco
 
-- [ ] T018 Implementar o modo relay em `internal/config/config.go` do gateway: quando `GATEWAY_MODE=relay`, `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` deixam de ser `mustGetEnv` e a persistência é pulada
-- [ ] T019 [TEST] [P] Teste em Go provando que o processo **sobe** em modo relay sem as variáveis de Supabase e **continua exigindo-as** no modo padrão
+- [x] T018 Implementar o modo relay em `internal/config/config.go` do gateway: quando `GATEWAY_MODE=relay`, `SUPABASE_URL` e `SUPABASE_SERVICE_ROLE_KEY` deixam de ser `mustGetEnv` e a persistência é pulada
+- [x] T019 [TEST] [P] Teste em Go provando que o processo **sobe** em modo relay sem as variáveis de Supabase e **continua exigindo-as** no modo padrão
 
 **Checkpoint**: schema aplicado e provado nos dois modos, contrato e autenticidade testados, rota
 respondendo `202` e enfileirando, gateway subindo sem banco. Nenhuma mensagem ingerida ainda.

@@ -38,6 +38,7 @@ import { audit } from "@/lib/audit";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { env } from "@/lib/env";
 import { autenticarEntregaDoGateway } from "@/lib/gateway/auth";
+import { avisarSegredoNaoProvisionado } from "@/lib/gateway/aviso-de-segredo";
 import { parseEnvelope } from "@/lib/gateway/envelope";
 import { ingerirEnvelope } from "@/lib/gateway/ingest";
 import { checarTetoDaConexao } from "@/lib/gateway/rate-limit";
@@ -150,9 +151,6 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
   });
 
   if (!auth.ok) {
-    // Motivo próprio, nunca 401 genérico: `segredo_nao_provisionado` é defeito de
-    // configuração desta conexão e precisa virar aviso na Central, não silêncio
-    // que o operador vai caçar do lado errado.
     await audit({
       action: "webhook.gateway_rejected",
       organizationId,
@@ -162,6 +160,30 @@ export async function POST(req: NextRequest, ctx: RouteCtx): Promise<NextRespons
         delivery_id: req.headers.get("x-gateway-delivery-id"),
       },
     });
+
+    // Segredo não provisionado tem RAMO PRÓPRIO, e não o 401 genérico.
+    //
+    // Duas coisas mudam, e as duas importam. O código nomeia o defeito como
+    // sendo DESTE lado — um `unauthenticated` mandaria o operador conferir a
+    // configuração do emissor, que está certa. E o status é 503, não 401: pelo
+    // contrato, o gateway descarta 401 e retenta 5xx, e esta recusa é curável —
+    // com 503, as entregas do período quebrado entram sozinhas assim que a
+    // chave existir, em vez de virarem buraco permanente no histórico.
+    //
+    // O aviso é o que impede a recusa de virar silêncio (Princípio II): sem ele
+    // o sintoma é "as mensagens pararam", sem lugar nenhum para olhar.
+    if (auth.motivo === "segredo_nao_provisionado") {
+      await avisarSegredoNaoProvisionado(admin, {
+        organizationId,
+        channelSessionId: sessao.id as string,
+        requestId,
+      });
+      return fail("gateway_secret_not_provisioned", auth.motivo, 503, {
+        requestId,
+        headers: { ...teto.cabecalhos, "Retry-After": "300" },
+      });
+    }
+
     return fail("unauthenticated", auth.motivo, 401, {
       requestId,
       headers: teto.cabecalhos,

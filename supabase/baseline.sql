@@ -9067,6 +9067,15 @@ alter table public.agent_inbox_items
     -- uma promessa sem dono precisa aparecer onde o humano olha — não no log do
     -- worker. Entra NESTA lista pela mesma razão que a de cima.
     'promise_unfulfilled',
+    -- (migration 0117, spec 001 §T017e) Conexão cuja chave de verificação nunca
+    -- foi gerada: a entrega do gateway é fail-closed sem válvula, então toda
+    -- mensagem daquela conexão é recusada. Nenhuma se perde — o gateway retenta
+    -- 5xx — mas nenhuma entra, e sem este aviso o sintoma é "as mensagens
+    -- pararam", sem lugar nenhum para olhar. A cura das linhas antigas roda
+    -- FORA do SQL (scripts/curar-segredos-de-canal.ts, no install.sh e no
+    -- update.sh), porque a chave de cifra só existe depois deste arquivo — logo
+    -- um clone que atualize pela metade cai exatamente neste estado.
+    'channel_secret_missing',
     'other'
   ));
 

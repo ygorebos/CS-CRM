@@ -56,6 +56,13 @@ export const ApiErrorCodes = {
   internal_error: "internal_error",
   upstream_unavailable: "upstream_unavailable",
   unavailable: "unavailable", // 503: dependência de config ausente (ex.: pool do engine sem SUPABASE_DB_URL)
+  // 503: a conexão do gateway ainda não tem chave de verificação (o `Buffer.from([0])`
+  // que as rotas de criação gravavam, ou uma instalação atualizada sem o passo de cura).
+  // Código PRÓPRIO, e não `unauthenticated`: o defeito é de provisionamento DESTE lado,
+  // e um 401 genérico mandaria o operador conferir o segredo do emissor — o lado errado.
+  // 503 (e não 401) porque a entrega é legítima e curável: o gateway retenta 5xx, então
+  // as mensagens do período quebrado entram sozinhas assim que a chave existir.
+  gateway_secret_not_provisioned: "gateway_secret_not_provisioned",
   waha_error: "waha_error",
   ai_provider_error: "ai_provider_error",
   nuvemshop_error: "nuvemshop_error",

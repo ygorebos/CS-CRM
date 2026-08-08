@@ -104,6 +104,7 @@ Segredo: o mesmo `channel_sessions.webhook_secret_encrypted` da conexão, decifr
 | Corpo inválido | `400` | `{ "error": { "code": "invalid_request", … } }` |
 | Assinatura ausente/inválida/fora da janela | `401` | `{ "error": { "code": "unauthenticated", … } }` |
 | Token desconhecido ou conexão arquivada | `404` | `{ "error": { "code": "not_found", … } }` |
+| Conexão sem chave de verificação | `503` | `{ "error": { "code": "gateway_secret_not_provisioned", … } }` + `Retry-After` |
 | Excesso de requisições | `429` | `Retry-After` + `X-RateLimit-*` |
 | Falha interna | `500` | `{ "error": { "code": "internal_error", … } }` |
 
@@ -120,6 +121,10 @@ responde; a ingestão roda fora do ciclo (D4). É o que cumpre ACK-primeiro.
 - Retenta quando: erro de rede, tempo esgotado, `5xx`, `429`.
 - **Não** retenta quando: `400`, `401`, `404` — são defeitos de configuração, e retentar só
   multiplica o ruído. Vão direto para o descarte inspecionável, com aviso.
+- `gateway_secret_not_provisioned` é `503` **de propósito**, e não `401`. O defeito é de
+  provisionamento do lado do CRM e é curável; classificá-lo como falha de autenticação faria o
+  gateway descartar entregas legítimas, e o histórico daquele período nunca entraria. Com `5xx`,
+  as mensagens do período quebrado entram sozinhas assim que a chave existir.
 - Espera crescente entre tentativas, com teto; a pendência é gravada em disco **antes** da
   primeira tentativa e sobrevive a reinício (D5).
 - `429` respeita `Retry-After`.
