@@ -291,17 +291,71 @@ cada um no aparelho.
 
 ## Requirements *(mandatory)*
 
-### Frente 1 — Provisionamento (dependência externa, `gateway_go`)
+### Frente 1 — Provisionamento e escrita (fork do gateway apontado para o CRM)
 
-- **FR-001**: O gateway MUST expor um contrato HTTP para **criar** uma conexão de canal e devolver
-  seu identificador, de forma que o CRM nunca escreva no banco de outro produto (Princípio VII).
-- **FR-002**: O gateway MUST expor um contrato para **encerrar/desprovisionar** uma conexão, de
-  modo que apagar um canal no CRM não deixe instância órfã do lado do provedor.
-- **FR-003**: O contrato de provisionamento MUST identificar o dono da conexão por credencial da
-  chamada, nunca por campo do corpo — mesma regra que o CRM já aplica no recebimento.
-- **FR-004**: Enquanto FR-001 não existir, o CRM MUST recusar criar canal com caminho de gateway
-  com erro legível, em vez de criar linha que nunca vai enviar. Falha silenciosa aqui é canal morto
-  na mão do corretor.
+> Reescrita em 2026-08-08 pela [decisão de escrita direta](decisao-escrita-direta.md). A versão
+> anterior (FR-001 a FR-004 pedindo contrato HTTP com o gateway dono do próprio armazenamento) está
+> preservada no histórico do git; o `gateway-provisioning-v1.md` segue válido como contrato HTTP,
+> mas deixou de ser o único caminho.
+
+**Superfície de escrita**
+
+- **FR-001**: A escrita do gateway no banco do CRM MUST passar **só por função versionada**
+  (`security definer`). O fork MUST NOT receber grant de tabela nem a `service_role` key do CRM —
+  escrever tabela crua tem de falhar em desenvolvimento, não em produção.
+- **FR-002**: O fork MUST autenticar-se com papel Postgres dedicado, com `EXECUTE` apenas nas
+  funções desta frente. Um invariante MUST reprovar se esse papel ganhar qualquer grant de tabela.
+- **FR-003**: Toda função nova MUST revogar `EXECUTE` de `public` **e** de `anon` — são duas origens
+  distintas de grant, e tratar só uma expõe a função como RPC alcançável pela anon key.
+
+**Resolução de tenant**
+
+- **FR-004**: A `organization_id` MUST ser resolvida **dentro do banco**, a partir da conexão pela
+  qual a mensagem chegou (`channel_sessions.gateway_connection_id`). O corpo da chamada MUST NOT
+  decidir tenant — mesma regra do recebimento de hoje.
+- **FR-005**: Conexão inexistente, arquivada ou de outra organização MUST recusar a escrita com erro
+  distinguível de falha transitória, para o gateway não retentar para sempre o que nunca vai passar.
+
+**Idempotência**
+
+- **FR-006**: A idempotência MUST continuar sendo a constraint `unique (organization_id,
+  external_id)` do banco. A função de ingestão MUST tratar a duplicata como **sucesso**, devolvendo
+  o identificador da mensagem já existente e sinalizando que era repetida.
+- **FR-007**: A função de ingestão MUST tornar a constraint imediata antes do insert. **Medido**:
+  `on conflict` não funciona contra constraint `DEFERRABLE`, índice único imediato adicional não
+  resolve, e o `exception when unique_violation` sem isso não captura — o erro estoura no `COMMIT` e
+  mata a transação inteira.
+
+**Cadeia viva**
+
+- **FR-008**: A ingestão de mensagem **recebida** MUST emitir o pedido de turno do agente na
+  **mesma transação** do insert — ou os dois acontecem, ou nenhum. Emissão em viagem separada MUST
+  NOT ser usada: morrer no meio deixa mensagem sem atendimento e sem ninguém perceber.
+- **FR-009**: O eco do próprio envio MUST NOT pedir turno de agente — pedir faria o agente responder
+  a si mesmo.
+- **FR-010**: Nenhuma função desta frente MUST fazer HTTP. Efeito colateral sai por `event_log`,
+  consumido por worker (anti-pattern 9).
+
+**Ciclo de vida da conexão**
+
+- **FR-011**: MUST existir caminho para **criar** a conexão de canal e devolver seu identificador,
+  e para **encerrar/desprovisionar**, de modo que apagar um canal no CRM não deixe instância órfã no
+  provedor.
+- **FR-012**: A criação MUST ser tudo-ou-nada: instância criada no provedor com registro falhando
+  MUST desfazer a instância antes de reportar erro.
+
+**Durabilidade — o que a decisão concentrou**
+
+- **FR-013**: Com o `webhook_events_log` fora do caminho do gateway, a fila em disco do gateway
+  passa a ser a **única** rede contra perda. Ela MUST sobreviver a reinício do processo, MUST ter
+  teto de tamanho declarado e MUST alarmar quando parar de drenar. Sem isto a decisão troca duas
+  redes por nenhuma.
+
+**Enquanto não existir**
+
+- **FR-014**: Enquanto esta frente não estiver pronta, o CRM MUST recusar criar canal com caminho de
+  gateway com erro legível, em vez de criar linha que nunca vai enviar. Falha silenciosa aqui é
+  canal morto na mão do corretor.
 
 ### Frente 2 — Envio
 
