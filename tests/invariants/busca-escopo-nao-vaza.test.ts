@@ -277,13 +277,33 @@ describe("fn_buscar_lastro — o escopo é fronteira, não sugestão", () => {
   });
 
   it("não é alcançável por public, anon nem authenticated", async () => {
+    // ⚠️ A ASSINATURA AQUI TEM DE SER A VIGENTE — a de SEIS argumentos.
+    // `has_function_privilege` resolve o nome literalmente e **ignora defaults**: escrita
+    // com os cinco de antes, ela ergue "function does not exist" e este teste reprova o
+    // job inteiro — não por privilégio aberto, mas por texto desatualizado. A migration
+    // 0125 dropou a de cinco ao acrescentar `p_incluir_preteridos` (FR-035), justamente
+    // para não deixar duas funções alcançáveis por uma chamada de cinco argumentos.
     for (const papel of ["public", "anon", "authenticated"]) {
       const { rows } = await pool.query<{ p: boolean }>(
-        "select has_function_privilege($1, 'public.fn_buscar_lastro(uuid,uuid,public.vector,integer,real)', 'execute') p",
+        "select has_function_privilege($1, 'public.fn_buscar_lastro(uuid,uuid,public.vector,integer,real,boolean)', 'execute') p",
         [papel],
       );
       expect(rows[0]!.p, `fn_buscar_lastro executável por ${papel}`).toBe(false);
     }
+  });
+
+  it("a assinatura de CINCO argumentos não existe mais", async () => {
+    // O `drop` da 0125 é o que impede duas funções alcançáveis pela mesma chamada de cinco
+    // argumentos — qual delas responderia seria detalhe de resolução de overload, que não
+    // aparece em teste e aparece em produção. Se alguém recriar a antiga "para
+    // compatibilidade", é aqui que fica vermelho.
+    const { rows } = await pool.query<{ n: string }>(
+      `select count(*)::text n
+         from pg_proc p
+         join pg_namespace ns on ns.oid = p.pronamespace
+        where ns.nspname = 'public' and p.proname = 'fn_buscar_lastro'`,
+    );
+    expect(rows[0]!.n).toBe("1");
   });
 
   it("forward-fix: retrieve_top_k_chunks deixou de ser alcançável por authenticated", async () => {
