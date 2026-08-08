@@ -17,7 +17,7 @@
  *
  * ═══ POR QUE ISTO AVALIA SÓ UMA PARTE, E DIZ QUAL ═══
  *
- * A cadeia tem 10 gates. Seis dependem de ESTADO que só existe no turno real:
+ * A cadeia tem 11 gates. Dez dependem de ESTADO que só existe no turno real:
  * contadores de pacing, janela de cópias do spinning, carimbo da última inbound,
  * ledger de envios, base legal do contato. Fabricar esse estado para o teste
  * produziria um veredito **inventado** — pior que veredito nenhum, porque teria
@@ -32,6 +32,7 @@
  * turnos com prompt de operador vazavam vocabulário interno para o cliente.
  */
 import { detectarVazamentoInterno } from "@/lib/agent-engine/guardrails/vazamento-interno";
+import { classificarAfirmacaoDeAssistencia } from "@/lib/agent-engine/guardrails/assistance-grounding";
 
 /** O que a checagem de texto encontrou na resposta de teste. */
 export interface AvaliacaoDaRespostaDeTeste {
@@ -72,6 +73,23 @@ const NAO_AVALIAVEIS_SEM_TURNO: ReadonlyArray<{ gate: string; porque: string }> 
 ];
 
 /**
+ * O gate de lastro (spec 002, FR-009) é METADE decidível aqui: se a resposta **afirma**
+ * um procedimento de operadora dá para saber só lendo o texto, mas se existe trecho do
+ * acervo que a sustente depende da conversa real e do escopo do cliente.
+ *
+ * Declarar as duas metades separadas é o que FR-034 pede. Um "não avaliado" genérico
+ * esconderia a informação mais útil que esta tela pode dar: *"esta resposta vai exigir
+ * lastro na conversa de verdade"* — que é acionável antes de publicar, enquanto
+ * "depende do turno" não é acionável nunca.
+ */
+function porqueDoLastro(corpo: string): string {
+  const { isAssistanceClaim } = classificarAfirmacaoDeAssistencia(corpo);
+  return isAssistanceClaim
+    ? "esta resposta afirma um procedimento da operadora: na conversa real ela só será enviada se houver material seu que a sustente — aqui não há cliente nem operadora para procurar"
+    : "depende de haver material seu que sustente a resposta, e de qual operadora é o cliente — nada disso existe no teste";
+}
+
+/**
  * Avalia o texto que o agente produziria. Puro: não toca em banco, não escreve
  * trace, não gasta modelo — pode rodar dentro da rota do app, que é justamente
  * onde a cadeia real não existe.
@@ -85,6 +103,9 @@ export function avaliarRespostaDeTeste(texto: string | undefined): AvaliacaoDaRe
     passou: !achado.achou,
     categorias: [...achado.categorias],
     termos: [...achado.termos],
-    naoAvaliados: NAO_AVALIAVEIS_SEM_TURNO,
+    naoAvaliados: [
+      ...NAO_AVALIAVEIS_SEM_TURNO,
+      { gate: "assistance_grounding", porque: porqueDoLastro(corpo) },
+    ],
   };
 }

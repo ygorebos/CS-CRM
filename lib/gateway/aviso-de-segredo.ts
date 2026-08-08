@@ -30,7 +30,7 @@ import type { InboxKind } from "@/lib/agent-engine/db/repository";
 import { logger } from "@/lib/logger";
 
 /**
- * Vocabulário de `agent_inbox_items.kind` (migration 0117).
+ * Vocabulário de `agent_inbox_items.kind` (migration 0120).
  *
  * Tipado como `InboxKind` — e o import é só de TIPO, que some no build — para
  * que um kind escrito à mão aqui e ausente da constraint vire erro de

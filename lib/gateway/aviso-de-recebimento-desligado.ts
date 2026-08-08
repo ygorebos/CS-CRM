@@ -33,7 +33,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { InboxKind } from "@/lib/agent-engine/db/repository";
 import { logger } from "@/lib/logger";
 
-/** Vocabulário de `agent_inbox_items.kind` (migration 0119). */
+/** Vocabulário de `agent_inbox_items.kind` (migration 0122). */
 export const KIND_RECEBIMENTO_DESLIGADO: InboxKind = "gateway_inbound_down";
 
 interface LinhaDeConexao {

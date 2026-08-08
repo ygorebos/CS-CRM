@@ -21,6 +21,16 @@ import type pg from 'pg';
  * Esta lista já ficou 3 valores atrás do banco (`judge_unaligned`,
  * `followup_dead`, `next_action_ambiguous`) sem nada falhar. Quem adiciona um
  * kind numa migration adiciona aqui na mesma mudança.
+ *
+ * ⚠️ **Sem comentário DENTRO da união.** O invariante extrai os valores por leitura de
+ * texto, e uma linha de comentário no meio corta a lista: medido em 2026-08-08, um
+ * comentário entre dois membros escondeu `assistance_without_grounding` e `other` do
+ * extrator, e o teste acusou divergência que não existia. Explicação de kind novo vai
+ * aqui em cima, ou na migration.
+ *
+ * `assistance_without_grounding` (migration 0116, spec 002 FR-012): o agente recusou uma
+ * afirmação de assistência por não haver trecho do acervo que a sustentasse. A recusa é o
+ * comportamento correto; o aviso é o que a transforma em trabalho do corretor.
  */
 export type InboxKind =
   | 'qr_rescan'
@@ -38,19 +48,20 @@ export type InboxKind =
   | 'capabilities_missing'
   | 'message_send_stuck'
   | 'promise_unfulfilled'
-  // (0117) Conexão sem chave de verificação: a entrega do gateway é fail-closed
+  // (0120) Conexão sem chave de verificação: a entrega do gateway é fail-closed
   // sem válvula, então toda mensagem daquela conexão é recusada. Nenhuma se
   // perde (o gateway retenta 5xx), mas nenhuma entra — e sem este aviso o
   // sintoma é "as mensagens pararam", sem lugar nenhum para olhar.
   | 'channel_secret_missing'
-  // (0118) Entrega de envelope descartada pelo dreno: tentativas esgotadas,
+  // (0121) Entrega de envelope descartada pelo dreno: tentativas esgotadas,
   // linha sem dono ou envelope que não parseia. Diferente do kind acima, aqui
   // NÃO haverá nova tentativa — a mensagem daquele cliente não vai chegar.
   | 'gateway_delivery_dead'
-  // (0119) Conexão apontada para o gateway com o recebimento desligado: a rota
+  // (0122) Conexão apontada para o gateway com o recebimento desligado: a rota
   // responde 404, o gateway descarta sem retentar, e NADA entra. Silêncio total
   // com conserto de uma variável.
   | 'gateway_inbound_down'
+  | 'assistance_without_grounding'
   | 'other';
 
 export interface InboxItemRow {

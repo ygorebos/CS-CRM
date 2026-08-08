@@ -4,7 +4,7 @@
  * ## O default da coluna não serve para conexão nova
  *
  * `channel_sessions.ingest_path` nasce `'legacy'` por default, e isso está certo
- * para as linhas que **já existiam** quando a migration 0116 rodou: elas estavam
+ * para as linhas que **já existiam** quando a migration 0119 rodou: elas estavam
  * recebendo pelo caminho antigo naquele instante, e mudá-las em massa seria
  * virar a chave de todo mundo sem aviso.
  *
@@ -16,7 +16,7 @@
  * ## Por que segue o interruptor, e não é fixo em `'gateway'`
  *
  * Nascer sempre `'gateway'` com `GATEWAY_INBOUND_ENABLED=false` criaria
- * exatamente a combinação que o aviso da migration 0119 existe para denunciar:
+ * exatamente a combinação que o aviso da migration 0122 existe para denunciar:
  * conexão apontada para uma rota desligada, que responde 404, e o gateway
  * descarta sem retentar. A conexão nasceria muda.
  *

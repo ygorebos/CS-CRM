@@ -11,6 +11,7 @@ import { audit } from "@/lib/audit";
 import { listSelectableChannels, type SelectableChannel } from "@/lib/channels/selectable";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { aiAgentDefaultSchema, type PromptTemplate } from "@/lib/schemas/onboarding";
+import { GUARDRAILS_DO_AGENTE_PADRAO } from "@/lib/ai/agents/guardrails-padrao";
 import { requireOnboardingCtx, patchOnboardingState, OnboardingError } from "./_shared";
 
 const PROMPT_BODIES: Record<PromptTemplate, string> = {
@@ -202,7 +203,12 @@ export async function createDefaultAgent(formData: FormData): Promise<CreateAgen
   // runtime, e nenhum deles o padrão. Repetir o passo tem que ser inofensivo.
   const { data: reaproveitado, error: reuseErr } = await admin
     .from("ai_agents")
-    .update({ name: input.name, system_prompt: systemPrompt, is_active: true })
+    .update({
+      name: input.name,
+      system_prompt: systemPrompt,
+      is_active: true,
+      guardrails: GUARDRAILS_DO_AGENTE_PADRAO,
+    })
     .eq("organization_id", ctx.orgId)
     .eq("is_default", true)
     .select("id, published_version_id")
@@ -223,6 +229,7 @@ export async function createDefaultAgent(formData: FormData): Promise<CreateAgen
         is_default: true,
         is_active: true,
         created_by: ctx.userId,
+        guardrails: GUARDRAILS_DO_AGENTE_PADRAO,
       })
       .select("id, published_version_id")
       .single();

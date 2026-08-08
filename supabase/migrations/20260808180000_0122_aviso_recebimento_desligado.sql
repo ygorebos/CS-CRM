@@ -41,9 +41,14 @@ alter table public.agent_inbox_items
     'capabilities_missing',
     'message_send_stuck',
     'promise_unfulfilled',
+    -- (migration 0116, spec 002 FR-012) Kind da OUTRA frente. Ele entra aqui
+    -- porque esta constraint é reconstruída inteira: uma lista que o esquecesse
+    -- o apagaria em silêncio no primeiro `update`, e o defeito só apareceria
+    -- quando um agente recusasse por falta de lastro e o insert estourasse.
+    'assistance_without_grounding',
     'channel_secret_missing',
     'gateway_delivery_dead',
-    -- (migration 0119, spec 001 §T059) Conexão apontada para o gateway com o
+    -- (migration 0122, spec 001 §T059) Conexão apontada para o gateway com o
     -- recebimento desligado: a rota responde 404, o gateway descarta sem
     -- retentar (404 é defeito de configuração pelo contrato §5) e nenhuma
     -- mensagem entra. É o silêncio mais caro da feature, e é curável com uma

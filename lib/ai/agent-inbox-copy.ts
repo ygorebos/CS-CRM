@@ -56,6 +56,11 @@ export const KIND_LABEL = {
   // rota de recebimento, mas entende "está desligado" e entende que alguém
   // precisa ligar. O nome da variável fica no corpo, para quem for consertar.
   gateway_inbound_down: "O recebimento de mensagens está desligado",
+  // Diz o que FALTA, não o que o guardrail fez. "Recusa por ausência de lastro" é
+  // verdade e é inútil para quem lê: o dono do negócio precisa entender que existe um
+  // cliente esperando e que a solução está na mão dele — carregar o material. O motivo
+  // técnico fica no corpo do aviso, junto com a pergunta original.
+  assistance_without_grounding: "Uma pergunta de cliente ficou sem resposta por falta de material",
   other: "Aviso do assistente",
 } as const satisfies Record<InboxKind, string>;
 

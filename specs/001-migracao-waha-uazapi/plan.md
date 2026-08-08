@@ -145,9 +145,9 @@ DeskcommCRM/
 ├── workers/
 │   └── gateway-inbound-worker.ts             # NOVO — consome a fila, chama lib/gateway/ingest
 ├── supabase/
-│   ├── migrations/20260807…_0116_gateway_inbound.sql   # NOVO
+│   ├── migrations/20260808…_0119_gateway_inbound.sql   # NOVO
 │   ├── baseline.sql                          # ALTERADO — apêndice idempotente
-│   └── migrations/MANIFEST.md                # ALTERADO — linha da 0116
+│   └── migrations/MANIFEST.md                # ALTERADO — linha da 0119
 ├── tests/
 │   ├── unit/gateway-envelope.test.ts         # NOVO — contrato, versão futura, tipo desconhecido
 │   ├── invariants/gateway-inbound-*.test.ts  # NOVO — autenticidade, isolamento, idempotência,

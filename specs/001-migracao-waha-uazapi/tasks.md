@@ -53,9 +53,9 @@ desta fase fechar.**
 
 ### Schema — a tripla obrigatória (Princípio III)
 
-- [x] T005 Criar `supabase/migrations/20260807210000_0116_gateway_inbound.sql` com: `channel_sessions.ingest_path text not null default 'legacy' check (ingest_path in ('legacy','gateway'))`, `channel_sessions.gateway_connection_id text`, extensão do `channel_sessions_provider_check` para incluir `whatsapp_uazapi`/`whatsapp_cloud`/`instagram`/`messenger`, extensão do `webhook_events_log_provider_check` para incluir `gateway`, e índice parcial em `webhook_events_log (status, received_at) where status = 'received'` — tudo idempotente (`add column if not exists`, `drop constraint if exists` + `add constraint`), sem `BEGIN`/`COMMIT` explícito
-- [x] T006 Acrescentar o mesmo conteúdo como apêndice idempotente e auto-curativo no fim de `supabase/baseline.sql`, no bloco rotulado `-- ---- gateway inbound (migration 0116) ----`
-- [x] T007 [P] Registrar a linha da 0116 em `supabase/migrations/MANIFEST.md` (tabela "Applied"), dizendo o QUÊ e o PORQUÊ
+- [x] T005 Criar `supabase/migrations/20260808150000_0119_gateway_inbound.sql` com: `channel_sessions.ingest_path text not null default 'legacy' check (ingest_path in ('legacy','gateway'))`, `channel_sessions.gateway_connection_id text`, extensão do `channel_sessions_provider_check` para incluir `whatsapp_uazapi`/`whatsapp_cloud`/`instagram`/`messenger`, extensão do `webhook_events_log_provider_check` para incluir `gateway`, e índice parcial em `webhook_events_log (status, received_at) where status = 'received'` — tudo idempotente (`add column if not exists`, `drop constraint if exists` + `add constraint`), sem `BEGIN`/`COMMIT` explícito
+- [x] T006 Acrescentar o mesmo conteúdo como apêndice idempotente e auto-curativo no fim de `supabase/baseline.sql`, no bloco rotulado `-- ---- recebimento unificado pelo gateway (migration 0119) ----`
+- [x] T007 [P] Registrar a linha da 0119 em `supabase/migrations/MANIFEST.md` (tabela "Applied"), dizendo o QUÊ e o PORQUÊ
 - [x] T008 Provar o baseline num Postgres descartável `pgvector/pgvector:pg17`: aplicar em modo install (`ON_ERROR_STOP=1`) e em modo update (re-aplicar, sem a flag) — os dois têm de passar
 - [x] T009 Regenerar `lib/database.types.ts` a partir do schema novo
 
@@ -122,7 +122,7 @@ desta fase fechar.**
   > RETENTA 5xx; classificar como falha de autenticação faria o histórico do período quebrado nunca
   > entrar, quando ele entra sozinho assim que a chave existir. O aviso é **um por conexão** enquanto
   > houver um `open` — a conexão quebrada recusa toda entrega, e sem deduplicar um número movimentado
-  > enterraria a Central em minutos. O kind `channel_secret_missing` saiu como migration 0117 +
+  > enterraria a Central em minutos. O kind `channel_secret_missing` saiu como migration 0120 +
   > apêndice do baseline + linha no MANIFEST, e entrou em `InboxKind` (o par TS×banco é cobrado por
   > `tests/invariants/vocabulario-banco-x-typescript.test.ts`).
 

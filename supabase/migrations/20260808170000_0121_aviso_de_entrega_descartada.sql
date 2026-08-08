@@ -40,8 +40,13 @@ alter table public.agent_inbox_items
     'capabilities_missing',
     'message_send_stuck',
     'promise_unfulfilled',
+    -- (migration 0116, spec 002 FR-012) Kind da OUTRA frente. Ele entra aqui
+    -- porque esta constraint é reconstruída inteira: uma lista que o esquecesse
+    -- o apagaria em silêncio no primeiro `update`, e o defeito só apareceria
+    -- quando um agente recusasse por falta de lastro e o insert estourasse.
+    'assistance_without_grounding',
     'channel_secret_missing',
-    -- (migration 0118, spec 001 §T037) Entrega de envelope DESCARTADA: as
+    -- (migration 0121, spec 001 §T037) Entrega de envelope DESCARTADA: as
     -- tentativas acabaram, ou a linha chegou sem conexão/organização, ou o
     -- envelope não parseia. Ao contrário de `channel_secret_missing`, aqui não
     -- haverá nova tentativa — a mensagem daquele cliente não vai chegar, e a

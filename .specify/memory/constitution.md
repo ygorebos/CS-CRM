@@ -76,63 +76,124 @@ Interpretações aplicadas ao ditado do dono do produto (registradas para confer
 Divergência documental declarada:
   VISION.md e docs/prd/00-prd-master.md posicionam o produto como multi-nicho com persona
   primária "Operador BPO" de e-commerce. Esta emenda define o **nicho de validação** como
-  corretor de plano de saúde. Multi-nicho segue como capacidade (via `vocabulary` por
-  pipeline) — muda a prioridade de validação, não a arquitetura.
-  TODO(VISION_PRD_ALIGNMENT): alinhar VISION.md e docs/prd/00-prd-master.md.
+  corretor de plano de saúde. Não é contradição de arquitetura (multi-nicho segue como
+  capacidade, via `vocabulary` por pipeline) — é mudança de prioridade de validação. Os dois
+  documentos ficaram desatualizados.
+  TODO(VISION_PRD_ALIGNMENT): alinhar VISION.md e docs/prd/00-prd-master.md ao nicho de
+  validação.
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/plan-template.md — tabela do Constitution Check estendida de 7 para
+                                           11 gates e fonte atualizada para v1.1.0
+  ⚠️ CLAUDE.md — a doutrina de testes do Princípio XI é mais estrita que a seção "Testes"
+                 atual. TODO(CLAUDE_MD_TESTES): refletir lá o teste-de-sabotagem e o
+                 teste-de-efeito-de-configuração.
 
 ==================================================================================
 EMENDA — 2026-08-07 (segunda do dia)
 
 Version change: 1.1.0 → 1.2.0
-Bump rationale: MINOR — um princípio novo, de processo de sessão. I–XI seguem íntegros.
+Bump rationale: MINOR — um princípio novo, de processo de sessão. Nenhum princípio existente
+foi removido ou redefinido; I–XI seguem íntegros, palavra por palavra.
 
 Princípio adicionado:
   - XII. Contexto Antes de Ação (NÃO NEGOCIÁVEL)
 
 Origem: pedido explícito do dono do produto — sessão que ainda não absorveu o planejamento
 geral do sistema, e que ainda não leu `CLAUDE.md` nem `README.md`, faz essa leitura ANTES de
-seguir com a ação pedida.
+seguir com a ação pedida. A emenda transforma isso em regra com ordem de leitura, gatilho de
+releitura e declaração verificável, para que "eu li" pare de ser afirmação implícita.
+
+Seções alteradas:
+  - "Governance" → subseção "Leitura de entrada" apontando para o Princípio XII, para que a
+    regra apareça também onde um agente procura procedimento (e não só onde procura doutrina).
+
+Seções removidas: nenhuma.
 
 Artefatos dependentes propagados:
-  ✅ .specify/templates/plan-template.md — Constitution Check estendido de 7 para 12 gates e
+  ✅ .specify/templates/plan-template.md — Constitution Check estendido de 11 para 12 gates e
                                            fonte atualizada para v1.2.0
 
-Nota de procedência: as duas emendas acima foram escritas por sessões distintas trabalhando na
-mesma árvore, e o arquivo foi restaurado ao estado 1.0.0 duas vezes por `git restore` no meio
-do trabalho. Esta versão reúne as duas e foi commitada justamente para não se perder de novo.
+Divergência corrigida nesta emenda:
+  O rodapé do arquivo dizia `Version: 1.0.0` enquanto o corpo já continha a emenda 1.1.0
+  (Princípios VIII–XI). Rodapé passa a 1.2.0.
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
 
 ==================================================================================
+NOTA DE RECONCILIAÇÃO — 2026-08-07 (sem mudança de versão; segue 1.2.0)
+
+As duas emendas acima foram escritas por sessões distintas trabalhando na MESMA árvore de
+trabalho, e foram commitadas em `acdd63cd`, na branch `chore/spec-kit-constituicao`. Esse
+commit ficou de fora do PR #7, que foi aberto de `f41bbe6c` — um commit antes dele. Ao trocar
+para a `main` e puxar, o arquivo voltou ao estado 1.0.0, e outra sessão concluiu (errado) que a
+emenda tinha sido perdida e a reescreveu do zero. A reescrita entrou na `main` como `b1606351`.
+
+A reescrita ficou idêntica ao original no corpo inteiro — os 12 princípios, "Missão e Escopo",
+"Papéis, Ritmo e Método" e o Definition of Done batem byte a byte, e o `plan-template.md`
+também. O que ela perdeu foi metadado deste cabeçalho: os "Artefatos dependentes propagados" da
+v1.1.0 (com o aviso do TODO(CLAUDE_MD_TESTES)), "Seções alteradas", "Seções removidas" e
+"Divergência corrigida nesta emenda". Este commit restaura os quatro a partir de `acdd63cd`.
+
+A mensagem de `b1606351` afirma que o trabalho foi perdido por `git restore` antes de ser
+commitado. **É falso** — estava commitado em `acdd63cd` o tempo todo. Corrige-se aqui porque a
+mensagem de commit já publicada não pode ser reescrita.
+
+Lição registrada, porque custou retrabalho: arquivo rastreado que "voltou" ao conteúdo antigo
+quase sempre está commitado em outra ref. `git log --all -- <arquivo>` antes de reescrever.
+
+==================================================================================
 EMENDA — 2026-08-08
 
-Version change: 1.2.0 → 1.3.0
-Bump rationale: MINOR — expansão material de orientação na seção "Fluxo de Desenvolvimento e
-Portões" (subseção nova "Cadência de commit"). Nenhum princípio foi adicionado, removido ou
-redefinido; I–XII seguem íntegros, palavra por palavra.
+Version change: 1.2.0 → 2.0.0
+Bump rationale: MAJOR — redefinição incompatível do Princípio X. A versão anterior afirmava,
+sem exceção, que "conteúdo de operadora é dado de tenant e entra no isolamento por
+`organization_id` como qualquer outro". Esta emenda abre uma segunda camada, compartilhada
+pela instalação e não pertencente a nenhuma organização. Doutrina e código escritos contra a
+regra antiga passam a estar errados sobre onde o conteúdo pode viver — por isso MAJOR, e não
+MINOR. Nenhum outro princípio foi removido ou redefinido; I–IX, XI e XII seguem íntegros,
+palavra por palavra, e o título do Princípio X é preservado.
 
-Seção alterada:
-  - Fluxo de Desenvolvimento e Portões — subseção "Cadência de commit" ADICIONADA
+Princípio alterado:
+  - X. Conhecimento de Operadora é Dado Curado, Nunca Código — corpo reescrito. O que passa a
+    existir: as duas camadas (acervo do tenant × catálogo curado) e as SETE travas sob as quais
+    a exceção ao Princípio I é aceitável. Faltando qualquer uma, a exceção não se aplica.
 
-Origem: pedido explícito do dono do produto — "Não precisa ficar fazendo um Commit a cada task
-executada. Quando executar uma fase inteira de uma spec, aí você faz um Commit."
+Origem: decisão do dono do produto registrada na sessão de clarificação da feature
+`002-rag-por-operadora` em 2026-08-08. A instalação nova precisa já saber assistir antes de o
+corretor carregar a primeira coisa (Princípio VIII), e isso só é possível com conteúdo que o
+fabricante cura e distribui. A sessão reportou a divergência em vez de resolvê-la em silêncio,
+conforme o Princípio XII, e a feature ficou bloqueada até esta emenda.
 
-O que muda na prática: a unidade de commit deixa de ser a task e passa a ser a FASE da spec. O
-histórico passa a ter um commit por fase concluída, e não uma dezena de commits parciais que só
-fazem sentido lidos em bloco. Os portões não afrouxam: eles passam a rodar uma vez por fase, no
-fecho, em vez de uma vez por task.
-
-Escape declarado (não é exceção informal — é regra): árvore de trabalho compartilhada. Este
-repositório é editado por sessões concorrentes, e este mesmo arquivo já foi perdido duas vezes
-por `git restore` de outra sessão (ver nota de procedência da v1.2.0). Segurar trabalho pronto
-fora do índice por uma fase inteira é o que torna essa perda possível. Por isso a subseção
-autoriza — e obriga — o commit antecipado quando a fase é longa ou a árvore é compartilhada.
+Plano de migração (exigência (c) da Governança):
+  - **Nenhum código existente é invalidado.** Não há catálogo compartilhado no repositório hoje:
+    todo conhecimento é tenant-scoped (`ai_knowledge_sources`, `ai_kb_versions`, `ai_kb_chunks`,
+    `retrieve_top_k_chunks`). A emenda abre caminho, não pede refactor. Nenhuma tabela existente
+    perde `organization_id` nem afrouxa RLS — a trava 3 proíbe exatamente isso.
+  - **A dívida nasce com a primeira linha do catálogo, não com esta emenda.** No momento em que
+    a partição compartilhada existir, o Princípio XI passa a exigir invariante em
+    `tests/invariants/` para as travas 1, 2 e 3: escrita a partir de papel de tenant barrada por
+    todos os caminhos; catálogo sem dado pessoal e sem identificador de organização; consulta
+    que cruza as duas camadas devolvendo zero linhas de outra organização. Sem esses três, a
+    exceção não pode ser considerada implementada.
+  - **Trava 6 é responsabilidade do Princípio III.** O apêndice do `baseline.sql` que semeia o
+    catálogo precisa ser idempotente **e** não-destrutivo — só acrescentar versão. Idempotência
+    sozinha não basta: um `upsert` idempotente apagaria a correção local, que é justamente o que
+    a trava proíbe.
+  - **Nada a alinhar em documento derivado.** Varredura em `CLAUDE.md`, `AGENTS.md` e
+    `docs/doctrine/` não encontrou nenhuma ocorrência de "operadora": nenhum deles repetia a
+    regra antiga, e nenhum desatualiza com esta emenda.
 
 Artefatos dependentes propagados:
-  ✅ .specify/templates/tasks-template.md — a nota "Commit after each task or logical group"
-                                            contradizia a emenda; reescrita para commit por fase
-  ✅ .specify/templates/plan-template.md  — fonte do Constitution Check atualizada para v1.3.0
+  ✅ .specify/templates/plan-template.md — fonte atualizada para v2.0.0 e a pergunta do gate X
+                                           reescrita para cobrir as duas camadas e as sete travas
+  ✅ rodapé deste arquivo                 — Version 2.0.0, Last Amended 2026-08-08
+
+Fora deste PR, de propósito: a spec `specs/002-rag-por-operadora/` que motivou a emenda segue na
+branch da feature. A Governança proíbe emenda no mesmo PR da feature que a motivou. Depois do
+merge, o item CHK028 do checklist daquela spec — reprovado hoje justamente por esta contradição —
+volta a passar sem nenhuma mudança na spec.
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
@@ -140,64 +201,82 @@ TODO(CLAUDE_MD_TESTES).
 ==================================================================================
 EMENDA — 2026-08-08 (segunda do dia)
 
-Version change: 1.3.0 → 2.0.0
-Bump rationale: MAJOR — o modelo de distribuição do produto mudou. O CRM DEIXA de ser
-distribuído para instalação em máquina de terceiro e passa a ser **SaaS de instância única**
-operada por nós. Isso redefine dois princípios NÃO NEGOCIÁVEIS (III e IV), cuja justificativa
-inteira era o self-host, e reescreve a Missão e Escopo. Redefinição incompatível = MAJOR.
+Version change: 2.0.0 → 2.1.0
+Bump rationale: MINOR — orientação nova e material numa seção existente ("Fluxo de
+Desenvolvimento e Portões"). Nenhum princípio foi adicionado, removido ou redefinido; I–XII
+seguem íntegros, palavra por palavra, e a contagem de gates do Constitution Check não muda.
 
-Origem: decisão do dono do produto — "o gateway não tem réplica e não é instalado junto com o
-CRM; nem o CRM ficará sendo instalado em diversas máquinas. Estamos trabalhando ele no modelo
-SaaS, onde os usuários se cadastram, usam, testam e depois realizam a assinatura. Mas a
-assinatura é gerenciada lá pelo Cotador Simplificado, não por aqui."
+Seção alterada:
+  - "Fluxo de Desenvolvimento e Portões" → subseção nova **"Cadência de commit"**, entre
+    "Higiene de branch" e "Portões obrigatórios". Define a fase — não a task — como unidade de
+    commit, com três exceções nomeadas e o que o commit de fase precisa ter rodado para existir.
 
-Princípios REDEFINIDOS (mesmo número, regra e justificativa diferentes):
-  - III. "Schema Viaja com o Clone"          → "Schema Muda por Migration, Nunca à Mão"
-  - IV.  "Prova pela Tela em Ambiente Fresco" → mesmo nome, "fresco" redefinido: conta nova em
-                                                banco novo, não instalação nova numa VPS
+Seções removidas: nenhuma.
 
-Princípios ADICIONADOS:
-  - XIII. Cobrança Mora no Cotador, e Só Lá (NÃO NEGOCIÁVEL)
-  - XIV.  O Gateway é Serviço Único, Compartilhado e Sem Réplica (NÃO NEGOCIÁVEL)
+Origem: pedido explícito do dono do produto — "não precisa ficar fazendo um commit a cada task
+executada; quando executar uma fase inteira de uma spec, aí você faz um commit". A regra estava
+implícita e cada sessão escolhia a sua, o que produziu tanto histórico picotado (um commit por
+task, estados que não compilam) quanto trabalho perdido (nada commitado até a fase fechar). A
+emenda fixa o padrão e, no mesmo movimento, protege o caso em que segurar o commit custa
+trabalho.
 
-Princípios com AJUSTE de justificativa, regra intacta: VII (o gateway ganha estatuto próprio no
-XIV; a fronteira "não escreve no banco do CRM" segue idêntica), VIII (o teto de 10 minutos
-continua, o relógio agora começa no CADASTRO e não na instalação).
-
-Seções reescritas: "Missão e Escopo"; "Restrições de Stack e Configuração" (bloco de Deploy).
-
-Plano de migração — o que esta emenda invalida, e o que fica como dívida DECLARADA
-(nenhum item foi executado nesta emenda; o Scope Guard do /speckit-constitution proíbe):
-
-  (a) `install.sh`, `update.sh` e o kit HostGator deixam de ser produto. Não são apagados nesta
-      emenda: `scripts/test-db.sh` — que roda no job `invariants`, obrigatório na branch
-      protection — aplica `baseline.sql` em modo install E update, e é HOJE a única prova
-      mecânica de que o schema sobe do zero. Enquanto essa prova não tiver outro dono, remover
-      o kit remove o gate. TODO(SELFHOST_KIT_RETIREMENT).
-  (b) `docker-compose.prod.yml` deixa de descrever "a VPS do cliente" e passa a descrever a
-      NOSSA instância. O gateway sai dele: não é instalado junto (Princípio XIV).
-  (c) A spec 001 foi escrita sob a doutrina antiga. As decisões dela seguem CERTAS — o gateway
-      já era serviço externo e o envelope já era contrato HTTP —, mas a justificativa
-      "self-hoster" que aparece em vários comentários e nos docs da spec está desatualizada.
-      Isso é dívida de TEXTO, não de código. TODO(SPEC001_RATIONALE_REWRITE).
-  (d) `VISION.md`, `README.md`, `CLAUDE.md` e `docs/prd/*` descrevem monetização por self-host
-      em VPS (parceria HostGator). Contradizem esta emenda e MUST ser alinhados.
-      TODO(SELFHOST_DOCS_ALIGNMENT) — absorve o TODO(VISION_PRD_ALIGNMENT) da v1.1.0.
-  (e) O Princípio IV mandava testar "com os envs opcionais AUSENTES", porque era o estado real
-      de um primeiro deploy alheio. Em SaaS os envs são nossos e conhecidos. A regra não é
-      apagada, é REDIRECIONADA: o que se testa ausente agora é o que o USUÁRIO ainda não
-      configurou (canal não conectado, base de conhecimento vazia, agente sem capacidade).
+Plano de migração (exigência (c) da Governança):
+  - **Nenhum commit já publicado é invalidado.** A regra vale do merge em diante; histórico
+    anterior não é reescrito — a "Higiene de branch" acima já proíbe reescrever a `main`.
+  - **Sem efeito em portão de CI.** Nenhum job passa a reprovar por granularidade de commit; a
+    regra é de método, verificada na revisão do PR, não por script.
+  - **Conflito aparente com o Princípio XI, resolvido aqui:** juntar as tasks de uma fase num
+    commit MUST NOT virar desculpa para adiar o teste. O teste da fase entra no commit da fase;
+    fase cujo commit não carrega o teste que prova o que ela entregou não fechou.
 
 Artefatos dependentes propagados:
-  ✅ .specify/templates/plan-template.md — fonte do Constitution Check atualizada para v2.0.0
-  ⬜ CLAUDE.md / README.md / VISION.md   — fora do escopo deste comando; ver TODO acima
+  ✅ .specify/templates/plan-template.md — fonte atualizada para v2.1.0 (a tabela de gates não
+                                           muda: esta emenda não cria princípio)
+  ✅ rodapé deste arquivo                 — Version 2.1.0, Last Amended 2026-08-08
 
-TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(CLAUDE_MD_TESTES).
+TODO(CLAUDE_MD_CADENCIA): `CLAUDE.md` não fala de cadência de commit em lugar nenhum — não
+desatualiza com esta emenda, mas ganharia a regra na seção de fluxo. Fica como alinhamento de
+documento derivado, fora deste PR.
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES).
+==================================================================================
+EMENDA — 2026-08-08 (reconciliação de duas frentes)
+
+Version change: 2.1.0 → 2.2.0
+Bump rationale: MINOR — dois princípios novos (XIII, XIV) e expansão material de Missão e Escopo,
+III, IV, VIII, XII e Restrições de Stack. Nenhum princípio removido; o X expandido pela 2.1.0
+(spec 002) segue íntegro, palavra por palavra.
+
+Origem: a v2.0.0 e a v2.1.0 foram escritas em paralelo, em branches diferentes, a partir da
+v1.2.0 — a 2.0.0 na `feat/001-gateway-ingest-unificado` (virada para SaaS de instância única) e a
+2.1.0 na frente da spec 002 (Princípio X, conhecimento de operadora). Nenhuma das duas viu a
+outra. Esta emenda é a união: a 2.1.0 é a base, e o conteúdo da 2.0.0 foi reaplicado por cima.
+
+Princípios adicionados (vindos da 2.0.0):
+  XIII. Cobrança Mora no Cotador, e Só Lá
+  XIV.  O Gateway é Serviço Único, Compartilhado e Sem Réplica
+
+Seções substituídas pela redação da 2.0.0 (todas ampliam, nenhuma remove regra da 2.1.0):
+  Missão e Escopo — SaaS de instância única; sem clone; sem versão de escape
+  III  — "Schema Viaja com o Clone" → "Schema Muda por Migration, Nunca à Mão"
+  IV   — "fresco" passa a significar CONTA nova, não instalação nova
+  VIII — o relógio dos 10 minutos passa a contar do cadastro, não do login
+  XII  — o baseline descrito como o que sobe ambiente do zero e o que o gate `invariants` aplica
+  Restrições de Stack — deploy da nossa instância; gateway fora dele; expand/contract obrigatório
+
+Seção preservada da 2.1.0 por ser a mais recente:
+  Fluxo de Desenvolvimento e Portões — a "Cadência de commit" da 2.1.0 vence a da 2.0.0 (ela já
+  traz as três exceções, incluindo o escape de árvore compartilhada e o trio da migration).
+  Acrescentados a ela apenas os dois gates que III e IV passaram a exigir.
+
+Seções removidas: nenhuma.
+
 -->
 
 # DeskcommCRM Constitution
 
-Sistema operacional de vendas multi-tenant entregue como **SaaS de instância única**, com agentes de IA
+Sistema operacional de vendas open source, multi-tenant, self-hosted, com agentes de IA
 nativos e WhatsApp como canal primário. Esta constituição é a lei de arquitetura do repositório.
 `CLAUDE.md`, `docs/doctrine/sistema-vivo.md` e `README.md` a detalham; onde divergirem, esta
 constituição prevalece.
@@ -421,16 +500,55 @@ dano ao cliente final do corretor — e quem responde por isso é ele, não o fa
 ### X. Conhecimento de Operadora é Dado Curado, Nunca Código
 
 A informação específica de cada operadora de plano de saúde — como emitir boleto, onde acessar
-carteirinha, rede, regras de uso — MUST viver como conteúdo versionado e curado no RAG do tenant.
-MUST NOT viver em `if`, prompt hardcoded, tabela de código ou deploy. **Operadora nova = carregar
-conteúdo, não fazer release**: se o corretor precisa de deploy para atender uma operadora nova, o
-desenho está errado. Toda resposta de assistência MUST ser rastreável ao trecho que a originou —
-sem trecho, sem resposta (Princípio IX). Conteúdo de operadora é dado de tenant e entra no
-isolamento por `organization_id` como qualquer outro (Princípio I).
+carteirinha, rede, regras de uso — MUST viver como conteúdo versionado e curado no RAG. MUST NOT
+viver em `if`, prompt hardcoded, tabela de código ou deploy. **Operadora nova = carregar conteúdo,
+não fazer release**: se alguém precisa de deploy para atender uma operadora nova **na própria
+instalação**, o desenho está errado. Toda resposta de assistência MUST ser rastreável ao trecho que
+a originou — sem trecho, sem resposta (Princípio IX).
+
+Esse conhecimento vive em **duas camadas**, e a diferença entre elas é de dono, não de formato:
+
+- **Acervo do tenant** — o que o corretor carrega. É dado da organização e entra no isolamento por
+  `organization_id` como qualquer outro (Princípio I), sem exceção.
+- **Catálogo curado** — o que o fabricante mantém e distribui com o produto, para que uma instalação
+  nova já saiba assistir antes de o corretor carregar a primeira coisa. É uma partição
+  **compartilhada pela instalação** e a única do sistema que não pertence a nenhuma organização.
+
+O catálogo curado é uma exceção **de mão única** ao Princípio I, e ela só é aceitável sob **todas**
+as travas abaixo. Faltando qualquer uma, a exceção não vale e o conteúdo MUST voltar a ser dado de
+tenant:
+
+1. **Legível por todos, gravável por ninguém do tenant.** A escrita no catálogo MUST exigir papel de
+   plataforma (`is_platform_admin`); qualquer outra origem MUST ser barrada, inclusive `admin` da
+   organização e inclusive chamada direta às operações de dados.
+2. **Sem dado de ninguém dentro.** O catálogo MUST conter apenas procedimento de operadora. Dado
+   pessoal de cliente e dado pertencente a uma organização MUST NOT entrar nele — é isso que mantém
+   a partição fora do alcance da LGPD e do Princípio I.
+3. **Não afrouxa nenhuma tabela tenant-aware.** A exceção MUST ser uma partição própria. Retirar
+   `organization_id` de tabela existente ou relaxar RLS para acomodá-la é proibido, e consulta que
+   cruza as duas camadas MUST NOT poder devolver linha de outra organização.
+4. **O tenant manda no que vale para ele.** Cada organização MUST poder desativar para si qualquer
+   operadora ou material do catálogo, e material próprio dela MUST vencer o catálogo quando os dois
+   afirmam coisas incompatíveis sobre o mesmo assunto. Quem conhece a regional é o corretor.
+5. **A origem MUST dizer a camada.** A rastreabilidade exigida acima MUST identificar se o trecho
+   veio do catálogo ou do acervo do tenant. A responsabilidade editorial é de pessoas diferentes nos
+   dois casos, e sem essa marca ninguém sabe a quem cobrar a correção.
+6. **Distribuir MUST NOT destruir.** A semeadura do catálogo viaja pelo caminho do Princípio III e
+   MUST ser reaplicável: ela só acrescenta versão, e MUST NOT reescrever, apagar ou desativar
+   material já existente na instalação — inclusive o que o administrador local editou. Atualização
+   que apaga correção local é defeito, não efeito colateral aceitável.
+7. **Nada volta.** Lacuna, pergunta de cliente, métrica de uso e telemetria de conteúdo MUST NOT
+   atravessar a fronteira de uma instalação de volta ao fabricante. Quem instala um clone herda o
+   papel de curador do catálogo dele e responde pelo que editar ali.
 
 **Rationale**: são dezenas de operadoras, cada uma mudando processo no próprio ritmo. Qualquer
-desenho que exija release por operadora transforma manutenção de conteúdo em fila de engenharia,
-e a informação fica velha exatamente onde errar custa mais caro.
+desenho que exija release por operadora transforma manutenção de conteúdo em fila de engenharia, e
+a informação fica velha exatamente onde errar custa mais caro. A camada curada existe porque o
+Princípio VIII cobra valor em 10 minutos: uma instalação que nasce sem saber nada obriga o corretor
+a curar conteúdo antes de ver o produto funcionar, e ele não vai fazer isso. E a exceção é estreita
+de propósito — a redação anterior deste princípio dizia que todo conteúdo de operadora é dado de
+tenant, e ela estava certa sobre o risco: um acervo compartilhado é a primeira porta por onde o
+isolamento vaza. As sete travas existem para que essa porta abra num sentido só.
 
 ### XI. Toda Entrega Nasce com Teste que Prova e que Vigia (NÃO NEGOCIÁVEL)
 
@@ -632,21 +750,35 @@ worktree com working tree sujo que não é seu MUST NOT ser tocada — cheque `g
 `git worktree list`, e avise. Conflito ao atualizar interrompe e é resolvido com cabeça, nunca
 escolhendo um lado no automático.
 
-**Cadência de commit**: a unidade de commit é a **fase da spec**, não a task. Concluída uma fase
-inteira — todas as suas tasks feitas e provadas —, faz-se **um** commit que a fecha. Commit por
-task individual MUST NOT ser a prática padrão: gera histórico que só se entende lido em bloco, e
-faz cada task pagar o custo dos portões que a fase inteira pagaria uma vez.
+**Cadência de commit**: a unidade de commit é a **fase**, não a task. Uma fase inteira de um plano
+— as fases de `tasks.md` no fluxo Spec Kit, ou o marco equivalente num plano sem fases — fecha com
+**um** commit, carregando todas as tasks dela. Commit a cada task MUST NOT ser o padrão: enche o
+histórico de estados intermediários que não compilam, não passam nos portões e não são reversíveis
+sozinhos, e transforma revisão de PR em arqueologia.
 
-Fechar a fase MUST incluir, no mesmo commit: as tasks marcadas em `tasks.md`, o andamento
-atualizado em `plan.md`, e os portões da seção abaixo verdes para o conjunto — o commit de fase é
-o ponto em que a suíte roda, não um marco cosmético.
+Três exceções, e são exceções mesmo:
 
-**Escape obrigatório — árvore compartilhada e fase longa**: este repositório é editado por sessões
-concorrentes, e trabalho pronto fora do índice já foi perdido por `git restore` de outra sessão.
-Quando a fase é longa, ou a árvore é compartilhada, ou a mudança é doutrina (constituição,
-`CLAUDE.md`, `AGENTS.md`), o commit antecipado MUST acontecer assim que o trecho está coerente e
-verde — segurar por disciplina de cadência aqui troca ruído de histórico por perda de trabalho, o
-que é pior. Nesse caso o commit de fecho da fase continua existindo, e reúne o resto.
+- **Trabalho que atravessa mais de uma jornada sem fechar a fase MUST ser commitado assim mesmo**,
+  rotulado como parcial na mensagem. A árvore de trabalho é compartilhada entre sessões e
+  worktrees, e sessão que compacta, troca de branch ou restaura arquivo perde o que não está
+  commitado. Trabalho perdido é pior que histórico feio.
+- **Mudança de doutrina** — esta constituição, `CLAUDE.md`, `AGENTS.md`, `docs/doctrine/` — MUST
+  ser commitada assim que fica pronta, sem esperar fase. É a regra que governa o resto do
+  trabalho; ela não fica refém dele.
+- **Migration versionada** MUST sair no mesmo commit que o apêndice do `baseline.sql` e a linha do
+  MANIFEST (Princípio III). Se a fase ainda não fechou, o commit de schema sai sozinho — os três
+  artefatos nunca se separam.
+
+O commit de fase MUST ter rodado antes os portões que o tipo da mudança exige (`pnpm typecheck`,
+`pnpm lint`, `pnpm test:unit`; mais `pnpm test:db` se tocou schema, RLS, RBAC, escopo, roteamento,
+follow-up, webhooks ou automações). Commit de fase é entrega verificada, não "salvar arquivo". A
+mensagem MUST nomear o **resultado observável** da fase, nunca a lista de arquivos ou o intervalo
+de IDs de task. E juntar tasks num commit MUST NOT adiar teste: o teste que prova a fase entra no
+commit da fase (Princípio XI).
+
+**Rationale**: quem lê este histórico é o revisor do PR e o self-hoster que precisa achar onde
+algo quebrou. Um commit por fase é a menor unidade que alguém consegue reverter inteira sem
+quebrar o meio; um commit por task é ruído com custo de bisect.
 
 **Portões obrigatórios na branch protection da `main`**:
 
@@ -693,9 +825,10 @@ da Fase 0 e de novo após a Fase 1. Violação MUST ser registrada na tabela Com
 plano, com a alternativa mais simples que foi rejeitada e o porquê — violação não documentada
 reprova a revisão. Complexidade MUST ser justificada, nunca presumida.
 
-**Leitura de entrada**: antes da primeira ação de consequência, a sessão lê esta constituição, o
-`CLAUDE.md` e o `README.md`, nesta ordem, e declara que leu citando o `Version` — regra completa,
-com gatilhos de releitura e aprofundamento por tipo de task, no **Princípio XII**.
+**Leitura de entrada**: toda sessão começa lendo esta constituição, depois `CLAUDE.md`, depois
+`README.md`, e só então age — inclusive quando o pedido parece pequeno, e de novo quando o
+contexto foi compactado ou retomado. A regra completa, com a declaração exigida e o
+aprofundamento por tipo de task, está no Princípio XII.
 
 **Orientação de runtime**: `CLAUDE.md` (convenções detalhadas e Definition of Done),
 `AGENTS.md` (mesmo contrato em forma portável para outros agentes),
@@ -703,4 +836,4 @@ com gatilhos de releitura e aprofundamento por tipo de task, no **Princípio XII
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.0.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08

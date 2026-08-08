@@ -40,25 +40,25 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Fonte: `.specify/memory/constitution.md` v2.0.0. Marque PASS/FAIL/N/A por gate; todo FAIL
+Fonte: `.specify/memory/constitution.md` v2.2.0. Marque PASS/FAIL/N/A por gate; todo FAIL
 precisa de linha na Complexity Tracking com a alternativa mais simples que foi rejeitada.
 
 | # | Gate | Pergunta que o plano responde | Status |
 |---|---|---|---|
 | I | Isolamento de tenant | Toda tabela nova tem `organization_id` + RLS? Handler com service role filtra a org de fonte confiável (nunca do body)? `getUser()` em vez de `getSession()`? Função nova em `public` revoga `execute` de `public` **e** `anon`? | |
 | II | Nada é ilha | Living System Checklist respondido: quem alimenta, quem é alimentado, que log emite, onde aparece na tela, por qual porta se chega, mecanismo anti-morte, onde se configura, continuidade IA↔humano? Peça nova entra em `docs/architecture/` com ≥2 arestas? | |
-| III | Schema muda por migration | Mudança de schema sai como migration versionada **+** apêndice idempotente no `baseline.sql` **+** linha no MANIFEST? Constraint nova corrige os dados antes de ser criada? Há **caminho de volta declarado** (expand/contract), já que a instância é única e não existe versão de escape? | |
-| IV | Prova pela tela | Fluxo visível será provado por Playwright em ambiente fresco (baseline + bootstrap-owner), não por `curl`? O **estado vazio** — conta nova, sem canal, sem conhecimento, sem lead — foi provado, e não só o banco povoado? Efeito externo tem receiver real? | |
+| III | Schema muda por migration | Mudança de schema sai como migration versionada **+** apêndice idempotente no `baseline.sql` **+** linha no MANIFEST? Constraint nova corrige os dados antes de ser criada? Mudança destrutiva tem **caminho de volta declarado** (expand/contract) — a instância é única e não há versão de escape? | |
+| IV | Prova pela tela | Fluxo visível será provado por Playwright em ambiente fresco (baseline + bootstrap-owner, envs opcionais ausentes), não por `curl`? Efeito externo tem receiver real? | |
 | V | Evento na fila | Nenhum trigger faz HTTP? Evento externo tem `unique (organization_id, external_id)` + captura de `23505`? POST de criação aceita `Idempotency-Key`? A fila tem dono declarado? | |
 | VI | Contrato de API | Rota sob `/api/v1/` com `ok()`/`fail()`, Zod em todo input externo, audit log na mutação, rate limit se pública, credencial em header, token como hash SHA256? | |
 | VII | Interoperável por contrato | Integração externa consome API v1 / MCP / webhooks — sem acesso direto ao banco do outro sistema nem FK cruzando fronteira de produto? Entidade trocada carrega `organization_id` e é rastreável até o lead? O gateway entrega envelope por HTTP e **não** escreve no banco do CRM? | |
 | VIII | Corretor em 10 minutos | A feature nasce com estrutura pré-pronta que já funciona, sem exigir configuração longa nem edição de arquivo? O que ela acrescenta ao caminho login → primeira conversa atendida cabe no teto de 10 min, e como isso será cronometrado? | |
 | IX | Vender ou assistir | Cada capacidade nova declara qual das duas missões serve? Fluxo de assistência recusa e escala ao humano quando não há respaldo no conhecimento do tenant? | |
-| X | Operadora é dado curado | Nada específico de operadora entra em `if`, prompt hardcoded ou tabela de código? Operadora nova é resolvida carregando conteúdo, sem release? Resposta de assistência é rastreável ao trecho de origem? | |
+| X | Operadora é dado curado | Nada específico de operadora entra em `if`, prompt hardcoded ou tabela de código? Operadora nova é resolvida carregando conteúdo, sem release na própria instalação? Resposta de assistência é rastreável ao trecho de origem **e à camada** de onde ele veio? Se o plano toca o **catálogo curado**, as sete travas do princípio estão respondidas — escrita só por `is_platform_admin`, catálogo sem dado pessoal nem de organização, nenhuma tabela tenant-aware afrouxada, tenant podendo desativar e sobrepor, semeadura que só acrescenta versão e nunca sobrescreve, e nada de telemetria voltando ao fabricante? | |
 | XI | Teste que prova e vigia | Cada item entregável tem teste que falharia sem a feature, e o gate certo pro tipo de mudança (`test:db` p/ schema-RLS, Playwright p/ UI, receptor real p/ contrato externo)? Os testes foram confirmados por sabotagem? Configuração exposta na tela tem teste de **efeito**, não só de gravação? | |
 | XII | Contexto antes de ação | A sessão que produziu este plano declarou ter lido a constituição (com o `Version`), o `CLAUDE.md` e o `README.md` antes de planejar — e releu se o contexto foi compactado ou retomado? Leu o aprofundamento que a task exige (`docs/current-state.md` p/ estimativa, `docs/index.md` p/ schema, `user-journey-map.md` p/ UI, `runbooks/deploy.md` p/ deploy)? Divergência entre documentos foi reportada em vez de resolvida em silêncio? | |
-| XIII | Cobrança fora daqui | O plano NÃO implementa assinatura, plano, preço, checkout, pagamento ou dado de cartão? O estado de assinatura vem do Cotador por contrato, tratado como dado externo — e falha nessa consulta degrada de forma legível, sem cortar atendimento em andamento? | |
-| XIV | Gateway único e sem réplica | O plano NÃO supõe o gateway na mesma máquina/rede/deploy? Mensagem sobrevive ao gateway reiniciar (fila durável + dreno)? A queda vira alerta pra nós e aviso na Central pro usuário, nunca silêncio? Teto é por conexão, não global? | |
+| XIII | Cobrança mora no Cotador | O plano introduz alguma coluna, tabela, rota ou tela de assinatura, plano, preço, checkout, pagamento, cartão, nota fiscal ou inadimplência? Se depende do estado de assinatura, consome contrato HTTP explícito com validade — e degrada de forma legível sem cortar atendimento em andamento? | |
+| XIV | Gateway único e sem réplica | O plano supõe o gateway na mesma máquina, rede ou deploy (`localhost`, nome de serviço de compose, "sobe junto")? O endereço é configuração? Código novo lê **envelope** e nunca payload cru de provedor? Teto de taxa é **por conexão**, nunca global nem por IP? Queda do gateway vira alerta para nós **e** aviso na Central para o usuário? | |
 
 ## Project Structure
 

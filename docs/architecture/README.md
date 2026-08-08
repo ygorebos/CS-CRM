@@ -24,6 +24,7 @@ ser fonte sem ninguém decidir isso.
 | `ia-360-retencao.architecture.json` | pacote **Não perder o cliente** (IA 360 · wave 2) — 26 peças, 36 arestas; a regra única do retorno para o motor e para a capacidade configurável, e por que cancelado precisou deixar de ser igual a disparado |
 | `escalacao-ciclo-humano.architecture.json` | o ciclo agente ↔ pessoa — 30 peças, 38 arestas; as **três** travas da passagem (só uma era solta) e por onde a decisão da pessoa volta ao contexto do turno |
 | `recebimento-pelo-gateway.architecture.json` | **por onde a mensagem do cliente entra** (spec 001) — 19 peças, 24 arestas, 6 faixas; as duas metades da durabilidade (fila em disco no gateway + ACK-primeiro com dreno no CRM) e por que nenhuma sozinha basta; os **três silêncios** e por que cada um tem aviso próprio; **quatro não-ligações declaradas** (o gateway não escreve no banco do CRM; `conversations.channel` não identifica o canal; `media_url` não recebe endereço do envelope; o gateway não entra no compose do CRM) |
+| `lastro-de-assistencia.architecture.json` | o veto de lastro (spec 002, fatia F1) — 14 peças, 16 arestas; as **duas** coisas que precisam ser verdade ao mesmo tempo (gate desarmado na cadeia, agente padrão armado no onboarding) e por que quem fala na recusa é o sistema, não o modelo |
 
 ### `crm-vivo.architecture.json` é PLANTA, não fotografia
 

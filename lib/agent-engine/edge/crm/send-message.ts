@@ -77,6 +77,14 @@ export interface SendMessageInput {
    * colidirem no ledger e o segundo virar `already_sent` sem ter saído.
    */
   template?: { name: string; language: string; values: Record<string, string> };
+  /**
+   * Metadados que nascem no MESMO insert da mensagem (spec 002, FR-024) — a âncora que
+   * prova de onde a resposta veio. **Fora do hash de idempotência de propósito**: o hash
+   * identifica a INTENÇÃO de dizer aquele texto àquele contato, e mudar a citação não
+   * cria uma intenção nova. Se entrasse no hash, um re-run que buscasse o mesmo assunto e
+   * recebesse os trechos em outra ordem mandaria a mensagem duas vezes.
+   */
+  metadata?: Record<string, unknown>;
 }
 
 /** Fallback do ator ai_agent quando não há agente publicado (cfg.agentActorId). */
@@ -134,7 +142,11 @@ export async function sendTurnMessage(
             }
           : { type: 'text' as const }),
         body: input.body,
-        metadata: { idempotency_key: idempotencyKey },
+        // A âncora da resposta viaja AQUI, no insert (spec 002, FR-024) — não num
+        // `update` posterior. `idempotency_key` fica por ÚLTIMO de propósito: ela é a
+        // chave de reconciliação do ledger, e um chamador que a sobrescrevesse por
+        // engano quebraria o replay de crash sem sintoma visível.
+        metadata: { ...(input.metadata ?? {}), idempotency_key: idempotencyKey },
       },
     );
   } catch (err) {

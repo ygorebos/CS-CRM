@@ -40,7 +40,12 @@ alter table public.agent_inbox_items
     'capabilities_missing',
     'message_send_stuck',
     'promise_unfulfilled',
-    -- (migration 0117, spec 001 §T017e) Conexão cuja chave de verificação nunca
+    -- (migration 0116, spec 002 FR-012) Kind da OUTRA frente. Ele entra aqui
+    -- porque esta constraint é reconstruída inteira: uma lista que o esquecesse
+    -- o apagaria em silêncio no primeiro `update`, e o defeito só apareceria
+    -- quando um agente recusasse por falta de lastro e o insert estourasse.
+    'assistance_without_grounding',
+    -- (migration 0120, spec 001 §T017e) Conexão cuja chave de verificação nunca
     -- foi gerada: toda entrega do gateway é recusada, nenhuma mensagem se perde
     -- (o gateway retenta 5xx) mas nenhuma entra. Sem este aviso o sintoma é "as
     -- mensagens pararam", sem lugar nenhum para olhar.
