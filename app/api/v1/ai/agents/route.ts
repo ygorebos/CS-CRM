@@ -94,6 +94,12 @@ export async function POST(req: NextRequest): Promise<Response> {
     const v = input.version;
 
     // Insert agent first (no published_version_id yet).
+    //
+    // `guardrails` é omitido DE PROPÓSITO: a coluna tem default `rag_must_hit` (migration
+    // 0129), então o agente nasce recusando afirmação de assistência sem material. Escrever a
+    // constante aqui repetiria o que já é regra do banco e, no dia em que alguém acrescentar
+    // uma quinta rota de criação, é a repetição — não o default — que seria esquecida. Foi
+    // exatamente assim que o buraco de FR-014 nasceu.
     const { data: agentRow, error: agentErr } = await admin
       .from("ai_agents")
       .insert({
@@ -171,6 +177,8 @@ export async function POST(req: NextRequest): Promise<Response> {
   }
 
   // Legacy path — kind='rag_bot' (default DB constraint).
+  // `guardrails` omitido pelo mesmo motivo do caminho mcp_agent acima: default da coluna
+  // (migration 0129) é quem garante que o agente nasce com lastro exigido.
   const parsed = agentCreateSchema.safeParse(rawBody);
   if (!parsed.success) {
     return fail("validation_failed", "Campos inválidos.", 422, {

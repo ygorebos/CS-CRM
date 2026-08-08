@@ -173,6 +173,45 @@ describe("duplicateAgentWithVersion", () => {
     expect(inserts.find((i) => i.table === "ai_agents")).toBeDefined();
   });
 
+  it("cópia de agente sem guardrails OMITE a coluna — nunca manda null", async () => {
+    // `ai_agents.guardrails` é `not null default <rag_must_hit>` (migration 0129). Mandar
+    // `null` explícito viola o not null (500 no botão "Duplicar") e, no dia em que a coluna
+    // afrouxar, faz a cópia nascer com o gate `assistance_grounding` desarmado — o defeito de
+    // FR-014, voltando pela porta da duplicação. Omitir a chave é o que deixa o default agir.
+    //
+    // `AGENTE_MCP.guardrails` é `null` de propósito: é o que o SELECT devolveria se a coluna
+    // saísse de `DUPLICATE_AGENT_COLUMNS`, e é o único caminho pelo qual o `null` chegaria aqui.
+    const { db, inserts } = makeDb({ agent: AGENTE_MCP, published: VERSAO_PUBLICADA });
+    await duplicateAgentWithVersion(db, {
+      orgId: ORG,
+      agentId: "agent-1",
+      actorUserId: ACTOR,
+      requireVersion: false,
+    });
+
+    const agente = inserts.find((i) => i.table === "ai_agents")!;
+    expect(Object.hasOwn(agente.row, "guardrails")).toBe(false);
+  });
+
+  it("cópia de agente COM guardrails carrega os da origem", async () => {
+    // A outra metade: omitir sempre trocaria a configuração do admin pelo default de fábrica
+    // na cópia — perda silenciosa de decisão, e o teste acima sozinho ficaria verde com ela.
+    const guardrails = [{ kind: "rag_must_hit", min_citations: 3, reason: "exigente" }];
+    const { db, inserts } = makeDb({
+      agent: { ...AGENTE_MCP, guardrails },
+      published: VERSAO_PUBLICADA,
+    });
+    await duplicateAgentWithVersion(db, {
+      orgId: ORG,
+      agentId: "agent-1",
+      actorUserId: ACTOR,
+      requireVersion: false,
+    });
+
+    const agente = inserts.find((i) => i.table === "ai_agents")!;
+    expect(agente.row.guardrails).toEqual(guardrails);
+  });
+
   it("rota da API: mcp_agent sem versão é conflito, não casca", async () => {
     const { db } = makeDb({ agent: AGENTE_MCP });
 

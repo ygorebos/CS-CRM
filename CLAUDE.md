@@ -9,7 +9,11 @@
 - [`docs/current-state.md`](docs/current-state.md) — o que está pronto, incompleto e quebrado. **Leia antes de estimar ou prometer qualquer coisa.**
 - [`docs/harness-audit.md`](docs/harness-audit.md) — onde a verificação tem buraco. Importante: `pnpm gov:verify` **não** cobre `test:db` nem `test:e2e` — verde ali não é prova para mudança de schema ou de UI.
 - [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real da instância.
-- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.2.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
+- [`docs/doctrine/armadilhas-de-execucao.md`](docs/doctrine/armadilhas-de-execucao.md) — sintomas cujo
+  diagnóstico já foi pago uma vez, com a regra que sobrevive ao caso. **Leia antes de escrever teste de
+  banco, mexer no `baseline.sql` ou concluir que algo "está verde"** — várias das entradas descrevem
+  defeitos que passam verde. Ao gastar mais de 20 minutos entendendo um sintoma, acrescente a entrada.
+- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.3.1, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
 
 ---
 

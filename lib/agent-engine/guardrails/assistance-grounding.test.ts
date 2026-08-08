@@ -3,8 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   assistanceGroundingGate,
   classificarAfirmacaoDeAssistencia,
+  ehAprendizadoDeConversa,
   type Grounding,
 } from './assistance-grounding';
+import type { CategoriaAssistencia } from './lexico-assistencia';
 import type { GateContext } from './before-send';
 import { DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
 
@@ -35,11 +37,20 @@ const ctxBase = (over: Partial<GateContext>): GateContext =>
     ...over,
   }) as unknown as GateContext;
 
-const ancora = (id: string): Grounding => ({
+const ancora = (
+  id: string,
+  categorias: readonly CategoriaAssistencia[] = ['prazos'],
+  similarity = 0.8,
+  // FR-040: default `false` porque a esmagadora maioria dos casos é material carregado
+  // pelo corretor. O caso do aprendizado automático é explícito, e tem describe próprio.
+  aprendidoDeConversa = false,
+): Grounding => ({
   chunk_id: id,
   material_id: 'mat-1',
   layer: 'tenant',
-  similarity: 0.8,
+  similarity,
+  categorias,
+  aprendidoDeConversa,
 });
 
 describe('classificação de afirmação de assistência', () => {
@@ -176,5 +187,223 @@ describe('gate assistance_grounding', () => {
     const detail = JSON.stringify(!v.pass ? (v.detail ?? {}) : {});
     expect(detail).not.toContain('José');
     expect(detail).not.toContain('carência');
+  });
+});
+
+/**
+ * Pertinência da âncora (T138) — **similaridade não é aboutness**.
+ *
+ * O que estes casos vigiam: até aqui o gate perguntava "existe âncora acima do limiar?",
+ * nunca "a âncora é sobre este assunto?". Medido em 2026-08-08 com embeddings reais contra
+ * o catálogo semeado, no limiar que o produto usa (`rag_similarity_threshold = 0.40`):
+ *
+ *   - "como funciona o reembolso"  → ancorou em "Como consultar a rede credenciada", 0.460
+ *   - duas perguntas quaisquer     → ancoraram em "O que é carência", 0.377 e 0.407
+ *
+ * Um texto de rede credenciada autorizava uma afirmação sobre reembolso, e a resposta saía
+ * **com citação** — parecendo mais confiável, não menos. É o pior desfecho possível de uma
+ * feature que existe para o agente parar de inventar.
+ *
+ * Por que não se conserta no limiar: a âncora CORRETA mais fraca medida foi 0.495, colada
+ * na ERRADA mais forte (0.460). Não há corte que separe as duas, e calibrar em cinco
+ * amostras é ajustar ao ruído. A régua tem de ser outra — o assunto, não a distância.
+ */
+describe('pertinência da âncora — similaridade não é aboutness (T138)', () => {
+  const REEMBOLSO = 'O reembolso é pago em até 30 dias.';
+
+  it('o caso medido: afirmação de reembolso ancorada em rede credenciada é VETO', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: REEMBOLSO,
+        groundings: [ancora('c1', ['rede'], 0.46)],
+      }),
+    );
+    expect(v.pass).toBe(false);
+    expect(!v.pass && v.code).toBe('assistencia_sem_lastro');
+  });
+
+  it('a mesma afirmação, ancorada no assunto certo, passa', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: REEMBOLSO,
+        groundings: [ancora('c1', ['cobranca'], 0.46)],
+      }),
+    );
+    expect(v.pass).toBe(true);
+  });
+
+  it('similaridade altíssima NÃO compra pertinência — 0.99 no assunto errado ainda é veto', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: REEMBOLSO,
+        groundings: [ancora('c1', ['rede'], 0.99)],
+      }),
+    );
+    expect(v.pass).toBe(false);
+  });
+
+  it('o piso de min_citations conta só as âncoras PERTINENTES', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: REEMBOLSO,
+        minCitations: 2,
+        groundings: [ancora('c1', ['cobranca']), ancora('c2', ['rede'])],
+      }),
+    );
+    expect(v.pass).toBe(false);
+  });
+
+  it('frase a frase: a que tem âncora não salva a que não tem', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: 'O reembolso é pago em até 30 dias. A rede credenciada tem 40 hospitais.',
+        groundings: [ancora('c1', ['cobranca'])],
+      }),
+    );
+    expect(v.pass).toBe(false);
+  });
+
+  it('as duas frases ancoradas nos seus assuntos passam', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: 'O reembolso é pago em até 30 dias. A rede credenciada tem 40 hospitais.',
+        groundings: [ancora('c1', ['cobranca']), ancora('c2', ['rede'])],
+      }),
+    );
+    expect(v.pass).toBe(true);
+  });
+
+  it('o detail diz que a recusa foi por pertinência, não por ausência — são diagnósticos opostos', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: REEMBOLSO,
+        groundings: [ancora('c1', ['rede'])],
+      }),
+    );
+    expect(v.pass).toBe(false);
+    const detail = !v.pass ? ((v.detail ?? {}) as Record<string, unknown>) : {};
+    expect(detail.ancoras).toBe(1);
+    expect(detail.pertinentes).toBe(0);
+  });
+
+  it('categoria fechada entra no detail; o corpo e os termos casados NUNCA', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: 'O reembolso do senhor José é pago em 30 dias.',
+        groundings: [ancora('c1', ['rede'])],
+      }),
+    );
+    const detail = JSON.stringify(!v.pass ? (v.detail ?? {}) : {});
+    expect(detail).toContain('cobranca');
+    expect(detail).not.toContain('José');
+    expect(detail).not.toContain('reembolso');
+  });
+
+  it('classificação forçada pelo chamador sem assunto detectável: pertinência não é avaliada, e o gate volta a contar', () => {
+    // Guarda de compatibilidade. `isAssistanceClaim: true` com corpo sem termo do léxico
+    // não dá categoria nenhuma para comparar — inventar uma seria pior que declarar que
+    // não avaliou. O trace diz isso, para o léxico ser calibrado sobre medição (T030).
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        assistanceGroundingEnforced: true,
+        body: 'oi',
+        isAssistanceClaim: true,
+        groundings: [ancora('c1', ['rede'])],
+      }),
+    );
+    expect(v.pass).toBe(true);
+  });
+});
+
+/**
+ * FR-040 · T123 — o que foi aprendido de conversa não sustenta afirmação de assistência.
+ *
+ * ## Por que a regra existe
+ *
+ * O acervo indexa conversas passadas, e isso é bom para tom, jeito de responder e as
+ * dúvidas que os clientes realmente têm. É veneno como fonte de FATO: o que um atendente
+ * humano disse sobre carência há oito meses vira "material", e o agente o repete com a
+ * mesma cara de certeza que teria o manual da operadora. Um erro humano pontual vira regra
+ * institucional — com citação para provar.
+ *
+ * ## Por que isto é teste unitário e não invariante de banco
+ *
+ * A tarefa pedia `tests/invariants/aprendizado-nao-ancora-assistencia.test.ts`. A regra
+ * não vive no banco: `fn_buscar_lastro` devolve o trecho normalmente (e deve — ele ajuda o
+ * modelo a escrever), e quem recusa é o gate, em TypeScript. Um invariante de Postgres
+ * mediria a busca, que não é onde a decisão está — passaria verde com o gate quebrado.
+ */
+describe('FR-040 — aprendizado de conversa não ancora assistência', () => {
+  const corpo = 'A carência para parto é de 180 dias, conforme o seu contrato.';
+
+  it('âncora aprendida de conversa NÃO libera a afirmação', () => {
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        groundings: [ancora('c1', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(v.pass).toBe(false);
+    expect(!v.pass && v.code).toBe('assistencia_sem_lastro');
+  });
+
+  it('a recusa DIZ que havia âncora descartada por origem', () => {
+    // Sem este número, uma recusa com citações na tela pareceria defeito do gate — e o
+    // próximo a investigar concluiria que o veto está quebrado.
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        groundings: [ancora('c1', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(!v.pass && v.detail?.descartadas_por_origem).toBe(1);
+  });
+
+  it('a aprendida não ENGROSSA o número que libera a afirmação', () => {
+    // O defeito que este caso pega: filtrar só na hora de escolher a âncora, mas contar
+    // todas para bater o piso. Com piso 2, uma boa + uma aprendida passaria — e metade da
+    // prova seria conversa antiga.
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        minCitations: 2,
+        groundings: [ancora('c1', ['prazos'], 0.9, false), ancora('c2', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(v.pass).toBe(false);
+  });
+
+  it('material de verdade ao lado da aprendida continua liberando', () => {
+    // A regra corta a origem errada, não o assunto: quem tem material próprio sobre o
+    // assunto responde normalmente, mesmo com uma conversa antiga no mesmo balde.
+    const v = assistanceGroundingGate.evaluate(
+      ctxBase({
+        body: corpo,
+        assistanceGroundingEnforced: true,
+        groundings: [ancora('c1', ['prazos'], 0.9, false), ancora('c2', ['prazos'], 0.9, true)],
+      }),
+    );
+    expect(v.pass).toBe(true);
+  });
+
+  it('ehAprendizadoDeConversa reconhece as DUAS grafias que o banco aceita', () => {
+    // O CHECK de `ai_knowledge_sources.source_type` aceita 'conversations' e 'conversation'.
+    // Uma lista escrita à mão que esquecesse a segunda deixaria passar exatamente o que o
+    // requisito proíbe — e ninguém veria, porque a grafia rara é a mais antiga.
+    expect(ehAprendizadoDeConversa({ source_type: 'conversations' })).toBe(true);
+    expect(ehAprendizadoDeConversa({ source_type: 'conversation' })).toBe(true);
+    expect(ehAprendizadoDeConversa({ source_type: 'policy' })).toBe(false);
+    expect(ehAprendizadoDeConversa(undefined)).toBe(false);
   });
 });

@@ -9840,3 +9840,1122 @@ comment on index public.idx_webhook_events_log_pendentes is
   'minuto seria custo crescente sem fim.';
 
 notify pgrst, 'reload schema';
+
+
+-- ---- busca de lastro nas duas camadas (migration 0123) ----
+--
+-- Tenant e acervo ativo derivados de `p_agent_id`, NUNCA recebidos do chamador (FR-019):
+-- a organização é CONSULTADA a partir do agente, não AFIRMADA por quem chama.
+--
+-- E não `auth.uid()`: o chamador real é o agent-engine, por Pool `pg` com credencial de
+-- serviço. Não há sessão de usuário; uma função que derivasse o tenant dali devolveria
+-- conjunto vazio em toda chamada de produção — e passaria em qualquer teste escrito com
+-- uma sessão autenticada.
+--
+-- A precedência de camada vale DENTRO DO BALDE (research D7). Global, ela produziria um
+-- desastre silencioso: um texto do corretor sobre o horário de atendimento dele passaria
+-- o limiar e apagaria o procedimento de boleto da operadora.
+--
+-- A regra da versão inerte (FR-037) entra na 0124, por `create or replace` — a coluna
+-- `catalog_materials.inert` ainda não existe neste ponto.
+
+create or replace function public.fn_buscar_lastro(
+  p_agent_id  uuid,
+  p_scope_id  uuid,
+  p_embedding public.vector,
+  p_k         integer default 5,
+  p_threshold real    default 0.40
+)
+returns table (
+  chunk_id    uuid,
+  layer       text,
+  material_id uuid,
+  content     text,
+  similarity  real,
+  source_ref  jsonb
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  with agente as (
+    select a.organization_id, a.active_kb_version_id
+      from public.ai_agents a
+     where a.id = p_agent_id
+  ),
+  escopo_ativo as (
+    -- Resolvido DENTRO da organização do agente: `p_scope_id` de outro tenant não
+    -- resolve e a busca cai no caso "escopo desconhecido". `is_active` é a trava 4.
+    select ks.id as scope_id, ks.catalog_scope_id
+      from public.knowledge_scopes ks
+      join agente g on g.organization_id = ks.organization_id
+     where ks.id = p_scope_id
+       and ks.is_active
+  ),
+  camada_tenant as (
+    select
+      c.id                                            as chunk_id,
+      'tenant'::text                                  as layer,
+      s.id                                            as material_id,
+      c.content                                       as content,
+      (1 - (c.embedding <=> p_embedding))::real       as similarity,
+      case when c.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',       'tenant',
+        'title',       s.name,
+        'scope',       ks.display_name,
+        'updated_at',  s.updated_at,
+        'source_type', s.source_type
+      )                                               as source_ref
+      from public.ai_chunks c
+      join agente g
+        on c.organization_id = g.organization_id
+       and c.kb_version_id   = g.active_kb_version_id
+      join public.ai_knowledge_sources s
+        on s.id = c.knowledge_source_id
+      left join public.knowledge_scopes ks
+        on ks.id = c.scope_id
+     where (s.valid_until is null or s.valid_until >= current_date)
+       and (c.applies_to_all or c.scope_id = (select scope_id from escopo_ativo))
+       and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  ),
+  camada_catalogo as (
+    select
+      cc.id                                           as chunk_id,
+      'catalog'::text                                 as layer,
+      cm.id                                           as material_id,
+      cc.content                                      as content,
+      (1 - (cc.embedding <=> p_embedding))::real      as similarity,
+      case when cc.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',         'catalog',
+        'title',         cm.title,
+        'scope',         cs.display_name,
+        'updated_at',    cm.published_at,
+        'material_slug', cm.slug,
+        'version',       cm.version
+      )                                               as source_ref
+      from public.catalog_chunks cc
+      join public.catalog_materials cm
+        on cm.id = cc.catalog_material_id
+      left join public.catalog_scopes cs
+        on cs.id = cc.catalog_scope_id
+     where (cm.valid_until is null or cm.valid_until >= current_date)
+       and (cc.applies_to_all or cc.catalog_scope_id = (select catalog_scope_id from escopo_ativo))
+       and (1 - (cc.embedding <=> p_embedding)) >= p_threshold
+  ),
+  tudo as (
+    select * from camada_tenant
+    union all
+    select * from camada_catalogo
+  )
+  select t.chunk_id, t.layer, t.material_id, t.content, t.similarity, t.source_ref
+    from tudo t
+   where t.layer = 'tenant'
+      or not exists (
+        select 1 from tudo x
+         where x.layer = 'tenant'
+           and x.balde = t.balde
+      )
+   order by t.similarity desc
+   limit greatest(p_k, 0);
+$$;
+
+comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
+  'Migration 0123 (spec 002, F2): busca de lastro nas duas camadas. Tenant e acervo ativo '
+  'derivados de p_agent_id, NUNCA recebidos do chamador (FR-019). Escopo desconhecido ou '
+  'desligado devolve só material "vale para todos" — nunca busca ampla (FR-017, trava 4). '
+  'Material vencido não ancora (FR-026). Precedência de camada vale dentro do mesmo balde '
+  '(research D7).';
+
+revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) from public, anon, authenticated;
+grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) to service_role;
+
+-- Forward-fix: `retrieve_top_k_chunks` perde `authenticated`. O snapshot acima concede
+-- (`GRANT ALL ... TO authenticated`), e ela recebe `p_organization_id` do CHAMADOR com um
+-- comentário delegando a validação a ele — alcançável por token de tenant. Os caminhos
+-- vivos usam credencial de serviço (MCP e worker via admin client; agent-engine via Pool
+-- `pg`), medido em 2026-08-08. A porta some, os chamadores ficam.
+revoke execute on function public.retrieve_top_k_chunks(uuid, uuid, public.vector, integer, real) from authenticated;
+
+notify pgrst, 'reload schema';
+
+
+-- ---- adoção local do catálogo e inércia da versão semeada (migration 0124) ----
+--
+-- Fecha um defeito em que duas frases verdadeiras do desenho, juntas, produziam o
+-- oposto de FR-037: "a semeadura só ACRESCENTA versão" (trava 6) mais "o desempate é
+-- por recência" (FR-035) significa que a versão que chega por release, sempre a mais
+-- recente, vence a correção local NO COMPORTAMENTO enquanto o banco fica intacto.
+-- SC-018 passaria contando linhas e o requisito falharia respondendo.
+--
+-- Este bloco roda DEPOIS do bloco da 0123 e substitui a fn_buscar_lastro por
+-- create or replace — forward-fix, no padrão do repositório. Duas mudanças no lado do
+-- catálogo: versão inerte não entra, e por slug ancora só a MAIOR versão não-inerte.
+-- A segunda não estava na tarefa e faltava: sem ela a versão seed ANTERIOR continuava
+-- ancorando ao lado da local, dizendo justamente o que o administrador corrigiu.
+
+alter table public.catalog_materials
+  add column if not exists adopted_at timestamptz;
+
+alter table public.catalog_materials
+  add column if not exists adopted_by uuid references auth.users(id) on delete set null;
+
+-- Versão que chegou por semeadura DEPOIS de o slug ter sido adotado. Não ancora e não
+-- desempata; fica visível para ser aceita (FR-037).
+alter table public.catalog_materials
+  add column if not exists inert boolean not null default false;
+
+create index if not exists catalog_materials_adotados_idx
+  on public.catalog_materials (slug) where adopted_at is not null;
+
+-- ── a inércia é aplicada no INSERT, não conferida na leitura ────────────────
+--
+-- Podia ser um `where` na busca ("ignore seed mais nova que a adoção"). Não é, por dois
+-- motivos: a busca é o hot path, e a inércia precisa ser VISÍVEL na tela de curadoria
+-- para o administrador poder aceitar a versão nova. Estado que só existe dentro de um
+-- `where` não tem como aparecer.
+create or replace function public.fn_versao_semeada_sobre_adotado_nasce_inerte()
+returns trigger
+language plpgsql
+security definer
+set search_path to 'public'
+as $$
+begin
+  if new.origin = 'seed' and exists (
+    select 1 from public.catalog_materials m
+     where m.slug = new.slug
+       and m.adopted_at is not null
+  ) then
+    new.inert := true;
+  end if;
+  return new;
+end $$;
+
+revoke execute on function public.fn_versao_semeada_sobre_adotado_nasce_inerte() from public, anon, authenticated;
+grant  execute on function public.fn_versao_semeada_sobre_adotado_nasce_inerte() to service_role;
+
+drop trigger if exists trg_catalog_materials_inercia on public.catalog_materials;
+create trigger trg_catalog_materials_inercia
+  before insert on public.catalog_materials
+  for each row execute function public.fn_versao_semeada_sobre_adotado_nasce_inerte();
+
+comment on column public.catalog_materials.inert is
+  'Migration 0124 (spec 002, F3): versão semeada que chegou depois de o slug ser adotado '
+  'localmente. Não ancora e não desempata (FR-037); fica visível para ser aceita.';
+
+comment on column public.catalog_materials.adopted_at is
+  'Migration 0124: marca o slug como adotado por esta instalação. Gravado na versão local '
+  'criada pela edição. Estado por material, nunca chave global (A-21).';
+
+-- ── T134 · forward-fix da busca ─────────────────────────────────────────────
+--
+-- `create or replace` da 0123. Duas mudanças, ambas no lado do catálogo:
+--   · versão inerte não entra no conjunto;
+--   · por `slug`, só a MAIOR versão não-inerte ancora.
+create or replace function public.fn_buscar_lastro(
+  p_agent_id  uuid,
+  p_scope_id  uuid,
+  p_embedding public.vector,
+  p_k         integer default 5,
+  p_threshold real    default 0.40
+)
+returns table (
+  chunk_id    uuid,
+  layer       text,
+  material_id uuid,
+  content     text,
+  similarity  real,
+  source_ref  jsonb
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  with agente as (
+    select a.organization_id, a.active_kb_version_id
+      from public.ai_agents a
+     where a.id = p_agent_id
+  ),
+  escopo_ativo as (
+    select ks.id as scope_id, ks.catalog_scope_id
+      from public.knowledge_scopes ks
+      join agente g on g.organization_id = ks.organization_id
+     where ks.id = p_scope_id
+       and ks.is_active
+  ),
+  -- A versão VIGENTE de cada material curado: a maior `version` entre as não-inertes.
+  -- Sem este recorte, a versão `seed` anterior continuaria ancorando ao lado da local —
+  -- uma delas dizendo justamente o que o administrador corrigiu.
+  material_vigente as (
+    select distinct on (cm.slug) cm.id, cm.slug, cm.title, cm.version,
+           cm.published_at, cm.valid_until
+      from public.catalog_materials cm
+     where not cm.inert
+     order by cm.slug, cm.version desc
+  ),
+  camada_tenant as (
+    select
+      c.id                                            as chunk_id,
+      'tenant'::text                                  as layer,
+      s.id                                            as material_id,
+      c.content                                       as content,
+      (1 - (c.embedding <=> p_embedding))::real       as similarity,
+      case when c.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',       'tenant',
+        'title',       s.name,
+        'scope',       ks.display_name,
+        'updated_at',  s.updated_at,
+        'source_type', s.source_type
+      )                                               as source_ref
+      from public.ai_chunks c
+      join agente g
+        on c.organization_id = g.organization_id
+       and c.kb_version_id   = g.active_kb_version_id
+      join public.ai_knowledge_sources s
+        on s.id = c.knowledge_source_id
+      left join public.knowledge_scopes ks
+        on ks.id = c.scope_id
+     where (s.valid_until is null or s.valid_until >= current_date)
+       and (c.applies_to_all or c.scope_id = (select scope_id from escopo_ativo))
+       and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  ),
+  camada_catalogo as (
+    select
+      cc.id                                           as chunk_id,
+      'catalog'::text                                 as layer,
+      cm.id                                           as material_id,
+      cc.content                                      as content,
+      (1 - (cc.embedding <=> p_embedding))::real      as similarity,
+      case when cc.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',         'catalog',
+        'title',         cm.title,
+        'scope',         cs.display_name,
+        'updated_at',    cm.published_at,
+        'material_slug', cm.slug,
+        'version',       cm.version
+      )                                               as source_ref
+      from public.catalog_chunks cc
+      join material_vigente cm
+        on cm.id = cc.catalog_material_id
+      left join public.catalog_scopes cs
+        on cs.id = cc.catalog_scope_id
+     where (cm.valid_until is null or cm.valid_until >= current_date)
+       and (cc.applies_to_all or cc.catalog_scope_id = (select catalog_scope_id from escopo_ativo))
+       and (1 - (cc.embedding <=> p_embedding)) >= p_threshold
+  ),
+  tudo as (
+    select * from camada_tenant
+    union all
+    select * from camada_catalogo
+  )
+  select t.chunk_id, t.layer, t.material_id, t.content, t.similarity, t.source_ref
+    from tudo t
+   where t.layer = 'tenant'
+      or not exists (
+        select 1 from tudo x
+         where x.layer = 'tenant'
+           and x.balde = t.balde
+      )
+   order by t.similarity desc
+   limit greatest(p_k, 0);
+$$;
+
+comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) is
+  'Migrations 0123 + 0124 (spec 002): busca de lastro nas duas camadas. Tenant e acervo '
+  'derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou desligado '
+  'devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora (FR-026). '
+  'Precedência de camada dentro do balde (research D7). No catálogo, por slug ancora só a '
+  'MAIOR versão não-inerte — é o que faz a edição local vencer a semeada (FR-037).';
+
+revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) from public, anon, authenticated;
+grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real) to service_role;
+
+notify pgrst, 'reload schema';
+
+
+-- ---- catálogo curado de exemplo (semeadura, spec 002 F3) ----
+--
+-- GERADO por scripts/exportar-catalogo-para-baseline.ts. Não edite à mão: a próxima
+-- exportação sobrescreve. Para mudar conteúdo, mude na instalação de curadoria e
+-- exporte de novo.
+--
+-- 2 escopos, 5 materiais, 5 trechos.
+-- Custo declarado: ~94 KB só de embeddings — é dívida assumida, não detalhe. Ela
+-- existe para que a instalação fresca responda no minuto zero, SEM chave de IA
+-- configurada (FR-030, SC-017, research D6).
+--
+-- CONTEÚDO DE EXEMPLO (A-19): cada material diz no PRÓPRIO CORPO que é exemplo, e
+-- não num comentário daqui. Se o corretor publicar o agente sem trocar nada, a pior
+-- consequência é o cliente ler que aquilo é demonstração — nunca acreditar num
+-- procedimento inventado. Conteúdo real entra por release, sem tocar em estrutura.
+--
+-- `do nothing`, NUNCA `do update`: as duas formas são idempotentes, só uma é
+-- não-destrutiva. Um `do update` reaplicado apagaria a correção local (trava 6).
+
+insert into public.catalog_scopes (slug, display_name, official_code)
+values ($sem$operadora-exemplo-a$sem$, $sem$Operadora Exemplo A$sem$, null)
+on conflict (slug) do nothing;
+insert into public.catalog_scopes (slug, display_name, official_code)
+values ($sem$operadora-exemplo-b$sem$, $sem$Operadora Exemplo B$sem$, null)
+on conflict (slug) do nothing;
+
+insert into public.catalog_materials
+  (catalog_scope_id, applies_to_all, slug, version, title, body, valid_until, origin)
+select (select id from public.catalog_scopes where slug = $sem$operadora-exemplo-a$sem$), false, $sem$exemplo-a-rede-credenciada$sem$, 1,
+       $sem$Como consultar a rede credenciada$sem$, $sem$A consulta à rede credenciada é feita pelo buscador de rede, filtrando por especialidade, cidade e tipo de plano. É importante conferir se o prestador atende ao produto específico do beneficiário: um mesmo hospital pode atender uma linha de produto e não atender outra. Em caso de divergência entre o buscador e o atendimento presencial, vale o que a operadora confirmar por escrito.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, null, 'seed'
+on conflict (slug, version) do nothing;
+insert into public.catalog_materials
+  (catalog_scope_id, applies_to_all, slug, version, title, body, valid_until, origin)
+select (select id from public.catalog_scopes where slug = $sem$operadora-exemplo-b$sem$), false, $sem$exemplo-b-reembolso$sem$, 1,
+       $sem$Como funciona o pedido de reembolso$sem$, $sem$O pedido de reembolso costuma exigir a nota fiscal do atendimento, o relatório do profissional e os dados bancários do titular, enviados pelo aplicativo ou pelo portal. O valor devolvido segue a tabela de reembolso do contrato e raramente equivale ao valor pago — a diferença é a parte que fica com o beneficiário. O prazo de análise é contado a partir do envio da documentação completa.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, null, 'seed'
+on conflict (slug, version) do nothing;
+insert into public.catalog_materials
+  (catalog_scope_id, applies_to_all, slug, version, title, body, valid_until, origin)
+select null, true, $sem$exemplo-o-que-e-carencia$sem$, 1,
+       $sem$O que é carência$sem$, $sem$Carência é o período que o beneficiário precisa aguardar, contado da data de início do contrato, antes de poder usar determinado procedimento. Cada tipo de atendimento costuma ter um prazo próprio: consultas e exames simples costumam ter carência curta, internações e cirurgias costumam ter carência mais longa, e parto tem prazo próprio. O prazo exato depende do contrato e da operadora — quem informa o número é o contrato assinado, não uma regra geral.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, null, 'seed'
+on conflict (slug, version) do nothing;
+insert into public.catalog_materials
+  (catalog_scope_id, applies_to_all, slug, version, title, body, valid_until, origin)
+select null, true, $sem$exemplo-portabilidade-de-carencias$sem$, 1,
+       $sem$Portabilidade de carências$sem$, $sem$Portabilidade de carências é a possibilidade de mudar de plano levando junto o tempo de carência já cumprido, sem recomeçar a contagem. Em geral depende de o plano de destino ser compatível em faixa de preço e cobertura, de o contrato atual estar em dia e de um tempo mínimo de permanência no plano anterior. As condições exatas e os prazos são definidos pela regulamentação vigente e pela operadora de destino.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, null, 'seed'
+on conflict (slug, version) do nothing;
+insert into public.catalog_materials
+  (catalog_scope_id, applies_to_all, slug, version, title, body, valid_until, origin)
+select null, true, $sem$exemplo-segunda-via-de-boleto$sem$, 1,
+       $sem$Segunda via de boleto — orientação geral$sem$, $sem$A segunda via do boleto costuma ser obtida pelo aplicativo ou pelo portal do beneficiário, na área financeira, e também pela central de atendimento da operadora. O caminho exato, os canais disponíveis e o prazo de compensação variam por operadora. Boleto vencido pode exigir emissão de nova data, com atualização de valor.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, null, 'seed'
+on conflict (slug, version) do nothing;
+
+insert into public.catalog_chunks
+  (catalog_material_id, position, content, content_hash, token_count, embedding, embedding_model)
+select m.id, 0, $sem$Como consultar a rede credenciada
+
+A consulta à rede credenciada é feita pelo buscador de rede, filtrando por especialidade, cidade e tipo de plano. É importante conferir se o prestador atende ao produto específico do beneficiário: um mesmo hospital pode atender uma linha de produto e não atender outra. Em caso de divergência entre o buscador e o atendimento presencial, vale o que a operadora confirmar por escrito.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, md5($sem$Como consultar a rede credenciada
+
+A consulta à rede credenciada é feita pelo buscador de rede, filtrando por especialidade, cidade e tipo de plano. É importante conferir se o prestador atende ao produto específico do beneficiário: um mesmo hospital pode atender uma linha de produto e não atender outra. Em caso de divergência entre o buscador e o atendimento presencial, vale o que a operadora confirmar por escrito.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$), 155,
+       '[0.000785,0.018723,0.020569,0.027588,0.000686,0.015320,-0.029480,0.006416,0.005203,0.006229,0.026993,-0.025146,0.016983,0.017838,0.022095,-0.043152,-0.019119,0.059845,-0.008751,0.009178,0.013588,0.016754,0.002220,-0.026093,-0.058044,-0.046844,-0.007980,0.028961,0.061035,-0.031738,0.008987,-0.002201,0.002571,0.029266,-0.007271,0.032593,-0.016525,-0.022888,0.035034,0.016800,-0.022629,0.046387,-0.037537,-0.001591,0.000341,-0.013176,-0.029877,-0.027542,0.026306,0.015747,0.019943,0.040436,-0.011238,0.024261,-0.032776,0.014557,0.022400,-0.003857,0.011009,0.033630,-0.018829,0.022568,-0.024719,0.019058,-0.021469,0.010643,-0.017517,0.009628,-0.045074,0.011940,-0.012238,0.055237,0.015671,-0.039032,0.006912,-0.030701,-0.008957,0.017212,0.003517,-0.017059,-0.001299,-0.042664,-0.000467,0.000313,-0.008217,-0.033844,-0.114136,-0.041626,-0.017670,-0.001159,0.002760,-0.017548,-0.020477,0.031769,0.017960,0.089172,-0.001872,-0.016129,-0.021255,0.064636,0.044769,-0.016891,0.026779,-0.040039,-0.001142,0.017792,0.013222,0.046661,0.012276,-0.035187,0.057343,0.000588,0.005360,0.036713,0.028976,0.032837,0.026108,-0.020554,0.032867,-0.000491,-0.031647,-0.007851,0.007786,-0.049500,0.009773,0.017715,0.021561,0.018555,-0.035339,-0.074219,-0.026611,-0.003746,-0.033447,-0.054291,-0.034882,0.063843,-0.025497,-0.018219,-0.001510,-0.015945,-0.045288,0.005367,0.029770,0.013725,-0.003595,-0.026291,0.003641,-0.046265,-0.002790,0.046631,-0.034607,0.019958,-0.044403,0.022034,-0.062927,-0.001753,-0.027100,-0.015335,-0.014732,0.018524,-0.016068,-0.005920,-0.033508,0.023788,-0.032654,-0.004208,-0.000674,-0.001991,-0.041931,0.033295,-0.034332,0.008575,-0.026093,0.019943,0.005272,-0.004345,0.045349,0.038391,0.024902,-0.000526,-0.065430,-0.007030,0.018692,-0.031921,0.011002,-0.003725,-0.023865,0.023071,-0.014740,-0.023911,0.007072,-0.030609,0.009293,0.007576,0.003452,-0.012459,-0.034332,-0.018066,-0.049225,-0.002264,0.009872,-0.077393,0.031342,0.030609,-0.011787,-0.050140,0.012360,-0.011063,0.037354,-0.008530,0.032471,-0.004536,0.003019,0.023361,-0.013008,-0.003298,-0.033051,-0.025314,-0.018906,-0.008621,0.018753,-0.024216,-0.020767,-0.016525,0.006214,0.042755,-0.002140,-0.042450,-0.025955,-0.040253,0.024963,0.047974,0.072510,-0.017914,0.059845,-0.005344,-0.036652,-0.000617,0.039734,-0.062744,-0.024963,-0.011299,-0.003294,0.044952,0.021454,-0.011536,0.012360,-0.049591,0.046173,0.015854,0.018799,0.047913,0.016434,-0.006954,0.003960,0.034302,-0.005100,-0.028717,-0.005104,-0.045166,-0.013245,-0.015602,-0.015152,-0.028519,-0.015518,0.017242,-0.026337,-0.008751,-0.056091,0.015457,-0.043884,-0.015350,0.043976,0.017166,-0.027740,0.017838,0.012260,0.005772,0.028976,0.007690,-0.033722,0.007301,-0.039642,-0.052185,-0.003281,0.024765,0.002672,-0.033936,-0.025497,0.030045,0.017838,-0.006355,-0.026505,-0.067261,0.013329,-0.028091,0.018051,0.002934,0.004169,0.004578,-0.027527,0.002567,-0.009430,0.007797,-0.048065,0.007675,0.026733,0.030243,0.063782,-0.073914,-0.011810,-0.003101,0.027618,-0.014442,0.000875,-0.025650,0.027634,-0.075317,-0.044006,-0.042297,0.015099,-0.001054,0.014465,-0.009193,0.014709,-0.014389,-0.048828,-0.002649,0.004166,-0.031204,0.027451,-0.026855,0.029877,0.017029,-0.056488,0.054047,0.017548,0.039124,-0.008858,0.016479,0.022934,-0.005489,-0.029861,-0.020645,-0.006954,0.030792,0.037811,-0.015160,0.033417,0.033997,-0.001186,0.033844,0.007210,-0.005337,-0.001989,-0.016403,0.014832,0.001788,-0.001243,0.004036,-0.057739,-0.020035,0.012184,0.000874,-0.031769,-0.012711,-0.011086,0.010246,-0.032379,-0.048340,-0.028625,-0.009071,-0.007801,0.032471,-0.066711,-0.035126,-0.031067,0.034149,0.012260,0.012039,0.064270,-0.020157,-0.013992,-0.032562,0.021896,0.046143,-0.026245,0.000114,-0.036224,0.013023,0.011559,0.017334,0.039856,-0.039459,0.029282,0.006805,-0.011543,0.008835,0.039429,-0.036041,0.005215,-0.058868,-0.034027,0.044830,0.002661,-0.020279,0.014137,-0.005138,-0.033600,-0.004551,0.008865,-0.009903,0.036865,0.004368,-0.028931,0.002684,-0.024551,0.071899,0.004543,-0.025101,0.038361,0.020493,-0.014664,0.037750,-0.021576,-0.039154,0.007614,0.015762,-0.050720,-0.069397,0.049255,0.063843,-0.032166,0.030121,-0.040131,-0.010323,0.024216,0.038910,0.001440,-0.009216,-0.049835,-0.021194,-0.038147,-0.045258,0.028915,0.022354,0.014656,-0.021072,0.055237,0.030792,-0.043152,-0.032532,-0.013329,0.035736,-0.042725,-0.030197,0.022980,0.006142,-0.046875,-0.050385,0.012459,0.015839,0.025467,0.018921,0.017517,0.037933,-0.094910,-0.016571,0.056427,0.010139,-0.014221,-0.023636,0.003546,-0.011337,0.015198,0.015076,0.008972,-0.000965,-0.031525,-0.012375,0.031464,-0.022690,-0.038483,0.044281,0.028427,0.120178,0.012085,0.049408,-0.003857,0.002174,0.004696,0.018829,0.042542,-0.007610,0.004974,-0.038330,-0.018631,-0.044067,-0.066711,-0.000424,-0.020172,0.035889,-0.049744,0.024033,0.054352,0.037170,-0.043335,0.006905,-0.024323,-0.035614,0.035919,0.002892,-0.029846,0.010384,-0.043060,0.001888,0.019058,0.021347,0.008850,0.010696,0.005604,-0.011719,0.020996,0.011696,0.003025,0.006451,-0.019562,-0.052704,-0.009758,-0.040405,0.005112,-0.047150,-0.009293,0.009636,-0.021301,0.028214,-0.018082,0.035431,0.019058,-0.026459,-0.041168,0.006882,0.005859,0.003523,-0.003700,-0.031189,-0.028381,-0.016083,0.036804,-0.007378,0.011093,-0.022369,0.005898,0.009369,-0.027252,0.006653,-0.015549,-0.007690,0.044403,-0.050201,-0.036469,-0.007103,-0.033295,-0.011597,0.002983,0.027618,-0.000414,0.003109,-0.033508,-0.003351,-0.015778,-0.003126,-0.022934,0.090515,0.027084,0.019104,-0.037903,-0.023178,-0.044617,0.005386,0.002785,0.001935,0.046967,0.001146,-0.020935,-0.057739,0.018066,-0.028442,0.024323,-0.001566,0.022354,0.007183,-0.011185,-0.018967,-0.026016,0.012306,-0.010872,0.022476,0.021973,0.012749,0.017120,0.012558,0.018433,0.004536,0.026138,-0.033203,0.000873,-0.007416,0.002302,-0.012177,-0.000762,-0.003704,-0.038544,0.021210,0.015038,0.035339,-0.014084,-0.038971,-0.039307,0.034271,0.022491,0.023621,-0.024155,0.033661,0.010773,-0.020493,0.023178,0.005478,-0.004139,-0.044952,-0.005966,0.010925,-0.015732,0.033783,0.004684,-0.001065,0.001221,-0.015175,0.000982,-0.023560,0.011383,-0.017471,-0.016678,-0.008377,0.003120,-0.020126,0.015434,-0.019028,0.027725,-0.005016,0.003534,-0.028809,0.008301,-0.007561,-0.016479,0.001069,-0.014038,0.033539,0.003571,0.019455,-0.026688,0.023438,0.001842,0.004944,-0.033600,0.006947,0.043854,-0.007717,0.004162,0.032013,-0.088196,0.027924,0.024368,0.011024,-0.033905,-0.019455,-0.004951,-0.044342,0.001417,-0.025360,-0.001749,0.024109,-0.001418,0.016541,0.029160,0.023956,0.020172,0.017273,-0.014206,0.005615,0.011620,0.000196,0.041809,-0.013824,0.006783,-0.036102,0.016998,-0.003094,0.000687,-0.031372,0.019745,0.001838,0.003391,0.007881,0.002096,-0.017319,-0.041382,0.016037,0.014854,-0.026550,0.038361,0.022232,0.005741,0.008865,0.040863,0.035339,-0.018585,0.008728,0.009506,-0.005562,-0.001367,0.079590,-0.028488,-0.011139,0.018219,0.026047,0.014519,0.013008,-0.026062,0.041809,-0.034393,-0.005810,-0.009552,0.004520,0.013466,-0.014183,-0.028625,-0.000405,-0.009491,-0.027054,0.017349,-0.004280,-0.033356,-0.019745,0.006649,-0.022827,-0.019775,0.010307,-0.042999,-0.000115,0.010017,0.006672,-0.020828,-0.009193,0.000873,0.002289,0.010887,-0.002377,0.018463,-0.027893,0.014923,0.022430,0.012894,0.055847,-0.005470,0.002821,-0.014610,-0.009323,0.013451,0.018906,-0.003796,-0.034882,0.032562,-0.024307,0.022964,0.001276,-0.026642,-0.010521,0.000096,0.002800,-0.001570,-0.022842,-0.004627,0.007843,0.005253,0.016129,-0.024017,-0.005203,-0.000077,-0.010483,-0.010139,0.003063,-0.043518,0.006744,-0.000261,0.026993,0.002865,0.046753,0.016861,-0.015205,-0.002972,0.013420,0.013000,0.015533,0.011856,-0.022781,-0.009216,0.009407,0.035217,-0.001737,0.010010,0.044006,-0.004166,0.017319,-0.010368,-0.014801,0.002159,0.034241,-0.041229,0.015640,0.044495,-0.004368,-0.028214,-0.003733,-0.003704,0.028976,-0.033203,-0.019165,0.024719,-0.016907,0.034546,0.014343,-0.031113,-0.006744,-0.009079,-0.030640,-0.040863,-0.001507,-0.012115,-0.012894,0.071411,-0.004082,0.035187,-0.051727,-0.029205,0.002558,-0.022522,0.006725,-0.008858,0.010704,0.015495,-0.012695,0.018021,-0.036926,0.035858,-0.056824,-0.016327,0.006660,-0.009094,0.050995,0.007519,0.018631,-0.014343,-0.019302,-0.005554,0.002966,0.040497,-0.006004,0.002268,-0.023193,0.029724,0.020782,0.008316,0.008362,-0.036621,0.000462,-0.006725,0.010796,-0.007309,-0.042297,0.024567,-0.015549,-0.040039,0.002775,0.010361,-0.012032,-0.014412,-0.000166,0.006908,-0.029602,-0.002695,0.022766,-0.014488,-0.032959,-0.033813,-0.008446,0.038879,0.029510,0.003237,0.017761,-0.040527,0.006187,0.000203,-0.020386,-0.008904,0.009003,-0.008553,0.043457,0.035522,0.033356,-0.025009,-0.054077,0.017807,-0.009926,-0.005547,-0.024506,-0.004326,-0.011414,-0.029068,0.013573,0.029358,-0.019348,-0.035248,0.041504,-0.048340,0.017548,-0.006649,-0.033997,0.033203,-0.043365,0.017685,-0.000309,-0.004375,-0.003189,0.023422,-0.040985,-0.000227,0.013107,0.013748,-0.028564,0.024857,0.011719,0.044830,-0.005444,0.006088,-0.018127,0.024521,-0.025299,-0.021164,-0.009689,-0.000220,0.014206,0.015945,-0.029373,-0.053070,0.025604,0.000879,-0.030014,0.021973,0.008331,0.007439,0.009949,0.023117,0.010468,0.017624,0.045471,-0.030502,-0.016556,-0.042969,0.000881,0.009415,0.022766,0.016373,-0.005474,0.025116,-0.007698,0.011711,-0.028717,0.046722,-0.003387,0.045654,0.008072,0.005451,-0.017654,0.016617,0.013222,-0.025192,-0.000457,0.017380,0.007069,-0.007351,0.024078,0.033142,-0.008774,-0.000375,-0.007748,-0.023712,-0.100769,-0.050995,0.034882,0.020630,-0.009056,-0.024231,-0.006325,-0.011253,0.005630,0.054199,-0.000164,0.018219,0.023758,0.008537,0.029266,0.004665,-0.029526,0.007454,-0.027893,0.013939,0.007343,-0.042572,0.000988,-0.023376,0.020157,-0.006496,0.017624,-0.009689,0.004887,0.036652,0.008705,0.019913,0.005898,-0.034882,-0.022964,-0.000213,0.011337,0.004108,0.023026,0.020142,-0.000457,0.047943,-0.008324,0.030594,0.039703,-0.004498,0.008537,0.001035,0.008011,-0.022034,-0.015030,-0.005692,-0.012428,-0.042694,0.024414,-0.008736,0.000991,-0.026505,0.027237,-0.012535,-0.007618,0.037964,0.005806,-0.003704,0.039490,-0.012497,-0.003838,0.008041,-0.053192,-0.064026,0.028183,-0.029083,-0.016876,-0.031494,-0.010941,-0.023956,-0.005291,0.035278,-0.028885,-0.011688,0.001130,0.004131,-0.002815,-0.006756,-0.008240,0.018784,0.024506,0.010986,-0.001763,-0.030045,0.044128,0.016876,0.013474,0.005085,0.022797,-0.000042,0.021683,-0.010429,0.043213,0.022919,0.011581,0.001897,-0.001082,0.017746,0.015656,0.015602,-0.007538,-0.031189,-0.004742,-0.032471,-0.015175,-0.039001,0.023514,0.021133,0.005955,0.008919,0.019211,0.045990,-0.010307,-0.011391,-0.026855,0.022690,0.015259,0.001808,-0.001595,-0.015686,-0.009438,-0.006214,-0.011864,-0.022308,-0.018158,-0.001654,-0.009155,0.037262,-0.002014,0.032867,-0.027023,0.008659,0.017075,-0.000308,0.027695,-0.014114,0.036835,-0.051086,-0.020065,-0.006226,0.035675,0.016510,0.017822,0.000607,0.033722,-0.001181,-0.001450,-0.016129,0.031006,0.005058,0.024765,0.030563,0.011414,-0.006832,-0.029968,-0.004990,0.033264,-0.018433,0.002537,0.038757,0.000832,-0.045685,0.002323,0.010864,-0.023041,-0.003830,0.023178,0.009506,-0.000734,-0.002546,0.014183,0.031769,-0.015656,0.050018,0.002134,-0.016129,-0.019852,-0.016754,-0.012360,-0.021362,0.004616,-0.019302,0.045135,0.009590,-0.027832,-0.004551,-0.000990,-0.009689,-0.038361,0.007549,-0.010986,0.008804,-0.000374,-0.001703,-0.015518,0.006226,-0.005882,-0.008484,-0.014565,-0.035400,-0.004139,-0.037994,0.030350,-0.041565,-0.006226,-0.000536,0.011253,-0.022278,0.014305,-0.015152,0.019653,0.012779,-0.005669,0.012177,-0.019638,-0.001111,-0.000760,-0.034241,-0.019363,0.006268,0.001279,0.006710,-0.015991,0.011765,0.031586,0.043762,0.005314,-0.048553,-0.031647,0.030151,0.017456,0.013725,0.010185,-0.014244,0.000019,-0.001603,0.020050,0.015480,0.007702,0.005718,-0.004585,-0.019836,-0.006336,-0.001161,0.012711,0.033264,-0.025589,0.013718,-0.027191,-0.009827,-0.034973,-0.016220,0.020920,-0.007328,0.012505,-0.018143,0.018051,-0.018982,-0.011368,-0.020081,0.026138,0.005531,-0.002617,-0.006119,0.000723,0.013695,-0.020432,0.011757,0.009041,-0.005516,0.018311,0.029877,-0.018158,-0.009644,0.031677,-0.004677,-0.021255,0.005192,-0.020447,0.017349,0.026688,-0.019257,0.010246,-0.000076,0.034393,0.008240,-0.045654,0.005920,0.059998,0.022827,0.001220,0.025146,-0.017181,-0.001417,-0.020859,-0.027832,-0.011482,0.014465,0.031952,-0.014519,-0.007668,0.019394,-0.042908,-0.028778,-0.025818,0.035980,-0.005005,-0.009224,0.027878,-0.047028,0.011337,0.007008,-0.007973,-0.014664,0.003256,-0.002916,0.026154,0.002480,-0.045044,0.014481,-0.010918,-0.016998,-0.022781,0.023361,0.022232,0.007576,-0.010681,0.002537,-0.004120,0.020233,-0.027496,-0.017838,0.022476,0.017990,0.022476,-0.024994,0.016144,-0.020004,0.033905,-0.022507,-0.032410,0.028778,-0.026840,0.016754,-0.004684,0.023026,0.025223,-0.009613,-0.034515,-0.020981,-0.008209,0.002029,0.020859,-0.010544,0.003801,-0.001400,-0.025299,0.022293,0.008575,-0.000774,-0.001391,0.018387,0.011658,0.015358,0.013077,0.003824,-0.010796,-0.006424,0.011177,-0.000701,0.040741,-0.013000,0.001329,-0.042664,0.023972,-0.037018,0.002945,-0.006573,-0.024628,0.000044,-0.018112,0.030411,-0.021317,0.039948,-0.000469,-0.010445,0.003592,-0.015106,-0.025391,-0.019745,0.019592,-0.001009,0.003471,-0.005363,0.017120,-0.008774,0.004200,-0.008575,0.023331,-0.044861,0.034821,0.012352,0.009750,0.011665,-0.023224,-0.013222,-0.002817,-0.002972,0.019394,0.007168,-0.000014,0.047028,-0.004532,0.015007,0.035156,-0.023193,-0.003534,0.004509,-0.001160,0.017197,-0.028320,-0.020493,0.015419,-0.004436,-0.006401,0.036194,0.008995,-0.045837,0.059509,0.043610,-0.007061,0.028519,-0.004707,0.006565,0.036560,0.036224,-0.012428,0.035309,-0.012932,-0.018448,-0.022980,-0.022308,0.008636,-0.017517,-0.019104,-0.038483,0.025711,0.003351,0.017242,-0.017761,0.011986,-0.015434,0.013947,-0.019775,0.019028,0.010460,0.033203,-0.012405,0.023666,-0.004353,0.013206,0.002554,0.012825,0.040100,0.014183,0.001654,-0.027496,-0.002066,0.034790,0.020767,-0.015884,-0.019547,0.023087,0.017349,-0.019363,0.002172,0.012772,0.018829,-0.024033,0.000150,0.000330,0.012451,0.004715,0.040558,-0.000614,0.002581,0.003660,0.025299,0.005581,0.022324,0.005356,0.017807,0.007290,0.007072,-0.021088,0.011490,0.006428,0.029709,0.032013,0.002508,-0.011383,0.043213,0.014664,0.010262,-0.000151,-0.002415,-0.006725,0.008995,-0.001764,-0.001938,-0.003611,-0.008141,-0.035889,0.045074,-0.006634,-0.010910,0.023193,0.015251,0.023560,0.024658,0.020096,0.021957,-0.034393,-0.021912,0.013046,-0.040192,0.009598,-0.035034,0.032806,-0.000267,0.001801,-0.024811,0.016312]'::vector, $sem$openai/text-embedding-3-small$sem$
+  from public.catalog_materials m
+ where m.slug = $sem$exemplo-a-rede-credenciada$sem$ and m.version = 1
+   and not exists (
+     select 1 from public.catalog_chunks c
+      where c.catalog_material_id = m.id and c.position = 0
+   );
+insert into public.catalog_chunks
+  (catalog_material_id, position, content, content_hash, token_count, embedding, embedding_model)
+select m.id, 0, $sem$Como funciona o pedido de reembolso
+
+O pedido de reembolso costuma exigir a nota fiscal do atendimento, o relatório do profissional e os dados bancários do titular, enviados pelo aplicativo ou pelo portal. O valor devolvido segue a tabela de reembolso do contrato e raramente equivale ao valor pago — a diferença é a parte que fica com o beneficiário. O prazo de análise é contado a partir do envio da documentação completa.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, md5($sem$Como funciona o pedido de reembolso
+
+O pedido de reembolso costuma exigir a nota fiscal do atendimento, o relatório do profissional e os dados bancários do titular, enviados pelo aplicativo ou pelo portal. O valor devolvido segue a tabela de reembolso do contrato e raramente equivale ao valor pago — a diferença é a parte que fica com o beneficiário. O prazo de análise é contado a partir do envio da documentação completa.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$), 157,
+       '[-0.007633,0.032593,-0.002146,0.007050,-0.030228,-0.017075,-0.034485,-0.022003,0.005600,0.008484,0.010933,-0.032776,-0.036011,-0.033783,0.045837,0.014023,-0.014626,-0.003710,-0.034790,0.015839,0.000841,0.030640,-0.043793,-0.027618,-0.036285,-0.087402,-0.051239,-0.019897,0.011513,-0.031830,0.000392,-0.000672,-0.002808,0.001672,0.010620,0.060638,-0.045563,-0.023849,0.050415,0.020248,-0.019760,0.045868,-0.036316,-0.006451,-0.013428,0.065918,-0.015198,-0.004765,-0.009735,0.009842,0.021637,0.020142,-0.030991,0.008133,-0.014656,0.008499,0.023788,0.003345,0.029114,-0.001781,-0.003901,0.028961,-0.016190,-0.026077,-0.035309,0.019852,-0.026291,0.029907,-0.030640,0.000065,0.009048,0.027466,0.013123,-0.041809,0.010834,-0.052094,0.020798,-0.015198,0.002764,-0.008293,-0.017578,-0.042816,0.005184,0.022888,0.000307,0.005173,-0.135864,-0.030334,-0.001018,-0.013763,-0.014343,0.007263,-0.021591,0.057770,0.010826,0.015869,-0.071838,-0.018051,-0.014984,0.028534,0.006271,-0.019165,0.008530,-0.020691,0.031982,0.022049,-0.046082,0.017609,0.012566,-0.027328,0.104980,0.004318,0.011688,-0.023941,0.022934,0.034912,-0.006893,-0.017609,-0.014503,-0.057159,-0.017548,-0.001247,-0.034729,-0.044952,0.034973,0.012047,-0.013840,0.012657,0.001222,-0.005173,0.015007,0.008553,-0.009926,-0.029297,-0.017654,0.060028,0.022980,0.028046,0.020462,-0.017960,-0.017914,0.016022,-0.019180,-0.007477,-0.021469,0.019455,0.015686,-0.026184,-0.003036,0.017105,-0.003321,-0.002272,-0.006538,0.019836,-0.007519,0.010895,-0.017807,-0.022842,-0.041016,0.027008,-0.062744,-0.032196,-0.004482,0.005947,-0.044250,-0.005512,-0.007084,0.010040,-0.038269,0.005363,-0.043518,-0.008957,-0.010872,-0.006397,-0.017593,0.001485,0.069580,-0.009338,0.080688,-0.011513,-0.053192,-0.039886,0.020157,-0.026352,-0.016327,-0.018539,-0.035614,0.016861,-0.046783,0.018738,0.025803,-0.012962,-0.026245,-0.005836,-0.027878,-0.002626,-0.003933,-0.021667,-0.084106,0.040894,0.009438,-0.032562,0.038391,0.049805,0.002050,0.012817,0.014740,-0.038361,0.030273,0.000793,0.061462,0.000580,0.001893,-0.002104,-0.034973,-0.001067,-0.053589,0.034546,-0.004784,0.006725,0.031555,-0.016281,-0.004261,-0.005749,0.000344,0.047607,0.008301,-0.015915,-0.041016,-0.066772,0.006229,0.050934,0.032623,-0.019913,0.080139,-0.000002,-0.027130,0.012917,-0.009819,-0.051147,0.001154,0.021042,-0.000330,0.028091,0.009720,0.010437,-0.013016,-0.019485,0.052917,-0.010422,0.035492,0.068787,0.037872,-0.017624,0.013710,0.000186,0.002657,-0.004917,0.002331,-0.016632,0.007736,-0.058838,-0.010277,0.041199,0.021667,0.028854,-0.009186,-0.021835,-0.011711,0.071167,-0.045654,0.017578,0.030121,0.065002,-0.041992,0.021759,0.025742,-0.012589,0.037750,0.032562,-0.010094,0.007607,-0.057373,-0.000172,0.012733,-0.001919,0.013962,-0.020447,0.016663,0.032593,0.016190,0.011765,-0.013298,-0.076233,0.035797,-0.029861,-0.002254,-0.013504,0.014725,0.013733,-0.030701,-0.016144,-0.022354,0.008636,-0.061401,-0.033081,0.002092,0.016754,0.020950,-0.037781,-0.008774,0.012375,0.006855,-0.019806,0.022614,0.000101,0.036224,-0.039642,-0.032135,-0.070129,0.034760,-0.055481,0.019974,0.019211,0.017181,0.001031,-0.019653,-0.035156,0.022202,0.013832,0.027893,-0.024826,0.011307,0.024200,0.008850,0.059631,-0.016815,-0.010284,0.001011,0.007469,0.007713,-0.005447,-0.022064,-0.032898,0.002203,0.011795,0.006470,-0.025070,0.055054,0.081116,-0.018188,0.002874,0.040619,-0.000661,0.030380,0.014351,0.028137,-0.055573,-0.022217,-0.010437,-0.057007,0.003471,0.003103,0.010368,-0.000269,0.035706,-0.031982,-0.025131,-0.041626,-0.013939,0.005859,0.017868,-0.040680,0.028183,-0.055481,-0.116821,-0.008644,0.020645,-0.024979,0.005512,0.064575,0.001869,-0.035431,0.028503,0.032440,0.040222,-0.026657,0.014854,0.047211,0.008827,-0.003777,-0.006432,0.026871,-0.038605,0.056366,0.024872,-0.027985,0.033325,-0.010574,-0.040527,0.012680,-0.020996,-0.030121,0.008217,-0.009689,-0.031082,0.063965,0.012390,0.000900,-0.035889,0.026031,-0.026749,0.021774,-0.000936,0.002493,-0.045013,-0.023453,0.062012,0.010345,0.003128,0.034027,0.027939,-0.002951,0.009422,-0.004559,-0.008247,-0.045624,0.030930,-0.065430,-0.043030,0.004486,0.027786,-0.015167,-0.004959,-0.051544,-0.025055,0.028397,0.009148,0.020020,-0.032715,-0.007523,-0.002018,-0.028732,-0.001937,0.031403,0.009529,0.005032,0.004574,0.007263,0.007099,-0.042267,0.020126,-0.044495,0.015221,-0.047180,-0.049744,0.038330,0.021866,-0.049011,0.005238,0.005959,0.024872,0.045258,0.017548,0.024399,0.029465,-0.061371,0.012978,0.006008,-0.012024,-0.042511,-0.007851,0.024155,-0.003918,0.007378,0.016968,0.027206,-0.008263,0.003485,0.024109,0.013374,0.016617,-0.035645,0.021332,0.004562,0.086365,-0.012489,-0.006001,-0.043823,-0.021408,0.028702,0.006763,0.067261,-0.007446,-0.023117,-0.010056,0.002064,-0.020126,-0.017426,0.010002,-0.039490,0.034607,-0.010506,-0.036682,0.022568,0.004143,-0.011444,0.002686,0.017761,0.006546,0.002903,-0.018616,0.007008,0.011612,-0.034454,0.024872,-0.026489,-0.001989,0.006180,-0.007408,-0.053955,-0.008675,-0.003115,-0.002605,0.019333,-0.034821,0.005810,-0.082153,-0.010880,-0.014862,0.006584,-0.022919,-0.036469,0.010498,0.003275,-0.000354,0.000047,0.013298,0.026001,-0.014893,-0.027069,-0.009773,0.035004,-0.009171,0.017349,-0.003569,-0.000856,-0.008484,-0.001829,0.012436,0.012123,0.031830,0.046783,0.014374,-0.058014,0.001003,-0.003967,-0.002935,0.029831,-0.020187,-0.009781,-0.013863,-0.018066,-0.007328,-0.005932,0.038818,-0.014832,-0.041504,-0.032898,0.051483,-0.013054,0.019058,-0.025391,0.076172,0.000438,0.022873,-0.014481,-0.035767,-0.057220,0.005833,0.006432,-0.010254,0.009468,0.006195,-0.022415,-0.000364,-0.019089,-0.016571,-0.016693,0.002989,-0.013718,-0.012001,-0.004066,-0.020920,0.026825,0.021713,-0.028091,0.042053,0.032288,0.024048,-0.016037,0.002172,0.015450,0.008133,0.028992,-0.009483,-0.005302,-0.009262,0.014679,-0.012154,0.028732,-0.007427,-0.046997,0.018570,0.018631,0.022018,0.017914,-0.023499,-0.021484,0.058624,0.006077,0.021194,0.024979,-0.007572,0.035004,0.001999,0.011978,0.004242,0.009415,-0.007099,0.000764,0.029633,0.033020,0.038300,0.007557,-0.000040,0.011864,-0.001860,-0.020126,-0.060638,0.005005,-0.021790,0.015839,0.002415,0.015366,-0.004723,-0.006500,0.007622,-0.005848,0.000398,-0.012657,-0.046387,-0.004452,-0.028290,-0.012733,0.003889,-0.004715,0.020782,0.009857,-0.009773,-0.018631,-0.008537,0.015007,0.009010,-0.030228,0.038483,-0.001200,-0.037201,0.038116,-0.002634,-0.104736,0.011818,0.008553,-0.001044,-0.036407,0.010513,-0.026566,-0.047607,0.024445,0.001902,-0.012840,-0.027725,-0.012383,0.007858,0.001063,0.006329,0.025894,-0.004456,-0.011406,-0.000933,0.022873,-0.013382,0.030853,-0.050720,0.010162,-0.024460,0.033112,0.007183,0.015442,-0.014198,0.010620,-0.015015,0.002068,-0.025574,-0.028580,0.014862,-0.012810,0.034088,0.002642,0.008820,0.015640,0.018921,0.012329,-0.010498,0.011063,0.024872,-0.023071,0.031830,0.012642,-0.007183,0.015854,0.079773,-0.013931,-0.044037,0.026794,0.012711,-0.031097,-0.007645,-0.035980,0.022705,-0.028595,0.015793,-0.012085,0.012589,0.008842,-0.005371,-0.023499,-0.024399,-0.009201,-0.008293,-0.008789,-0.038147,-0.053070,-0.006870,-0.002346,-0.019928,-0.006756,-0.017365,-0.023132,-0.006691,0.044403,0.005894,-0.013229,0.008789,0.029449,-0.007881,-0.011848,-0.022919,-0.035767,0.002781,0.033691,0.028732,-0.001458,0.038635,-0.014778,-0.009583,-0.021225,0.012680,0.036591,0.012505,0.006012,-0.045258,0.012222,0.005474,0.053650,0.035370,-0.013947,0.000381,-0.011337,0.019196,0.026337,-0.028915,-0.001571,-0.004841,-0.020798,0.016541,-0.022659,-0.000322,-0.011665,-0.024673,-0.021271,-0.038055,-0.039673,-0.040924,0.013321,0.015900,-0.004650,0.065674,0.019867,-0.002892,-0.021774,-0.006115,0.014893,-0.006905,-0.013786,-0.052917,-0.011292,0.036835,0.017654,0.002333,0.014648,0.042664,-0.005428,0.036438,-0.000598,0.023758,-0.008392,0.021317,-0.039093,-0.010597,0.025116,0.016312,-0.005238,0.055328,0.001249,0.034729,-0.021042,0.023193,0.009621,-0.012993,0.007263,0.007446,-0.014023,-0.018967,-0.002462,-0.032349,-0.012337,-0.002708,-0.005947,0.017914,0.056610,-0.006561,0.028427,-0.014374,-0.010551,-0.002714,-0.026352,0.013130,-0.018356,0.006870,-0.012047,-0.034454,0.003536,-0.011574,-0.004547,-0.036743,-0.032623,0.006359,0.006474,0.028702,0.002449,0.027740,-0.027252,-0.015686,0.005798,-0.012863,0.015495,0.019363,0.004974,-0.037231,0.025848,0.014122,0.021606,0.006268,-0.001081,0.015617,0.016251,0.012390,-0.018097,0.001567,0.000433,-0.017242,-0.024323,0.002645,0.007111,0.013557,0.004505,0.001255,0.000601,-0.005558,-0.028198,0.034698,0.027557,-0.025543,-0.066528,0.014877,0.028809,0.040009,0.007545,-0.008736,-0.011894,0.028290,-0.031464,0.006157,0.002003,0.006882,-0.039642,-0.003786,-0.002586,0.037628,-0.019058,-0.033112,0.038330,-0.005386,0.030945,0.005642,-0.007988,-0.010376,-0.010117,0.011292,0.032959,-0.017654,-0.004253,0.008484,-0.013702,0.016830,0.001180,-0.016098,0.024506,-0.030380,0.039551,-0.000219,0.020660,-0.003363,0.019470,0.000766,-0.005901,-0.001831,-0.024597,-0.038177,0.008545,0.027786,0.005619,0.042755,0.019577,-0.018600,0.013939,-0.040009,-0.007389,0.002516,-0.015869,0.004200,-0.006687,-0.028488,-0.031006,0.048798,-0.017014,-0.048798,0.005478,-0.014351,-0.014069,0.003183,0.008385,-0.017090,0.002310,0.032928,-0.047211,-0.010300,-0.011276,-0.011826,-0.014275,0.016632,0.008316,-0.021790,0.026291,-0.015518,-0.021973,-0.035492,0.013702,0.063599,0.006775,0.014267,-0.012970,-0.026306,0.040375,0.010765,0.028076,-0.015259,0.032349,0.019333,0.011635,-0.003656,0.040253,-0.010872,0.031082,-0.011436,-0.029877,-0.078186,-0.039063,0.019531,0.008698,0.023132,-0.002815,-0.008255,0.013855,-0.007725,0.042297,-0.000837,0.015793,0.033295,0.026917,0.031677,-0.034088,-0.056305,-0.001120,-0.040100,0.029099,0.008522,-0.035675,0.013168,0.011063,0.020172,-0.015640,-0.016251,0.006104,-0.000053,0.036530,0.012764,0.050781,-0.022522,-0.036987,-0.002371,-0.000873,-0.005482,-0.002382,0.043243,-0.005020,0.000998,0.033325,-0.008034,0.059113,-0.011009,0.013191,0.048828,0.042511,0.002810,0.005428,-0.006794,-0.017502,0.012375,-0.028580,-0.003231,-0.022827,-0.028656,0.000622,0.000227,0.010757,-0.033936,0.003895,0.014809,-0.010796,-0.017700,0.005417,-0.012604,0.009911,-0.065674,-0.069885,0.017761,-0.027054,-0.011566,-0.013863,0.021698,0.018112,-0.006382,0.016800,-0.003670,-0.012894,0.018555,0.031372,0.001110,-0.032990,0.009697,0.020340,0.024002,0.003178,0.017044,0.018585,0.029465,0.022919,0.015823,0.027634,0.023788,0.012558,0.019012,-0.023956,0.021149,0.000305,0.019272,0.037201,0.013512,-0.005024,-0.008881,0.031372,0.007259,-0.021759,-0.015190,0.011055,-0.006790,0.006195,-0.013298,0.038940,0.005192,0.007332,0.003454,0.024750,-0.034149,0.011902,0.011284,-0.018326,0.006386,-0.008980,0.000208,-0.035004,-0.019440,-0.005035,-0.022263,0.002552,0.005024,0.019897,-0.026382,0.016815,0.027817,0.015083,-0.023026,0.017578,0.024628,0.010658,0.015869,-0.002115,0.018295,-0.045776,-0.012642,-0.015266,0.048615,0.005627,-0.000822,-0.023499,0.038788,-0.001603,0.019211,-0.013359,0.037201,-0.002625,0.023483,0.021179,-0.000090,0.000943,-0.020874,0.018143,0.037506,-0.001224,-0.002813,0.029419,0.010628,-0.004040,-0.004379,0.012306,-0.017410,-0.015388,0.023224,0.018448,-0.009636,-0.000271,-0.037750,0.014732,-0.004734,0.037598,0.008621,-0.006264,-0.009071,-0.005123,-0.040527,-0.005920,0.034943,-0.019714,0.032410,-0.001015,-0.028793,0.014267,0.002604,0.018005,0.010078,0.029114,-0.019318,0.005123,-0.001660,-0.004650,0.006546,-0.013985,-0.009514,-0.004082,0.008675,-0.000304,-0.005505,-0.019424,0.036804,-0.018723,0.006752,-0.031799,0.005913,-0.016754,0.012436,0.008003,0.002579,0.023727,-0.000170,0.001739,-0.008255,0.031311,-0.002871,-0.023224,-0.008797,0.009193,-0.001825,0.006279,-0.011520,0.006691,0.041901,0.028244,0.020599,-0.022873,-0.020355,0.028687,-0.025360,0.003555,0.016891,-0.034149,0.013168,-0.000086,0.010239,-0.001580,-0.010567,0.007843,0.002506,-0.004593,-0.007011,-0.004177,-0.014328,0.031433,-0.006470,0.029449,-0.009537,0.012680,-0.050659,-0.008972,0.009132,-0.017883,0.010460,-0.020050,0.018265,-0.031372,-0.007515,-0.026688,0.054230,0.001739,0.022583,0.034393,-0.012505,0.001487,-0.015991,-0.017334,-0.004070,0.028091,0.035767,0.048584,0.013741,-0.000739,0.042175,0.022873,0.002716,-0.020721,-0.020325,0.008881,-0.010422,0.001881,0.003487,-0.001714,0.033691,0.002598,-0.043823,0.003197,-0.009453,0.038666,0.003757,0.015244,-0.005836,-0.020264,0.019470,0.004185,-0.017609,0.029068,0.014153,0.003351,0.012161,-0.000707,-0.022964,-0.011574,-0.002924,0.005886,-0.048340,0.007866,-0.000337,-0.057007,-0.013603,0.033356,-0.000581,-0.027557,-0.010666,-0.010193,-0.001059,0.017014,-0.036591,0.026459,0.003401,-0.020782,-0.022278,-0.011368,0.030472,0.011696,-0.010933,0.035492,0.005684,0.006840,-0.061768,-0.008904,0.028305,0.004539,0.027878,-0.011635,0.019958,0.000982,0.019547,0.020432,-0.001144,0.025009,-0.025574,0.044708,0.004772,0.036926,-0.006340,0.011826,-0.003576,-0.020279,-0.026657,-0.016739,0.040894,0.012489,-0.031860,-0.001561,-0.008926,0.002419,0.037750,0.030807,0.010223,0.012077,0.023346,0.011787,0.006737,0.017197,-0.002293,-0.000511,0.009071,-0.014816,0.051605,0.024857,-0.011955,-0.008369,0.024521,-0.055420,-0.016922,0.048828,0.013092,0.003941,-0.015266,0.014473,-0.031143,0.012085,0.003792,0.014984,-0.000281,-0.016968,-0.022415,-0.027328,0.017151,0.004246,-0.008972,-0.007751,0.024002,-0.010078,0.032013,-0.006718,0.044800,-0.018555,0.042358,-0.014366,0.039642,0.016220,0.033875,-0.018204,0.004608,-0.024475,0.020828,-0.006878,0.022079,-0.000440,-0.001867,0.032318,0.002289,-0.014023,0.029678,0.017258,0.001533,0.013176,-0.010582,0.010803,0.028534,-0.028351,0.002859,0.029068,0.015579,-0.034515,0.019897,0.040039,0.010803,-0.007519,0.009239,0.023849,0.020477,0.031860,0.001436,0.013252,-0.028488,-0.000104,-0.024719,-0.003979,0.010094,-0.041656,0.019272,-0.011536,0.022614,-0.020615,0.021561,-0.021820,-0.012993,-0.023438,0.000451,-0.012199,0.001175,-0.031525,0.011101,0.016663,0.015060,-0.009415,0.023529,-0.014763,0.018799,0.030426,0.004902,0.010094,-0.022461,-0.000062,0.007183,0.003479,-0.000686,0.003809,-0.025024,-0.002653,-0.018387,0.009705,-0.008224,-0.003653,-0.034088,0.004192,-0.003857,0.010742,0.016617,0.038422,0.017075,-0.010689,-0.001949,-0.004417,0.019012,0.031677,-0.007542,0.001076,0.001218,-0.009850,-0.029968,0.001432,-0.022507,-0.000676,0.031143,-0.007446,-0.018463,0.050018,0.016556,-0.001903,-0.024811,0.034790,0.036957,-0.005157,-0.000439,-0.001722,-0.001637,0.008751,-0.038910,0.013046,-0.005627,-0.017166,0.014496,0.011818,0.001935,0.006546,0.026703,0.035400,-0.034180,-0.032471,0.043762,-0.014023,0.007038,-0.035797,0.047577,-0.003716,0.000162,-0.003765,0.025986]'::vector, $sem$openai/text-embedding-3-small$sem$
+  from public.catalog_materials m
+ where m.slug = $sem$exemplo-b-reembolso$sem$ and m.version = 1
+   and not exists (
+     select 1 from public.catalog_chunks c
+      where c.catalog_material_id = m.id and c.position = 0
+   );
+insert into public.catalog_chunks
+  (catalog_material_id, position, content, content_hash, token_count, embedding, embedding_model)
+select m.id, 0, $sem$O que é carência
+
+Carência é o período que o beneficiário precisa aguardar, contado da data de início do contrato, antes de poder usar determinado procedimento. Cada tipo de atendimento costuma ter um prazo próprio: consultas e exames simples costumam ter carência curta, internações e cirurgias costumam ter carência mais longa, e parto tem prazo próprio. O prazo exato depende do contrato e da operadora — quem informa o número é o contrato assinado, não uma regra geral.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, md5($sem$O que é carência
+
+Carência é o período que o beneficiário precisa aguardar, contado da data de início do contrato, antes de poder usar determinado procedimento. Cada tipo de atendimento costuma ter um prazo próprio: consultas e exames simples costumam ter carência curta, internações e cirurgias costumam ter carência mais longa, e parto tem prazo próprio. O prazo exato depende do contrato e da operadora — quem informa o número é o contrato assinado, não uma regra geral.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$), 169,
+       '[0.011757,0.052490,0.034363,0.046478,-0.013161,0.026199,0.015167,-0.010628,0.016129,-0.001681,0.016815,-0.032867,-0.010803,-0.036774,0.040619,-0.048553,-0.026138,0.037109,0.014786,0.017639,0.024429,0.009956,-0.036499,-0.016541,-0.016541,-0.065857,-0.001780,0.048309,0.033020,-0.050446,0.025238,0.002628,-0.009621,-0.018677,0.049408,0.044647,0.003433,0.007164,0.005215,-0.007496,-0.061615,0.010147,-0.044586,-0.029633,0.005550,0.040039,-0.023285,-0.022675,0.018829,0.034485,-0.014328,0.019211,-0.032349,0.003780,0.003342,-0.001792,0.001485,0.008667,0.033630,-0.023941,0.000649,-0.003513,-0.051941,0.016174,-0.039978,0.010262,0.029846,0.037018,-0.054810,0.000115,-0.011681,0.049500,0.016983,-0.009109,0.032745,0.008751,0.019684,0.007904,0.021042,0.006851,0.023590,-0.018143,-0.030930,0.002604,-0.000495,0.012695,-0.104492,-0.000440,-0.002321,0.000477,-0.016174,0.005211,-0.022217,0.021393,-0.003450,0.029678,-0.023209,-0.019135,-0.050934,0.064087,0.017471,-0.014885,0.012161,-0.030045,0.024628,-0.018082,-0.081482,0.024475,0.009491,-0.017944,0.095276,-0.003443,0.000645,0.038879,0.028427,0.034119,-0.027405,-0.020737,0.018295,-0.019562,-0.038635,-0.000005,0.011749,-0.057343,0.021866,-0.008713,0.000118,0.022171,-0.058868,-0.025055,0.014099,0.018326,-0.030380,-0.053406,-0.015305,0.033508,0.003254,-0.024017,-0.031464,0.021362,0.006992,0.000682,0.040894,0.027008,0.017090,0.018921,-0.003103,-0.020630,-0.015175,0.005455,-0.033813,0.016068,0.002838,0.036499,-0.016708,-0.027390,-0.047913,0.008133,-0.050751,-0.009369,-0.025330,-0.029190,-0.005119,0.009277,-0.018829,-0.032990,-0.027451,0.023514,-0.028122,-0.001834,-0.041107,-0.030396,-0.077637,0.001887,0.025742,0.015541,0.022903,0.005024,0.067322,-0.013420,-0.010025,0.015266,0.006752,0.036285,-0.001127,-0.050415,-0.045044,0.028885,-0.023132,-0.029526,0.019211,-0.055115,0.028778,0.024765,0.019974,-0.031647,-0.007614,-0.017288,-0.031250,0.006836,0.007183,-0.046692,0.031372,0.000811,0.053680,-0.016220,-0.025223,-0.015228,0.037109,0.001253,0.027817,0.016800,0.019409,0.017441,-0.011292,-0.038727,0.014580,0.025696,-0.034119,-0.001513,0.028473,-0.005707,-0.019913,0.034332,0.009430,0.012741,-0.032898,-0.007614,-0.006687,-0.062683,-0.012482,0.050140,0.037476,-0.039215,0.032135,-0.006039,-0.021576,0.018799,0.013191,-0.049408,-0.009125,0.019562,-0.042236,0.040283,0.035553,0.004681,-0.030853,-0.026688,0.038513,-0.018143,0.020676,0.008263,0.040802,0.025589,0.017380,0.019669,0.025482,0.006233,0.016342,-0.013023,-0.003172,-0.064514,0.012985,-0.011566,0.019180,0.030502,-0.006851,-0.035431,-0.028107,0.004410,0.012466,-0.024399,0.025818,0.058014,-0.072754,0.018509,-0.004963,-0.000174,-0.007015,0.030441,-0.029922,0.009621,-0.049316,-0.039063,0.038879,-0.010338,0.054718,-0.022995,0.016525,0.037048,0.031555,0.006283,0.006104,-0.039734,0.015526,-0.039917,-0.001870,-0.057251,-0.004513,0.018005,-0.039673,0.026077,0.024933,0.014389,-0.074829,-0.026123,0.003271,0.013824,-0.001152,-0.031616,0.016602,0.036438,0.013046,-0.038513,0.001334,0.009743,0.031464,-0.076843,-0.006573,-0.041443,0.014336,-0.025528,-0.021866,-0.001955,0.013290,-0.017532,-0.002800,-0.025116,0.003027,-0.052368,-0.009193,-0.047028,0.040253,-0.011101,-0.011368,0.026031,0.004784,0.031830,0.017181,0.016373,0.007473,-0.015190,-0.035614,0.013794,0.024261,0.002970,0.028824,-0.021439,0.050964,0.051941,-0.003786,-0.000529,0.009598,0.019821,-0.006382,0.002375,0.048737,-0.039093,-0.035583,-0.003290,-0.063049,-0.010704,-0.029480,0.036591,-0.019485,0.002071,0.044800,-0.014732,-0.042175,-0.018448,-0.022400,-0.000742,-0.020386,-0.001911,-0.060272,-0.036438,-0.036804,0.024261,0.043549,-0.029419,0.044220,-0.043793,-0.011909,0.039612,0.052460,0.025375,-0.066345,-0.000243,-0.003284,-0.008102,0.021011,0.024506,0.033356,-0.010086,-0.010529,0.069214,-0.020874,0.050323,-0.005936,-0.063721,0.043304,-0.030991,-0.030228,0.024918,0.007874,-0.031372,0.068481,-0.003208,-0.014328,0.015366,0.029282,0.029739,0.035095,0.041565,-0.004314,-0.006611,-0.016754,0.097595,-0.004284,-0.009628,0.055603,0.014053,-0.024780,-0.031189,-0.011505,0.011879,-0.018326,0.015572,-0.040161,-0.069153,0.026398,0.032562,-0.013222,0.052368,-0.028519,-0.015320,0.009644,0.021378,-0.033142,-0.009056,-0.005405,-0.031342,0.027435,0.011002,0.011726,0.059784,0.024261,-0.023499,0.035553,0.014175,-0.049561,-0.001453,-0.005550,0.003925,-0.027908,-0.013138,0.008324,0.002037,-0.046417,-0.010109,-0.023010,-0.019623,0.045959,0.000907,0.045105,0.025436,-0.053101,-0.011879,-0.010834,0.025360,-0.026474,-0.000834,0.008949,0.007645,0.015038,0.047028,-0.021530,0.042114,-0.016678,0.024811,0.030426,-0.005215,-0.033264,0.056793,0.048828,0.130249,0.006481,0.005459,0.008392,-0.019699,0.008888,0.015579,0.056213,-0.007851,0.007595,0.004211,0.011803,-0.029465,-0.035431,0.012535,-0.031052,0.017288,0.005772,-0.011375,0.004745,-0.008492,-0.009422,0.049103,-0.007725,-0.030457,-0.002407,0.015518,0.012718,0.008232,-0.066528,0.018082,-0.007030,-0.002815,-0.002634,0.000774,-0.018204,0.013779,0.021332,-0.005383,0.013725,-0.030685,-0.006546,-0.038818,-0.005493,-0.003260,0.020523,-0.053406,-0.026642,0.025574,-0.018417,-0.003649,-0.035675,0.031433,0.004765,-0.011429,-0.020355,-0.008858,0.019363,0.003633,-0.005951,0.040131,0.002369,-0.033722,0.021713,-0.016571,-0.004303,0.036163,0.028809,0.014763,-0.015961,0.002939,-0.001870,-0.043945,0.007748,-0.053894,-0.028275,0.004337,-0.010178,0.008781,-0.049530,0.032043,-0.006752,-0.051971,-0.041718,-0.014542,-0.028320,0.013809,-0.009491,0.114624,0.021942,-0.004364,-0.007507,0.010948,-0.017288,0.025375,0.001703,0.002621,0.006207,0.003944,-0.022385,0.012436,-0.023407,-0.043732,-0.016968,0.014366,0.002993,-0.020569,0.015945,0.001349,-0.020706,0.013802,-0.028854,0.036316,0.024048,0.016098,0.019196,-0.011070,0.015900,0.005356,0.017715,-0.030838,0.007740,-0.012985,-0.014999,-0.004986,0.029846,0.016754,-0.021759,-0.004807,0.001982,0.006355,-0.019058,-0.056915,-0.021896,0.011299,0.043579,0.022736,-0.046722,0.027252,0.032959,-0.001487,-0.013268,0.004833,0.027008,-0.026382,-0.010422,-0.027710,-0.000157,0.019394,-0.029129,0.009529,-0.015640,-0.017868,-0.012360,-0.026840,-0.017120,-0.008942,-0.015198,-0.019562,0.035919,-0.003550,-0.003717,0.026489,0.008972,-0.003057,-0.001618,-0.002781,-0.000968,-0.072144,-0.015549,-0.037903,-0.013878,0.014595,0.027252,0.032715,-0.013351,0.016785,0.010551,0.008629,-0.016708,-0.016953,0.050110,-0.035889,0.038940,-0.003012,-0.038727,0.023438,0.009628,0.001510,-0.029083,-0.032837,-0.008987,-0.017868,-0.004650,-0.008072,-0.036560,0.003254,-0.003857,0.038544,0.021393,0.008003,0.039215,0.043915,-0.008347,0.015480,0.009674,0.007057,0.037048,-0.024323,0.056549,0.008583,0.014511,-0.002607,0.008842,0.012642,-0.005192,-0.013550,-0.007416,0.023056,-0.028046,0.019989,-0.017807,0.014999,0.006012,-0.006851,0.039795,0.043182,0.003960,-0.001153,0.049225,0.004883,-0.021011,0.038605,-0.010239,0.032898,0.028656,0.059479,-0.017914,-0.009651,-0.019135,0.014503,0.013481,0.012177,-0.016190,0.039581,-0.001941,-0.010315,-0.003843,0.030502,0.010605,-0.013542,-0.034058,-0.000829,-0.015915,-0.013878,0.013756,-0.046692,-0.044952,-0.035828,0.026993,0.036346,-0.001447,-0.005619,-0.015549,0.019226,0.003292,0.006027,-0.017426,-0.031769,0.018463,-0.015396,0.003021,-0.006989,-0.015991,-0.029541,-0.020370,0.004086,-0.001126,0.038971,-0.003990,0.025208,-0.006657,0.001352,0.038361,-0.000546,0.008469,-0.041626,0.001028,-0.011238,0.026443,0.034210,-0.015465,-0.000239,-0.019836,-0.011124,0.024719,-0.013084,0.001109,0.024475,-0.003166,0.005985,-0.007168,-0.002138,-0.022491,-0.012131,0.001047,-0.027740,-0.047699,-0.014107,0.007042,0.011475,0.001832,0.024414,-0.004925,-0.031891,0.001264,0.002357,-0.011414,-0.034424,-0.012718,0.001865,-0.007366,0.022552,0.019333,-0.002350,-0.005917,0.016907,0.004139,0.003628,-0.006233,-0.009819,0.011223,0.025238,-0.033997,-0.007328,0.029465,-0.013901,-0.042267,0.038208,0.004757,-0.012917,0.036743,0.010849,-0.006458,-0.014793,0.041382,0.015625,0.000018,-0.015266,-0.027969,-0.009987,-0.047394,0.020264,-0.006851,0.041382,0.044983,0.020447,0.048004,-0.002926,-0.000094,-0.008316,-0.033691,-0.026489,0.015045,0.024933,-0.016556,-0.025177,0.007511,-0.026688,0.063965,-0.024002,-0.005486,0.003370,-0.000522,0.046814,0.011528,0.013039,-0.007740,0.001970,-0.016907,-0.009300,0.027206,-0.008774,0.003576,-0.035217,0.048431,0.009331,0.047424,-0.011902,-0.038055,0.014862,-0.031738,-0.001163,-0.016861,-0.030228,-0.004364,-0.009300,-0.022598,-0.005714,-0.012695,0.009590,-0.010277,0.001706,0.037689,-0.018906,-0.002905,-0.018829,-0.001215,-0.022095,-0.026794,-0.020309,0.035950,0.031235,-0.006447,0.026642,-0.018951,-0.016495,-0.027847,-0.019531,0.010551,-0.007088,-0.048828,0.035828,0.006859,0.013199,0.002445,-0.056396,0.037933,-0.006126,0.013367,0.014519,-0.020782,0.002268,0.017517,0.017838,0.033112,-0.048553,-0.047180,0.057434,0.003874,0.030777,-0.010376,-0.009415,0.063110,-0.054596,0.020187,0.040558,-0.000635,-0.016953,-0.010185,-0.012863,-0.026581,0.013618,0.024460,-0.008499,0.002089,-0.007057,0.043671,0.017303,0.032196,-0.013962,0.051849,-0.064880,-0.028580,0.031891,-0.003584,0.005047,-0.012260,0.006302,-0.041595,0.028015,-0.006809,-0.021332,0.019379,-0.021744,0.028824,0.048340,0.027145,0.004681,0.011879,0.035126,-0.020096,0.008293,-0.025162,-0.011246,-0.016754,0.021713,0.028259,-0.005608,0.003370,-0.011040,0.000833,-0.008476,-0.009239,0.053406,0.047638,0.010002,-0.000496,-0.009056,0.001717,0.004368,0.009346,0.006195,0.017426,0.003841,-0.004303,0.025223,0.014847,-0.016418,-0.006989,0.010612,-0.041870,-0.117126,-0.018784,0.034698,0.022980,-0.005493,-0.009605,0.021774,0.012009,0.008972,0.039368,-0.008583,0.004765,0.029190,0.013931,-0.002935,0.018036,-0.032776,0.026337,0.011696,0.016403,-0.021713,-0.050049,0.008629,-0.027313,0.019745,0.006775,0.017563,0.003439,0.011703,0.035248,0.006584,0.000152,0.003563,-0.032806,0.004414,-0.001184,0.009514,0.020645,0.008461,-0.021225,0.007370,-0.003702,-0.004192,0.019943,-0.002810,0.003342,0.032104,0.032440,0.023361,0.010788,-0.002464,0.008644,0.021088,-0.007030,0.031891,-0.023041,0.001088,-0.014587,0.015068,-0.003983,-0.030273,0.083862,0.018219,-0.018982,0.023544,-0.014893,0.000710,0.012733,-0.058380,-0.023193,0.041504,-0.009155,-0.006432,0.005672,-0.007214,-0.011490,0.017990,0.050720,0.011597,-0.029373,-0.001269,-0.017365,0.021561,-0.027039,0.007282,0.021896,0.021225,0.021423,-0.008499,-0.024582,0.038208,0.032867,0.011116,0.008369,0.024567,-0.021439,0.029541,0.004066,0.013550,0.018097,0.003323,0.014313,0.023590,-0.003233,0.020157,0.008141,-0.007206,-0.012230,-0.030792,-0.025284,-0.024826,-0.020676,0.007778,0.014908,0.028610,0.024124,-0.026688,0.032288,-0.002954,0.010468,-0.021011,0.027084,-0.001930,-0.026703,-0.016907,-0.005169,-0.047089,0.006168,0.024750,-0.007507,-0.012024,-0.001286,-0.001218,0.051941,0.006115,0.042725,-0.025635,0.034515,-0.011627,0.031921,0.004646,-0.024170,0.026794,-0.041718,-0.017258,-0.018326,-0.001465,0.002251,0.004105,0.010490,0.032990,0.007458,-0.037903,0.003948,0.040344,-0.022064,0.023804,0.016006,-0.021759,-0.038696,-0.018829,0.026016,0.021759,0.023788,-0.028885,0.006557,-0.012871,-0.022690,-0.024200,0.022400,0.020294,-0.002800,0.026443,-0.014137,-0.026428,-0.005436,-0.003096,-0.007858,-0.005093,0.041962,-0.001386,-0.001319,-0.040497,-0.020477,-0.010574,-0.007408,0.011528,-0.006638,0.023758,0.000354,-0.024551,-0.012993,0.001933,-0.008202,0.008301,0.005489,-0.038574,-0.004478,0.038391,0.004238,0.001196,0.012581,-0.001892,-0.000937,-0.007057,0.001206,-0.001694,-0.000949,0.040649,-0.032745,-0.015656,0.002247,0.002270,-0.013832,0.004551,-0.011955,0.012932,-0.002462,0.006657,0.001006,-0.015541,-0.004814,-0.015884,-0.021805,0.003654,0.016586,-0.003429,-0.002705,0.006523,-0.016037,0.037323,-0.004204,-0.009529,-0.044220,-0.005611,-0.005531,-0.003956,0.034698,0.032745,-0.031204,-0.006042,0.016571,0.030884,-0.010704,0.007053,-0.007736,0.019913,0.007408,-0.015289,-0.021500,0.012375,0.017609,-0.014229,-0.021362,-0.035370,0.014427,-0.045776,-0.009315,0.005173,0.004177,-0.010185,-0.024124,-0.010201,-0.029785,0.009789,-0.015884,0.040192,-0.030945,-0.004276,0.002926,0.007328,0.013252,-0.006382,0.004555,-0.030594,0.006901,0.009109,0.023895,0.013771,0.013733,0.002142,0.020004,-0.020477,0.011566,-0.016159,0.022552,0.000648,-0.013985,0.008812,-0.016769,-0.005077,-0.017365,-0.030228,0.027588,0.007481,0.012207,0.002857,0.001497,-0.001554,-0.013985,-0.024216,-0.012154,0.007610,0.011909,0.001817,-0.001158,0.013695,-0.000659,-0.011902,-0.011620,-0.003534,0.015961,-0.017288,-0.003014,0.032440,-0.030304,0.016571,0.010727,0.015556,-0.007648,-0.004005,-0.008087,0.031677,0.015091,-0.010933,0.012413,-0.009621,-0.044159,0.000968,0.013596,0.020493,0.021149,0.000168,0.010460,-0.016663,0.019745,-0.050232,-0.034607,0.015625,-0.006229,0.026749,-0.018600,0.013641,-0.009743,0.023636,-0.034607,0.038055,-0.021133,-0.031372,0.032410,-0.006378,0.022247,0.015289,-0.013062,-0.018463,-0.036743,0.014252,-0.000098,-0.002167,-0.028671,-0.022400,-0.005939,-0.009819,-0.011452,0.037659,0.032593,0.011238,0.009781,0.012558,-0.026337,0.002220,0.011421,0.005283,-0.003021,0.005463,0.003948,0.018753,0.000751,-0.035095,-0.018845,0.009621,-0.052582,-0.012276,0.024124,0.018951,-0.012611,0.001950,0.011871,-0.012787,0.039551,-0.008949,0.014832,-0.001440,-0.031311,0.006405,-0.016861,0.013832,-0.031036,0.002571,-0.019028,-0.000615,-0.009232,0.020782,-0.019318,0.006954,-0.033905,-0.001425,-0.011909,-0.000258,0.010696,-0.010361,-0.030991,0.019073,-0.007130,0.017517,-0.006470,-0.004826,0.035156,-0.015617,0.047119,-0.003664,0.002043,0.026077,-0.010910,-0.002447,0.021606,0.002310,-0.009476,0.027466,0.012207,0.002106,0.022995,-0.003685,-0.045166,0.042267,0.033203,-0.001135,0.011772,0.000207,0.009857,0.028580,0.011902,0.020340,0.021866,-0.024475,0.000213,-0.018372,0.011398,0.010414,-0.033600,-0.015099,-0.010826,0.016266,0.018219,0.022293,-0.016052,0.018738,0.002893,0.023865,-0.033569,0.007118,0.011719,0.021973,-0.004047,0.007385,-0.005142,0.006348,0.004520,0.017670,0.026840,0.013321,0.015915,0.001256,-0.012711,0.069641,0.009941,-0.008629,-0.025330,-0.009850,-0.000507,-0.005283,0.014183,0.003185,-0.006989,-0.032349,0.029037,0.012466,0.002775,-0.002325,0.019012,-0.003546,0.013321,0.028961,0.015732,0.029434,0.013718,0.011368,0.010483,-0.012260,0.011009,-0.010643,-0.000360,0.004196,0.014946,0.038452,-0.012077,-0.011269,0.023804,-0.000238,0.005081,-0.025131,0.013214,0.002327,-0.010223,0.014610,-0.009552,0.005672,-0.002586,0.004581,0.019562,-0.048615,-0.036346,0.029266,0.016495,0.017685,0.031708,0.011452,0.006004,-0.045471,-0.020905,0.015640,-0.048126,-0.001280,-0.028519,0.023392,0.026962,0.006176,-0.019623,0.029037]'::vector, $sem$openai/text-embedding-3-small$sem$
+  from public.catalog_materials m
+ where m.slug = $sem$exemplo-o-que-e-carencia$sem$ and m.version = 1
+   and not exists (
+     select 1 from public.catalog_chunks c
+      where c.catalog_material_id = m.id and c.position = 0
+   );
+insert into public.catalog_chunks
+  (catalog_material_id, position, content, content_hash, token_count, embedding, embedding_model)
+select m.id, 0, $sem$Portabilidade de carências
+
+Portabilidade de carências é a possibilidade de mudar de plano levando junto o tempo de carência já cumprido, sem recomeçar a contagem. Em geral depende de o plano de destino ser compatível em faixa de preço e cobertura, de o contrato atual estar em dia e de um tempo mínimo de permanência no plano anterior. As condições exatas e os prazos são definidos pela regulamentação vigente e pela operadora de destino.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, md5($sem$Portabilidade de carências
+
+Portabilidade de carências é a possibilidade de mudar de plano levando junto o tempo de carência já cumprido, sem recomeçar a contagem. Em geral depende de o plano de destino ser compatível em faixa de preço e cobertura, de o contrato atual estar em dia e de um tempo mínimo de permanência no plano anterior. As condições exatas e os prazos são definidos pela regulamentação vigente e pela operadora de destino.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$), 160,
+       '[0.029205,0.032745,0.029739,0.034271,-0.016586,0.012650,0.000365,-0.004635,0.037537,-0.014084,0.016174,-0.005016,-0.007030,0.013618,0.035248,-0.046295,0.000298,0.024857,-0.004189,0.011444,-0.002827,-0.016602,0.007050,0.007481,-0.032928,-0.080200,0.000829,0.031586,0.031616,-0.052856,0.054108,-0.018417,-0.015465,-0.013573,0.035522,0.026749,-0.013138,-0.001839,0.005203,-0.018341,-0.028397,0.048279,-0.022614,-0.008629,0.017334,0.087830,-0.025879,-0.015976,0.021606,0.064087,0.034088,0.014061,-0.029556,-0.013367,-0.009323,0.011002,0.034363,0.007912,0.006584,-0.021912,-0.057739,-0.002422,-0.011261,0.008446,-0.018631,0.030899,-0.013763,0.019501,-0.057770,0.009537,-0.025742,0.062805,0.025406,-0.047546,0.008881,0.018723,-0.014549,0.013100,0.034729,0.007072,-0.038300,-0.037872,-0.034943,0.009361,-0.006638,0.010406,-0.065491,-0.024368,0.020599,0.007183,0.006458,-0.002630,-0.037537,0.020218,0.009583,0.034271,0.009125,-0.015511,-0.023041,0.067322,0.045258,-0.035065,0.016479,-0.022675,0.033691,-0.002026,-0.064331,0.077209,-0.001928,-0.022659,0.047119,-0.022598,0.015289,0.043304,0.003857,0.016876,0.001384,0.001781,0.080627,-0.018616,-0.061005,-0.021271,0.029144,-0.045776,0.030304,-0.018204,-0.010857,0.029831,-0.052246,-0.027084,0.017578,0.024673,-0.028168,-0.021088,-0.039917,0.034943,0.001775,-0.018875,0.008362,0.009102,-0.002056,0.016830,-0.015068,0.026031,0.001451,0.011917,0.048981,0.000618,0.015472,0.013260,-0.026993,-0.006954,-0.033234,0.020264,-0.005768,-0.037262,-0.058594,0.034088,-0.017426,0.020615,-0.032928,-0.034943,-0.044861,-0.001494,0.000974,-0.040955,-0.005943,0.026550,-0.077576,-0.011230,-0.046204,-0.058044,-0.083740,-0.023880,0.032776,-0.002007,0.044464,-0.034882,0.018097,0.000908,-0.035187,0.030350,0.021149,-0.019592,-0.023132,-0.036285,-0.036743,0.064148,-0.014503,0.008087,0.010269,-0.030304,0.018188,0.027374,-0.023590,-0.008812,0.000974,-0.012184,-0.026108,-0.027176,-0.003164,-0.040710,0.066223,0.030502,0.002485,-0.006268,0.023727,0.010300,0.030884,0.005005,0.035461,0.043488,-0.023636,0.023438,0.000641,-0.049866,-0.004757,0.008125,-0.018250,0.019638,0.035339,-0.033478,-0.008110,0.007957,0.033264,0.015701,-0.025787,-0.022156,0.003387,-0.022171,0.006256,0.024902,0.023056,-0.038696,0.044098,0.000247,-0.046295,-0.012276,-0.007019,-0.041168,-0.037903,0.040131,-0.031311,0.012314,0.004105,-0.002178,-0.027435,-0.035736,0.034668,-0.049194,0.021194,0.043884,0.024460,0.042816,0.037628,0.030045,0.009659,-0.016663,0.008675,-0.031494,0.014961,-0.032562,0.000387,0.012032,0.013611,0.017776,0.015427,-0.016953,-0.032745,-0.004303,0.015060,-0.023911,-0.017273,0.056152,-0.087891,0.031555,0.029724,-0.005493,0.020844,0.018692,-0.034058,-0.006561,-0.065430,-0.038025,0.028671,-0.019257,0.040131,0.019119,0.002100,-0.017441,0.004749,0.003553,0.005428,-0.070068,0.015083,0.006313,-0.041870,-0.044678,-0.001166,0.027313,-0.013863,0.030502,0.006985,0.008446,-0.028000,-0.027222,0.000671,0.005810,0.018738,-0.026016,-0.014801,0.012680,0.023392,-0.045715,-0.022736,-0.013161,0.016663,-0.088562,-0.022537,-0.029205,-0.006794,0.007008,-0.002497,0.010727,-0.002197,0.013275,0.014305,-0.007828,0.020248,-0.014099,-0.017624,-0.046173,0.062866,0.031082,-0.015465,0.037445,0.001263,0.054260,-0.001478,-0.027664,0.000706,-0.024185,-0.019638,0.007980,0.010300,0.004189,0.020752,-0.004593,0.034943,0.022644,0.028351,-0.005604,0.019104,0.029099,0.014687,-0.009521,0.034729,-0.037048,-0.046204,0.000087,-0.023651,-0.013115,-0.029465,0.006065,-0.053223,-0.013550,-0.002371,-0.004105,-0.024902,-0.011856,-0.031311,-0.029373,-0.022110,0.018631,-0.057678,-0.030548,-0.029541,0.008659,0.053467,-0.027283,0.052551,0.006474,-0.052307,0.034241,0.005798,0.049164,-0.028427,-0.003750,-0.004932,-0.030655,0.002394,0.019058,0.042938,0.004211,0.020203,0.042908,-0.014328,0.046417,-0.017044,-0.067566,0.008026,-0.004463,-0.028214,-0.007996,-0.021194,-0.047546,0.027451,0.021301,-0.008766,0.012207,0.058807,0.001657,0.043427,0.020462,0.006828,-0.041779,-0.046112,0.077759,0.000485,-0.025085,0.046448,0.018295,0.002808,-0.021881,-0.009659,-0.016159,0.003901,0.013588,-0.007061,-0.073730,-0.008408,0.021042,-0.017792,0.052582,-0.004448,-0.000964,0.019440,0.025803,0.020523,-0.019882,-0.036865,0.009735,0.008804,-0.001637,0.005009,-0.004921,-0.003338,-0.012207,0.014336,0.025253,-0.055695,0.027100,-0.043854,0.006306,-0.045135,-0.031281,0.006809,0.000842,-0.000140,-0.029373,0.018097,-0.000217,0.043549,-0.002941,0.058380,0.039886,-0.022339,-0.026917,-0.006279,0.011574,0.008102,0.055511,0.006161,0.012924,0.000971,0.040985,0.018188,0.031769,-0.029648,0.010490,0.027527,0.008682,-0.006233,0.019241,0.057312,0.185425,0.016495,0.027039,-0.032745,0.002304,-0.001287,0.010704,0.055969,-0.010155,-0.012024,-0.039764,0.000772,-0.009583,-0.041321,0.013718,0.002947,-0.006023,0.002583,-0.013977,0.041016,-0.018539,-0.010445,0.016357,-0.041107,-0.021408,-0.000518,-0.006416,-0.016907,-0.003744,-0.054199,0.014618,-0.005871,0.029251,0.037323,0.027847,-0.038666,-0.013588,0.010185,0.001576,-0.006012,-0.021378,0.000162,-0.053650,0.023361,-0.034576,0.010963,-0.049072,-0.071045,0.019638,-0.018814,0.014893,-0.034607,0.013885,0.002842,0.008034,-0.013100,-0.029099,-0.000630,0.027283,-0.022720,-0.001162,0.035919,-0.015884,0.008774,-0.023682,0.010910,-0.004459,0.021393,0.001811,0.009422,-0.008209,0.015106,-0.021805,-0.001293,-0.014168,-0.028107,-0.000062,0.003553,0.000165,0.011856,0.040253,-0.012100,-0.043030,-0.041901,-0.027802,-0.013596,0.024979,-0.006111,0.081970,0.042023,0.023834,0.008621,-0.013657,0.011009,0.017212,0.001431,0.013039,0.013809,-0.007835,-0.028488,-0.013901,-0.046936,-0.028793,-0.018143,0.007965,-0.018784,-0.014847,-0.002958,0.014755,-0.023712,0.026062,-0.026108,0.024536,0.004765,-0.001053,0.015198,-0.043488,0.000089,-0.006374,-0.022247,-0.032196,-0.038025,-0.009483,-0.024155,-0.006603,0.039185,-0.008247,-0.039673,-0.015839,0.019592,0.005856,-0.018829,-0.033325,0.001536,0.006485,0.018158,0.045959,-0.039764,0.003670,0.036011,-0.002939,0.004223,0.012299,0.022415,-0.054871,0.020691,-0.047119,0.007713,0.041809,0.001054,-0.020889,0.002193,-0.002834,-0.016693,-0.055908,-0.023102,-0.019363,0.025787,0.005898,0.036011,0.007206,-0.022263,0.042053,0.017578,0.009636,0.017578,-0.026657,0.033966,-0.035339,-0.006279,-0.049164,-0.019348,0.023773,0.009979,0.032349,-0.030136,0.005833,-0.004932,0.010658,0.010483,-0.017105,0.039398,-0.026642,0.026596,-0.009300,-0.079712,0.025024,0.013214,-0.018051,-0.026291,-0.040619,-0.008965,-0.009247,-0.003729,-0.000641,-0.027145,0.016724,-0.048828,0.041992,0.012589,0.023666,0.014481,0.028885,-0.012390,-0.003359,0.015137,0.030457,0.038696,-0.042267,0.062256,0.016754,0.026520,-0.003759,0.002556,-0.007011,0.007153,-0.021027,-0.028397,0.007545,-0.035797,-0.029449,-0.051056,-0.003637,-0.017715,-0.005844,0.038483,0.034149,-0.000885,-0.027176,0.050262,0.017090,-0.031494,0.043304,-0.001900,0.043732,0.045044,0.043549,-0.015610,0.000813,-0.021530,0.007851,-0.003693,0.039642,-0.012939,0.019928,0.020599,-0.012444,-0.031982,0.023682,0.032471,-0.003933,-0.021698,-0.009346,-0.003593,-0.007771,0.030258,-0.041504,-0.033905,-0.040649,0.010391,0.021469,0.003119,0.024445,-0.019608,0.019608,0.004597,0.007813,0.023727,-0.017242,0.026337,-0.003588,-0.017258,-0.001529,-0.008606,-0.037750,-0.021881,0.025070,0.004177,0.023880,-0.009796,0.025253,-0.023773,-0.000690,0.036255,0.009132,-0.002714,-0.015129,0.017395,-0.013008,0.011787,0.038025,-0.027954,-0.015541,-0.000629,-0.019196,0.001216,0.003038,-0.026062,0.009491,0.000246,-0.006817,-0.028580,-0.004093,0.021042,0.002451,-0.010017,-0.003000,-0.016800,0.016800,0.018478,0.031982,0.013115,0.045410,0.009651,-0.028030,-0.011597,0.010963,0.014412,-0.016479,-0.007469,0.002899,-0.008774,0.010155,0.017044,0.024002,-0.004444,0.031342,-0.012276,0.002878,0.001393,-0.019653,0.002293,0.029816,-0.029785,0.017853,0.031677,-0.050446,-0.009346,0.036682,-0.031250,-0.007233,0.032562,0.025024,0.020966,-0.023346,0.005692,0.022232,0.001819,-0.009750,-0.014938,0.012970,-0.040222,-0.022461,0.015869,0.026184,0.045349,0.023788,0.011765,-0.024109,-0.000702,0.018066,-0.012703,-0.029449,-0.004566,0.026230,-0.005207,0.005966,-0.011559,-0.016037,0.044189,-0.018723,-0.011383,0.015068,0.007721,0.038422,0.025665,0.024307,-0.006615,-0.029785,-0.005268,-0.002106,0.039764,-0.030228,0.011139,-0.007748,0.043030,-0.004776,0.039429,-0.003002,-0.039856,-0.002127,-0.012581,0.025024,-0.006123,0.003637,-0.012154,-0.005882,-0.024185,-0.003952,-0.029831,-0.009712,-0.001342,-0.001288,0.028473,-0.016174,-0.021225,-0.026810,-0.000873,-0.015839,-0.003622,-0.039886,0.021881,0.009941,0.012878,0.007153,-0.050446,-0.016998,-0.033325,-0.009651,0.008751,-0.011856,-0.035553,0.034943,0.004906,-0.004093,0.038086,-0.054382,-0.002132,-0.007942,0.029831,0.000658,-0.021149,0.010910,-0.005058,0.018738,0.010414,-0.036285,-0.001735,0.038361,0.008713,0.005943,-0.014084,0.013100,0.039429,-0.074402,0.035248,0.017761,0.008209,-0.018768,0.008118,-0.023956,-0.026993,0.005318,0.022995,0.005714,0.013405,0.048523,0.025085,0.027939,0.012138,-0.016510,0.040405,-0.034454,0.005878,0.004860,-0.005558,-0.003796,0.009232,0.003727,-0.023285,0.039490,0.020523,-0.032654,0.039703,-0.027771,-0.014023,0.039154,0.026382,0.006741,0.012154,0.039703,0.000176,0.015488,-0.027405,-0.015228,-0.013405,0.033447,0.031494,0.016998,0.009399,0.001942,0.001738,-0.007198,0.011169,0.021423,0.031738,0.017624,-0.001426,0.008110,-0.007252,0.004261,0.001869,0.027405,0.027039,0.000113,0.026108,0.017685,0.017410,-0.045654,-0.006683,0.014061,-0.030807,-0.105652,-0.002256,0.014580,0.027084,-0.014221,-0.006104,0.008308,0.008926,0.023865,0.050415,0.017242,-0.019653,0.051147,0.014336,-0.023148,-0.010262,-0.045624,-0.006977,0.004803,0.003605,0.010063,-0.027679,-0.013878,-0.048553,0.016281,-0.021606,0.012611,0.023712,0.007599,0.023880,-0.032654,0.025208,0.010803,-0.025452,-0.010559,-0.026611,0.008331,0.017868,-0.010910,-0.017990,-0.003834,-0.000816,-0.008011,0.020340,0.005714,-0.010826,0.008591,0.009842,0.029877,0.001567,0.011673,0.004429,-0.004681,-0.044403,0.038269,-0.020248,-0.004116,0.009239,-0.004997,0.010971,-0.034149,0.056213,0.020935,-0.019409,0.018173,-0.020554,-0.011841,0.007442,-0.038330,-0.046967,0.051605,0.001888,-0.017624,-0.003376,-0.003727,0.000591,0.032013,0.040649,-0.018326,-0.006748,0.011833,0.017395,0.030945,-0.021057,-0.004696,0.022415,-0.008804,0.001120,0.004646,-0.015717,0.028656,0.028656,-0.003269,0.005703,0.008125,-0.032562,0.019669,0.013321,0.011467,-0.005772,0.013435,-0.004272,0.014015,0.020630,0.003532,0.005783,-0.011063,-0.008278,-0.039917,-0.017502,-0.027588,-0.009125,-0.014931,0.007927,0.049255,0.039032,-0.024811,0.040314,-0.004269,0.024307,-0.019836,0.023117,0.000666,-0.016510,-0.015930,-0.013809,-0.030533,-0.005360,0.023636,-0.022202,-0.004303,0.003500,0.021423,0.045197,-0.008186,0.012428,0.003578,0.045044,-0.002119,0.004753,-0.015465,-0.016754,0.033112,-0.036499,-0.038208,-0.004166,0.004032,-0.013817,0.023438,0.009903,0.041107,0.001746,-0.026428,-0.003521,0.033295,0.000748,0.020370,0.006340,-0.031433,-0.017532,-0.023438,0.018509,0.021393,0.010162,-0.007610,0.013367,0.008423,-0.012993,-0.000534,0.010651,0.039856,0.007744,0.023834,-0.014603,-0.000539,-0.000569,-0.029327,0.006603,-0.020752,0.050323,0.007458,-0.009521,-0.014481,-0.026733,-0.011620,0.009987,0.006794,-0.007107,0.047363,-0.000283,-0.044373,-0.013748,-0.022552,-0.015129,-0.029739,-0.003998,-0.027328,-0.024094,0.048401,-0.033020,-0.000872,0.010132,-0.010750,-0.013229,-0.002382,0.002010,0.001390,0.003092,0.013794,-0.029541,0.002789,-0.016708,0.002245,-0.008476,0.003086,0.009911,0.013184,-0.016296,0.002193,0.001736,-0.050873,-0.006474,-0.012337,-0.036865,0.004513,0.010109,-0.009315,-0.003548,0.003983,0.000785,0.018478,0.005150,-0.009651,-0.014961,-0.006233,0.016235,-0.017868,0.035156,0.016937,-0.019058,0.017624,-0.011391,0.017181,-0.019745,-0.000325,0.002361,-0.006203,-0.020844,-0.020798,0.017517,0.037628,0.029282,-0.009102,0.008804,-0.004082,0.005573,-0.035370,-0.013229,0.002787,0.006268,-0.012604,-0.026276,-0.003029,-0.018005,0.004436,-0.016296,0.036591,-0.020981,0.014244,-0.003681,0.029999,0.019287,0.024643,0.002806,-0.024063,0.006546,0.040955,0.048737,0.015266,0.007286,0.039185,0.023819,-0.007702,0.011276,-0.022812,0.020981,0.001528,-0.020309,0.023697,0.012749,-0.003506,-0.011116,0.001509,0.059021,-0.003513,0.005672,0.010910,-0.006882,-0.005478,-0.004524,-0.021179,0.004303,0.008781,-0.001881,0.028305,0.008499,-0.002106,0.006557,-0.001145,0.011978,0.019257,0.019943,0.006832,-0.009697,0.005295,-0.052399,-0.012512,0.012825,0.020584,-0.033356,-0.033142,-0.005592,0.020218,-0.018921,-0.017380,0.015266,0.000329,-0.033173,-0.022842,-0.011368,0.010979,0.022400,0.013725,0.004826,-0.023880,0.012627,-0.023361,-0.021973,0.004673,-0.005783,0.007725,-0.013100,0.009323,-0.004280,0.026108,-0.031403,0.003363,0.002550,-0.033875,0.027802,-0.015778,0.021591,0.008018,0.002613,-0.013008,-0.033783,0.015312,-0.007568,-0.000624,-0.002041,0.011414,0.011086,-0.050262,-0.006256,0.026276,0.003933,0.026184,0.016830,0.000268,-0.011383,-0.002779,0.008270,-0.008934,-0.027084,-0.000294,0.021713,0.027939,-0.010780,-0.021469,-0.022339,0.011124,-0.042816,-0.026520,0.005764,-0.017746,-0.015945,-0.006077,0.009987,-0.020050,0.025650,-0.020203,0.009193,0.000937,-0.034088,0.007351,-0.001308,0.019104,-0.027863,-0.009521,-0.025940,0.004044,-0.011406,0.055237,-0.012535,-0.010857,-0.029785,0.008209,-0.020508,0.009369,0.026077,0.032471,-0.027008,0.003963,-0.015297,0.012428,0.002439,-0.020493,0.020828,-0.011398,0.014755,-0.001023,-0.019989,0.019852,-0.020554,0.000426,0.009689,-0.015564,-0.003801,0.005291,0.016479,0.005520,0.026520,-0.014259,-0.037109,0.018082,0.021805,0.004250,0.008179,-0.004150,0.014435,0.048981,-0.001594,0.018616,0.024200,-0.008301,0.006504,-0.032898,0.011940,0.032410,-0.010590,-0.018723,-0.009209,0.015495,-0.001997,0.019684,-0.013184,-0.001648,-0.011703,-0.004719,-0.031586,0.052673,0.017319,0.005676,-0.010010,-0.013100,0.020447,0.001626,-0.003513,0.015160,0.034698,0.009781,0.026474,0.004894,-0.011757,0.036530,-0.008865,-0.012939,-0.007530,0.010307,0.010773,0.015579,0.020493,0.016235,-0.027908,-0.016098,0.022186,0.006775,-0.014954,0.009071,0.022141,-0.004536,-0.014221,-0.013283,0.030624,0.017059,-0.000717,-0.004478,0.040253,-0.018478,0.011421,0.003376,-0.007263,-0.017151,0.005695,0.056396,0.019302,-0.005283,0.024200,0.010910,-0.001229,0.002867,0.014458,0.006248,0.006474,0.003813,-0.014061,0.001963,-0.034454,-0.028656,-0.006023,-0.016739,-0.012604,0.019669,0.022568,0.040619,0.011536,0.013351,0.021851,-0.043579,-0.026123,-0.005619,-0.021317,0.011040,-0.007530,0.017120,0.038330,-0.000243,-0.030029,0.036255]'::vector, $sem$openai/text-embedding-3-small$sem$
+  from public.catalog_materials m
+ where m.slug = $sem$exemplo-portabilidade-de-carencias$sem$ and m.version = 1
+   and not exists (
+     select 1 from public.catalog_chunks c
+      where c.catalog_material_id = m.id and c.position = 0
+   );
+insert into public.catalog_chunks
+  (catalog_material_id, position, content, content_hash, token_count, embedding, embedding_model)
+select m.id, 0, $sem$Segunda via de boleto — orientação geral
+
+A segunda via do boleto costuma ser obtida pelo aplicativo ou pelo portal do beneficiário, na área financeira, e também pela central de atendimento da operadora. O caminho exato, os canais disponíveis e o prazo de compensação variam por operadora. Boleto vencido pode exigir emissão de nova data, com atualização de valor.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$, md5($sem$Segunda via de boleto — orientação geral
+
+A segunda via do boleto costuma ser obtida pelo aplicativo ou pelo portal do beneficiário, na área financeira, e também pela central de atendimento da operadora. O caminho exato, os canais disponíveis e o prazo de compensação variam por operadora. Boleto vencido pode exigir emissão de nova data, com atualização de valor.
+
+Este é um material de EXEMPLO que acompanha a instalação, para demonstrar como o conhecimento por operadora funciona. Substitua-o pelo procedimento real da sua operadora antes de usar em atendimento.$sem$), 142,
+       '[-0.000970,0.008087,0.001600,0.008926,-0.010941,0.006451,0.011948,-0.022507,-0.008125,0.015137,0.025482,0.008926,-0.027512,-0.036682,-0.001984,-0.007103,-0.008476,0.051331,-0.039215,0.024765,-0.002638,0.002317,0.031860,0.014259,-0.025070,-0.036499,-0.038940,-0.009125,0.022842,-0.028015,-0.009964,-0.009926,-0.004395,-0.014969,-0.017899,0.052094,0.009750,0.003735,0.044220,0.002476,-0.010529,0.003265,-0.012009,0.014137,0.018234,0.040497,-0.009323,-0.000164,-0.004368,-0.008568,0.022903,-0.011543,0.008904,0.016617,-0.022797,-0.006603,0.026352,-0.000977,0.035645,-0.032288,-0.015823,0.009720,-0.043793,-0.025391,0.012520,0.035736,-0.032990,0.032013,-0.047394,-0.007175,-0.004715,0.045807,0.019684,0.009033,0.029724,-0.022644,0.054321,0.016998,0.044006,-0.004581,-0.027420,-0.046417,-0.060913,0.062744,-0.014061,0.008621,-0.072571,-0.006611,-0.019394,0.000957,-0.043060,0.017929,-0.025604,0.031082,0.012062,0.062317,-0.070557,-0.087708,0.007107,-0.006882,-0.006100,-0.020309,0.055054,-0.004406,0.026138,-0.010590,-0.005428,0.038971,-0.004013,-0.046600,0.049286,-0.001740,-0.005444,0.012726,0.082520,0.019333,0.084900,0.016830,0.039734,-0.055603,-0.019806,-0.035706,-0.013596,-0.014992,-0.005215,-0.001993,-0.040710,0.021027,-0.011284,0.017670,-0.013100,0.010590,-0.001974,-0.014130,-0.037537,0.058380,-0.008736,0.027481,0.032959,0.013367,-0.017502,-0.007843,0.021988,-0.007172,-0.020966,0.024963,-0.007935,-0.000071,-0.006004,0.004143,-0.024490,-0.004795,0.003754,0.019318,-0.045044,0.000464,-0.048218,0.023209,-0.020401,0.005535,-0.035950,-0.033722,-0.009949,0.025589,-0.047272,-0.038513,-0.005905,-0.028488,-0.059448,0.004688,-0.004017,0.029800,-0.036682,-0.055542,-0.007210,-0.001397,0.033691,-0.035309,0.003176,-0.007801,-0.043091,-0.028412,0.046539,-0.017914,0.011528,-0.007317,-0.017151,0.018875,-0.033203,0.024902,0.008736,-0.057800,0.026260,0.005524,-0.034454,0.014488,-0.018509,-0.035553,-0.032257,-0.013649,0.027893,-0.041382,0.040802,0.021179,-0.004505,0.006577,-0.021118,-0.007710,0.069153,-0.012077,0.035095,-0.012741,-0.021545,-0.014771,-0.029434,0.029343,-0.008141,0.009003,-0.006931,-0.011917,0.051849,-0.000144,-0.022003,0.006611,0.034485,0.032227,0.010445,-0.010506,-0.015823,-0.049194,0.021347,0.031204,0.048950,-0.038757,0.047821,-0.008896,-0.039093,0.015617,0.002903,-0.031616,0.021576,0.030075,-0.000599,0.050903,-0.011681,0.008446,-0.014961,-0.043701,0.054108,0.000340,0.073730,0.042603,0.012146,0.031372,0.024231,-0.035919,0.020142,0.027893,0.029282,-0.038086,0.038025,-0.032776,-0.025269,0.001541,0.015457,0.027100,0.004353,0.008041,-0.018585,0.009552,-0.020401,0.014557,0.017563,0.053436,-0.057800,0.021164,0.009483,0.010796,0.022476,0.032867,0.005684,0.013519,-0.069153,-0.045776,0.008446,0.010124,-0.038391,-0.004349,0.050293,0.016541,0.017212,0.031494,-0.034088,-0.053528,0.016785,-0.033661,0.050079,-0.043152,-0.003687,-0.005577,-0.008568,-0.021072,-0.010124,0.014008,-0.032867,-0.047302,-0.010849,0.070129,0.033875,-0.062866,-0.032104,-0.003096,0.003122,-0.012863,0.039490,-0.025970,0.010643,-0.045776,-0.053314,-0.085754,0.012688,0.032349,0.013542,0.022781,0.037445,-0.015602,-0.026627,0.016968,0.016068,-0.026154,0.010292,-0.011658,0.008102,0.031281,-0.060150,0.063171,0.019333,0.003874,0.002251,-0.002031,-0.058380,-0.046661,0.010155,-0.038177,-0.069946,-0.021240,0.001613,-0.018768,0.025833,0.056641,-0.024857,-0.027008,0.023483,-0.024689,0.016647,0.039734,0.042786,-0.011253,0.000325,-0.004448,-0.038269,-0.007427,0.020142,0.040710,0.022034,0.016785,0.001166,-0.027664,-0.030762,-0.005238,-0.036560,0.000607,-0.035645,0.047668,-0.035858,-0.060272,0.005939,0.022110,-0.006535,-0.008324,0.016113,-0.020111,-0.060028,0.012085,0.037750,0.048004,-0.040863,0.018967,0.054382,0.020691,0.006229,0.032379,0.009308,-0.018097,0.053162,-0.004166,-0.052673,0.036865,0.000850,-0.046112,0.048981,-0.032745,0.003420,0.021469,-0.020111,-0.037506,0.034302,0.029022,0.027954,0.018021,-0.015671,0.000446,0.033783,-0.005829,-0.007641,-0.010353,-0.003757,0.065735,0.001959,0.009003,-0.000915,0.034210,-0.020294,-0.020325,-0.028595,-0.049835,-0.058533,0.012321,-0.041656,-0.046722,-0.009933,0.016968,-0.019547,-0.036682,-0.066589,-0.020004,0.003906,0.001063,0.037659,-0.043793,-0.050659,0.010895,-0.008804,0.001116,0.005302,0.022476,0.015121,-0.023361,0.042450,0.000078,-0.040375,0.022797,-0.019958,0.030670,-0.038452,-0.029388,-0.011703,-0.017288,-0.008163,-0.013649,-0.012238,-0.032562,0.033081,-0.011818,0.016190,0.074036,-0.056030,0.025085,0.005508,0.035797,0.008125,0.028946,0.039185,-0.025085,-0.019791,0.038361,-0.023254,0.013580,-0.045868,0.052734,0.007370,0.010300,-0.044647,0.012115,0.020004,0.114990,0.001130,0.005447,-0.038727,-0.053864,0.003498,0.014793,0.057739,-0.006428,-0.023636,-0.011612,0.002314,-0.044922,-0.005493,-0.010414,0.009514,0.080017,-0.034363,-0.036011,0.055328,-0.005459,0.006828,0.014526,0.007851,-0.004017,-0.002357,0.007290,0.007263,0.006416,-0.076843,0.019028,0.009468,0.013100,0.019623,0.024750,-0.035980,0.008446,0.025391,-0.007980,-0.001924,-0.000400,-0.009857,-0.053894,-0.014160,-0.010612,0.029282,-0.041290,-0.033508,0.023682,0.031921,0.025620,0.012192,0.020569,0.001630,-0.013580,-0.010628,-0.023407,0.010323,0.045074,-0.023834,-0.017548,-0.036011,-0.005508,0.017105,0.024399,0.033203,-0.018478,0.026474,0.023758,-0.047058,-0.002254,-0.002666,0.000619,0.037415,-0.006668,0.001773,-0.016174,-0.005230,-0.001487,0.034515,0.017120,-0.027405,-0.036011,-0.048431,0.014801,-0.019669,0.009048,0.001219,0.065857,0.001841,0.019623,-0.023849,-0.016678,-0.042725,0.003342,0.001451,-0.011154,0.007065,-0.003759,-0.010139,0.009109,0.029709,-0.021805,0.003675,0.017670,0.002430,-0.037750,-0.009521,0.000249,-0.005699,-0.007717,0.016174,0.032440,0.020828,0.010475,-0.022644,-0.013939,0.004135,0.004555,0.032501,0.019821,-0.003479,-0.000387,-0.011902,0.012993,0.016403,-0.000194,0.012383,0.004944,0.014557,0.028687,0.002817,-0.005112,-0.012161,0.030380,0.014824,0.031235,0.030487,-0.013153,0.045746,-0.013474,0.000779,-0.006779,-0.006496,-0.028580,-0.026550,0.003956,0.023209,0.042938,0.003187,-0.003881,-0.002056,-0.000049,0.011185,-0.069824,-0.029816,-0.011017,0.011162,-0.000096,-0.032532,-0.008133,0.016006,0.010887,0.009933,0.002930,-0.027832,-0.005241,0.009323,-0.036530,-0.006584,-0.003321,-0.015465,-0.006504,0.023422,0.015434,-0.017258,0.005978,-0.013786,0.024582,-0.028305,0.022293,0.020752,-0.036804,0.002186,-0.028625,-0.084900,0.020477,0.012726,0.019928,-0.017242,0.011597,-0.031189,-0.052307,0.011948,-0.005589,-0.033325,-0.031204,-0.008591,0.020142,0.015457,0.042480,0.013229,-0.027985,-0.016708,0.004837,0.020264,0.041168,0.051025,0.008713,0.016434,-0.021194,0.021240,0.015976,-0.023163,-0.018112,0.013123,0.008553,0.009811,-0.004860,-0.028595,0.012253,-0.003813,0.010544,0.019562,-0.010025,0.017746,0.015175,-0.006615,-0.003614,-0.010986,0.026245,-0.011848,0.000938,-0.002876,-0.007240,0.039825,0.058807,-0.003767,-0.024368,-0.000719,0.014458,-0.029694,0.021362,-0.015007,0.020416,-0.005550,-0.007111,0.002344,0.001740,0.035004,0.017792,-0.042572,0.010452,0.014954,-0.020203,-0.004063,-0.015121,-0.054108,-0.026138,0.022049,0.013046,-0.009598,-0.026825,-0.032104,0.000633,0.034393,0.005539,0.019577,0.014320,0.039612,0.004196,0.001829,-0.001317,0.005932,-0.012321,0.015686,0.010612,0.000311,0.017105,-0.017929,0.003141,-0.022522,0.028168,0.030655,0.003222,-0.009018,0.004581,0.023788,0.006390,0.023315,0.023621,0.002573,-0.025116,-0.007244,-0.000644,0.001119,-0.006947,-0.014381,0.002504,0.011505,-0.000123,-0.031082,-0.007397,-0.013626,-0.003578,-0.009140,-0.021866,-0.040619,0.000260,0.026474,0.030838,0.003206,0.054199,-0.008842,-0.017273,-0.020279,-0.013397,-0.005962,0.014153,0.026306,-0.012459,-0.007813,0.014236,-0.013847,-0.026901,-0.005932,0.042786,-0.016418,0.032654,0.033997,0.008316,-0.014725,0.002531,-0.039886,-0.010201,0.059021,-0.032257,-0.031616,0.052521,0.018875,0.010994,-0.010857,-0.011734,0.007454,-0.006073,-0.012054,0.012238,0.009201,-0.012321,-0.016251,0.002602,-0.014290,0.012108,-0.001514,0.007404,0.045349,0.008324,0.038361,0.002346,-0.030930,0.028534,-0.043732,0.008301,-0.015221,0.007229,-0.030350,-0.036163,-0.027481,-0.005520,0.023331,-0.018112,-0.018250,0.047150,-0.016464,-0.018341,0.008820,0.005127,0.010185,-0.029541,0.006134,-0.016708,0.013451,-0.019455,0.013412,0.016113,0.025864,0.048035,0.005722,0.015137,0.024124,0.026291,-0.020935,0.007229,-0.020477,-0.005360,0.017014,-0.011497,-0.021393,0.013046,0.009804,-0.009064,0.014488,0.002035,0.001912,-0.019470,0.004051,0.008598,0.005566,-0.050659,-0.037537,-0.013794,0.038086,0.041107,0.021866,0.000602,0.008026,0.020020,-0.045502,-0.015793,-0.009773,0.016373,-0.026932,-0.002840,0.050690,0.007561,0.015686,-0.036926,0.041931,0.005760,0.031372,0.022156,-0.019958,0.000328,0.006123,-0.023407,0.012703,-0.016891,-0.007595,0.008430,-0.031433,-0.016388,0.008957,-0.044159,0.033630,-0.019928,0.031830,0.006374,0.001197,-0.040253,-0.007332,0.010414,0.001803,-0.017578,-0.012886,-0.015945,0.032471,0.040375,0.024078,0.039612,-0.012749,-0.017883,0.039917,-0.004009,-0.010437,0.022629,0.031036,0.011490,-0.028152,-0.010559,-0.011581,0.026840,0.015472,-0.038727,0.020355,-0.001121,-0.045135,0.006016,-0.008911,-0.011551,0.034637,0.029236,-0.035156,-0.012566,-0.009499,0.022400,-0.003700,0.020432,-0.011864,0.005112,-0.000554,0.008354,-0.007481,-0.018051,0.012093,0.013176,0.021301,0.004456,0.011978,-0.014374,0.021500,-0.004810,-0.016068,-0.010239,0.045593,-0.023254,0.020508,0.008438,0.037781,-0.020645,-0.007118,-0.008659,-0.027634,-0.083496,-0.034943,0.032776,0.029724,0.003582,0.007065,-0.020309,0.015495,-0.013817,0.029053,-0.000597,0.042084,-0.004826,0.019760,-0.017853,-0.028549,-0.045258,-0.016113,0.002031,0.029831,-0.011635,-0.022720,0.004929,0.004520,0.003729,-0.015358,0.030457,-0.001302,0.004543,0.027939,0.015747,0.022507,-0.012589,-0.033661,-0.013359,0.005661,-0.003283,-0.001018,0.033325,-0.022476,-0.007732,0.044281,0.000300,0.016953,0.008553,-0.005123,0.018158,0.026459,0.018890,0.003979,0.006630,-0.016190,0.006813,-0.018143,0.031647,-0.000390,-0.021271,-0.014854,-0.012146,0.008881,-0.003481,0.042267,0.020691,0.009911,-0.020035,0.004436,-0.025024,0.008278,-0.021286,-0.012741,0.014076,-0.022034,-0.049500,0.004589,-0.020660,-0.025711,0.012169,0.029266,-0.013412,-0.018768,0.046173,0.010056,0.011391,-0.037140,-0.018723,-0.015388,0.027985,-0.017426,0.010918,-0.018997,0.053772,0.018860,0.004601,0.034058,0.008675,0.015015,0.016846,0.012024,-0.022583,-0.005909,0.005276,0.027359,0.038300,0.015778,-0.010361,0.006443,0.037384,-0.006866,-0.005554,-0.035767,-0.005302,-0.024643,-0.049377,0.015762,0.022797,0.013046,0.006268,0.021439,0.019180,-0.014801,0.009666,-0.030029,-0.021439,0.013977,-0.009666,-0.049316,-0.025696,-0.007858,-0.016068,0.008446,0.006786,0.001869,-0.003096,0.017960,-0.038696,-0.016861,0.001339,0.023407,0.003786,0.008034,0.028839,-0.005074,0.022781,-0.049286,0.007782,-0.000466,0.031250,0.031952,0.000398,-0.007980,0.033295,-0.025375,0.026016,-0.011742,0.020981,0.012054,0.031677,0.038300,-0.031052,0.047241,0.002657,0.011703,0.019806,0.013184,0.025177,0.028702,0.025116,-0.002485,0.003082,-0.001644,-0.016602,-0.025833,0.019714,-0.008095,-0.019257,-0.012146,0.007545,0.024597,-0.001821,0.014984,-0.038910,-0.003881,0.000768,-0.019470,-0.055664,-0.008629,0.025146,-0.020508,0.032440,0.018127,-0.048889,0.013763,0.003187,0.004005,-0.027039,0.026474,0.014435,0.003208,0.018677,-0.018509,0.010788,0.017105,0.025223,0.000034,-0.037750,-0.022186,-0.001384,-0.017807,0.030807,-0.021393,-0.002407,-0.016495,-0.000916,0.003036,-0.000767,-0.008339,-0.016083,0.004814,-0.003740,-0.033264,-0.011559,0.010696,-0.015930,-0.026688,-0.030060,0.016357,-0.012749,-0.033142,-0.022903,0.018753,0.032104,0.042694,0.003288,0.002327,-0.026978,0.001821,-0.021835,-0.004875,-0.007118,-0.051758,0.034882,-0.008629,0.046753,0.006641,0.002850,-0.007801,-0.029007,-0.018829,-0.003462,-0.028976,-0.000810,0.006031,-0.016006,0.000558,-0.003592,-0.021469,-0.028702,-0.012436,0.008499,0.014984,0.012970,-0.030624,0.018890,-0.046661,-0.005455,-0.000710,0.034943,0.001025,0.014503,0.030273,-0.004116,-0.007576,0.002764,-0.015015,-0.011818,0.021103,0.001786,0.059967,0.004803,-0.005974,0.039215,0.041290,-0.016541,0.022141,0.001847,0.039276,-0.017471,-0.000438,0.016434,0.004932,-0.011818,-0.015900,-0.031342,0.020218,-0.032776,-0.025131,0.002733,-0.030731,0.004070,-0.013466,0.017151,0.016006,-0.000469,-0.006363,-0.016861,0.001295,-0.024612,-0.003050,-0.008949,-0.005360,0.021851,0.009407,-0.014954,0.017517,-0.031738,-0.039429,-0.000940,0.010895,-0.027740,-0.008072,-0.004082,-0.014587,-0.008560,0.060333,-0.018082,0.010353,0.017166,-0.022751,-0.014771,-0.009743,-0.002375,0.042877,-0.019241,0.013283,0.009483,0.041931,-0.061554,-0.013557,0.017044,0.008583,0.032318,-0.025238,0.016571,-0.008545,0.017319,-0.013542,-0.003628,0.002714,-0.034912,0.034271,-0.008080,0.001203,-0.023621,0.005852,-0.040771,-0.029022,-0.009880,-0.007442,0.047791,0.021423,-0.041534,-0.009445,0.002914,0.014671,0.033356,0.012848,0.035400,0.032043,-0.010002,0.008553,-0.001816,0.019302,0.020691,0.013397,0.006706,0.012169,0.031342,-0.010139,0.023270,-0.018402,0.015976,-0.044312,0.001194,0.057617,0.034821,-0.030441,-0.002361,0.013741,-0.001229,0.016571,0.013947,0.013718,-0.022308,0.002468,-0.009041,0.023895,-0.000019,0.003839,0.014107,0.007107,0.006344,0.010986,-0.000982,-0.017853,0.018753,-0.002050,-0.008507,0.020340,0.036377,0.000570,0.011200,-0.029053,0.006161,-0.022400,0.006557,0.003986,0.037781,0.011795,0.001921,0.042877,-0.012909,-0.040283,0.038788,0.003242,-0.001387,0.023163,-0.008987,-0.010345,0.045013,-0.000671,0.006458,-0.002071,-0.011322,-0.029770,0.018448,-0.009781,-0.018143,0.027786,-0.014153,0.044647,0.023041,0.006424,0.001360,-0.018036,-0.036255,0.021500,-0.032745,0.015038,-0.006512,-0.014328,0.022110,-0.030060,0.018326,-0.025803,0.003399,-0.016937,0.026901,-0.009239,-0.005394,0.007076,-0.015823,-0.035187,-0.007496,0.013390,0.005161,0.002018,-0.012062,-0.023575,0.018356,0.010414,-0.009651,0.010147,-0.005112,-0.008774,0.014824,0.010338,-0.035217,-0.018387,-0.045776,0.000917,-0.013359,0.012032,-0.022293,-0.025406,-0.007965,-0.015793,0.003040,-0.000351,-0.006748,0.029755,0.004753,-0.029938,0.031860,0.033783,-0.002880,0.031128,0.024017,0.015198,-0.015457,0.004608,-0.013237,-0.004871,-0.049438,0.038666,0.027512,-0.026230,0.002354,0.030838,0.032990,0.012703,-0.057922,0.012138,0.009659,-0.004108,-0.001430,-0.007454,-0.022369,-0.023590,-0.017624,-0.016403,-0.015961,-0.033234,0.042511,0.022629,0.012161,0.037903,0.012566,0.029648,-0.044434,0.004913,0.018906,-0.034332,0.021988,-0.018875,0.036285,0.005001,0.007030,-0.023468,0.018173]'::vector, $sem$openai/text-embedding-3-small$sem$
+  from public.catalog_materials m
+ where m.slug = $sem$exemplo-segunda-via-de-boleto$sem$ and m.version = 1
+   and not exists (
+     select 1 from public.catalog_chunks c
+      where c.catalog_material_id = m.id and c.position = 0
+   );
+
+-- Espelhos para TODA organização existente. É esta linha que faz escopo curado novo
+-- alcançar quem instalou há seis meses e roda o update.sh — sem ela a semeadura
+-- serviria só a instalação nova, e a atualização entregaria escopo que ninguém vê.
+select public.fn_sincronizar_escopos_do_catalogo(o.id) from public.organizations o;
+
+notify pgrst, 'reload schema';
+
+
+-- ---- divergência entre camadas, e o preterido que a busca passa a devolver (migration 0125) ----
+--
+-- FR-035 tem duas metades e só a do desempate existia. Ver o cabeçalho de
+-- supabase/migrations/20260808210000_0125_divergencia_de_conteudo.sql para o porquê de a
+-- função ter mudado de assinatura (o preterido é descartado DENTRO dela, e registrá-lo sem
+-- isso exigiria uma segunda busca vetorial por turno).
+
+-- ── 1 · onde a divergência mora ─────────────────────────────────────────────
+--
+-- Tenant-aware com RLS, como toda tabela que carrega dado de cliente. O par de materiais
+-- é FK dos dois lados (anti-pattern nº 1: nunca guardar nome de material como texto) —
+-- título e escopo são LIDOS por junção na hora de mostrar, nunca copiados para cá, que é
+-- a doutrina DIRC: Referenciar. Se o corretor renomear o material, a lista de divergências
+-- acompanha sozinha.
+create table if not exists public.knowledge_divergences (
+  id                uuid primary key default gen_random_uuid(),
+  organization_id   uuid not null references public.organizations(id) on delete cascade,
+
+  -- Quem venceu: material do PRÓPRIO corretor. Hoje o desempate só tem um sentido
+  -- possível (tenant sobre catálogo), e por isso não há coluna de camada: ela seria uma
+  -- constante gravada em toda linha (DIRC: Calcular). Se um dia houver outro sentido, a
+  -- coluna entra então, com dado real para preencher.
+  winner_source_id  uuid not null references public.ai_knowledge_sources(id) on delete cascade,
+  -- Quem foi silenciado: material curado do catálogo.
+  loser_material_id uuid not null references public.catalog_materials(id) on delete cascade,
+
+  -- O balde onde o desempate aconteceu, informativo. Nulo = o balde "vale para todos".
+  scope_id          uuid references public.knowledge_scopes(id) on delete set null,
+
+  -- Assunto pelo léxico FECHADO de assistência (`lib/agent-engine/guardrails/
+  -- lexico-assistencia.ts`), nunca o texto da pergunta. Mesmo contrato de PII da 0086
+  -- (`knowledge_searches`): telemetria de retenção longa não carrega conteúdo de conversa.
+  -- `''` = não classificado, e é valor legítimo — divergência sem assunto reconhecido
+  -- continua sendo divergência.
+  subject           text not null default '',
+
+  -- Uma linha por par-e-assunto, não uma por busca. Sem isto, um assunto perguntado cem
+  -- vezes por dia viraria cem linhas idênticas e a lista do corretor ficaria ilegível
+  -- justamente no caso que mais importa — o que mais se repete.
+  occurrences       integer not null default 1,
+  first_seen_at     timestamptz not null default now(),
+  last_seen_at      timestamptz not null default now(),
+
+  -- Preenchido quando o corretor declara a divergência tratada. Não apagamos a linha:
+  -- divergência resolvida que volta a aparecer é informação, e `delete` a perderia.
+  resolved_at       timestamptz
+);
+
+-- É este índice que torna o registro idempotente por turno. Todas as colunas da chave são
+-- `not null` de propósito: `null` não conflita em índice único, e uma delas nula
+-- devolveria o comportamento que o índice existe para impedir (uma linha nova por busca).
+create unique index if not exists knowledge_divergences_par_key
+  on public.knowledge_divergences (organization_id, winner_source_id, loser_material_id, subject);
+
+-- A leitura da tela: divergências abertas daquela organização, mais recentes primeiro.
+create index if not exists knowledge_divergences_org_aberta_idx
+  on public.knowledge_divergences (organization_id, last_seen_at desc)
+  where resolved_at is null;
+
+comment on table public.knowledge_divergences is
+  'Migration 0125 (spec 002, F4): a SEGUNDA metade de FR-035. Quando o material do tenant '
+  'vence o do catálogo no mesmo balde, os dois textos discordam sobre o mesmo assunto e um '
+  'está errado — o desempate silencia o perdedor, e sem este registro o corretor nunca '
+  'saberia. Uma linha por (par de materiais, assunto), com contagem; assunto pelo léxico '
+  'fechado, sem texto de conversa (mesmo contrato de PII da 0086).';
+
+alter table public.knowledge_divergences enable row level security;
+
+drop policy if exists tenant_isolation_knowledge_divergences_all on public.knowledge_divergences;
+create policy tenant_isolation_knowledge_divergences_all on public.knowledge_divergences
+  using ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin())
+  with check ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin());
+
+-- Mesma defesa em profundidade da 0086: a policy já devolve zero linha sem sessão, mas o
+-- grant que o default privilege do baseline concede a `anon` não tem razão de existir —
+-- esta tabela nunca é lida sem sessão. Idempotente: revogar o que não está lá é no-op.
+revoke all on public.knowledge_divergences from anon;
+
+-- ── 2 · a busca passa a poder devolver o preterido ──────────────────────────
+drop function if exists public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real);
+
+create or replace function public.fn_buscar_lastro(
+  p_agent_id            uuid,
+  p_scope_id            uuid,
+  p_embedding           public.vector,
+  p_k                   integer default 5,
+  p_threshold           real    default 0.40,
+  p_incluir_preteridos  boolean default false
+)
+returns table (
+  chunk_id               uuid,
+  layer                  text,
+  material_id            uuid,
+  content                text,
+  similarity             real,
+  source_ref             jsonb,
+  -- `true` = o desempate rejeitou este trecho. NUNCA ancora resposta (ver contrato no
+  -- cabeçalho). Só existe na saída quando `p_incluir_preteridos` é ligado.
+  preterido              boolean,
+  -- O material do tenant que o venceu, para o registro de divergência apontar os DOIS
+  -- lados. Nulo em linha não preterida.
+  preterido_por_material uuid
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  with agente as (
+    select a.organization_id, a.active_kb_version_id
+      from public.ai_agents a
+     where a.id = p_agent_id
+  ),
+  escopo_ativo as (
+    select ks.id as scope_id, ks.catalog_scope_id
+      from public.knowledge_scopes ks
+      join agente g on g.organization_id = ks.organization_id
+     where ks.id = p_scope_id
+       and ks.is_active
+  ),
+  -- Da 0124: a versão VIGENTE de cada material curado é a maior `version` não-inerte. É o
+  -- que faz a edição local vencer a semeada (FR-037).
+  material_vigente as (
+    select distinct on (cm.slug) cm.id, cm.slug, cm.title, cm.version,
+           cm.published_at, cm.valid_until
+      from public.catalog_materials cm
+     where not cm.inert
+     order by cm.slug, cm.version desc
+  ),
+  camada_tenant as (
+    select
+      c.id                                            as chunk_id,
+      'tenant'::text                                  as layer,
+      s.id                                            as material_id,
+      c.content                                       as content,
+      (1 - (c.embedding <=> p_embedding))::real       as similarity,
+      case when c.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',       'tenant',
+        'title',       s.name,
+        'scope',       ks.display_name,
+        'updated_at',  s.updated_at,
+        'source_type', s.source_type
+      )                                               as source_ref
+      from public.ai_chunks c
+      join agente g
+        on c.organization_id = g.organization_id
+       and c.kb_version_id   = g.active_kb_version_id
+      join public.ai_knowledge_sources s
+        on s.id = c.knowledge_source_id
+      left join public.knowledge_scopes ks
+        on ks.id = c.scope_id
+     where (s.valid_until is null or s.valid_until >= current_date)
+       and (c.applies_to_all or c.scope_id = (select scope_id from escopo_ativo))
+       and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  ),
+  camada_catalogo as (
+    select
+      cc.id                                           as chunk_id,
+      'catalog'::text                                 as layer,
+      cm.id                                           as material_id,
+      cc.content                                      as content,
+      (1 - (cc.embedding <=> p_embedding))::real      as similarity,
+      case when cc.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',         'catalog',
+        'title',         cm.title,
+        'scope',         cs.display_name,
+        'updated_at',    cm.published_at,
+        'material_slug', cm.slug,
+        'version',       cm.version
+      )                                               as source_ref
+      from public.catalog_chunks cc
+      join material_vigente cm
+        on cm.id = cc.catalog_material_id
+      left join public.catalog_scopes cs
+        on cs.id = cc.catalog_scope_id
+     where (cm.valid_until is null or cm.valid_until >= current_date)
+       and (cc.applies_to_all or cc.catalog_scope_id = (select catalog_scope_id from escopo_ativo))
+       and (1 - (cc.embedding <=> p_embedding)) >= p_threshold
+  ),
+  tudo as (
+    select * from camada_tenant
+    union all
+    select * from camada_catalogo
+  ),
+  -- Quem venceu cada balde: o trecho do tenant de maior similaridade ali dentro. É esse o
+  -- material que o corretor precisa comparar com o do catálogo — apontar qualquer outro
+  -- mandaria ele conferir o texto errado.
+  vencedor_por_balde as (
+    select distinct on (t.balde) t.balde, t.material_id
+      from tudo t
+     where t.layer = 'tenant'
+     order by t.balde, t.similarity desc
+  ),
+  marcado as (
+    select
+      t.*,
+      -- A NEGAÇÃO EXATA do predicado de precedência da 0123. Era
+      -- `where layer='tenant' or not exists (tenant no mesmo balde)`; virou coluna.
+      (t.layer = 'catalog'
+        and exists (select 1 from tudo x where x.layer = 'tenant' and x.balde = t.balde)
+      ) as preterido
+      from tudo t
+  ),
+  vencedoras as (
+    select m.chunk_id, m.layer, m.material_id, m.content, m.similarity, m.source_ref,
+           false::boolean as preterido,
+           null::uuid     as preterido_por_material,
+           0              as ordem
+      from marcado m
+     where not m.preterido
+     order by m.similarity desc
+     limit greatest(p_k, 0)
+  ),
+  rejeitadas as (
+    -- Fora do `limit` das vencedoras de propósito: instrumentação que rouba lastro da
+    -- resposta é instrumentação que degrada o que veio observar.
+    select m.chunk_id, m.layer, m.material_id, m.content, m.similarity, m.source_ref,
+           true::boolean  as preterido,
+           v.material_id  as preterido_por_material,
+           1              as ordem
+      from marcado m
+      join vencedor_por_balde v on v.balde = m.balde
+     where p_incluir_preteridos
+       and m.preterido
+  )
+  select u.chunk_id, u.layer, u.material_id, u.content, u.similarity, u.source_ref,
+         u.preterido, u.preterido_por_material
+    from (select * from vencedoras union all select * from rejeitadas) u
+   order by u.ordem, u.similarity desc;
+$$;
+
+comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) is
+  'Migrations 0123 + 0124 + 0125 (spec 002): busca de lastro nas duas camadas. Tenant e '
+  'acervo derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou '
+  'desligado devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora '
+  '(FR-026). Precedência dentro do balde (research D7). No catálogo, por slug ancora só a '
+  'MAIOR versão não-inerte (FR-037). p_incluir_preteridos=true acrescenta as linhas que o '
+  'desempate rejeitou, marcadas — elas NUNCA ancoram resposta, existem para registrar a '
+  'divergência de FR-035, e não consomem o limit das vencedoras.';
+
+-- As três origens de EXECUTE, de novo: o `drop` acima levou os grants junto, e recriar sem
+-- revogar deixaria a função exposta ao PostgREST pela anon key (a doutrina de migrations
+-- do CLAUDE.md, item 9).
+revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) from public, anon, authenticated;
+grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) to service_role;
+
+notify pgrst, 'reload schema';
+
+
+-- ---- a âncora como registro, e a recusa com escopo e motivo (migration 0126) ----
+--
+-- Ver o cabeçalho de supabase/migrations/20260808220000_0126_rastreabilidade_validade_lacunas.sql para o porquê.
+
+-- ── 1 · a âncora como registro ──────────────────────────────────────────────
+create table if not exists public.message_groundings (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+
+  -- `cascade`: apagada a mensagem, a âncora dela não tem o que provar. E a anonimização
+  -- da LGPD passa por aqui — âncora órfã de mensagem redigida seria dado sobrevivente de
+  -- uma conversa que o titular pediu para apagar.
+  message_id      uuid not null references public.messages(id) on delete cascade,
+
+  layer           text not null check (layer in ('tenant', 'catalog')),
+
+  -- SEM FK, e isto é a feature, não um esquecimento. O trecho e o material são recriados
+  -- a cada reindexação; uma FK aqui ou impediria reindexar (violação de referência) ou
+  -- apagaria o histórico em cascata. O id fica como PISTA para quem investiga hoje, e
+  -- `source_ref` é o que responde quando ele não existe mais.
+  chunk_id        uuid,
+  material_id     uuid,
+
+  -- A cópia congelada: título, escopo, data do material e camada, como estavam quando a
+  -- resposta saiu. É o que FR-023 exige que sobreviva à reconstrução do acervo.
+  source_ref      jsonb not null default '{}'::jsonb,
+  similarity      real,
+
+  created_at      timestamptz not null default now()
+);
+
+-- A leitura natural: "que âncoras esta resposta teve?" — é o que a tela pergunta.
+create index if not exists message_groundings_message_idx
+  on public.message_groundings (message_id);
+
+-- E a que `metadata` não conseguia responder: "que material ancorou respostas na janela?".
+create index if not exists message_groundings_org_material_idx
+  on public.message_groundings (organization_id, material_id, created_at desc);
+
+-- Reprocessar o mesmo turno não duplica âncora. Sem isto, um retry de worker dobraria a
+-- contagem de "quantas vezes este material respondeu" — número que vira decisão de
+-- curadoria.
+create unique index if not exists message_groundings_mensagem_trecho_key
+  on public.message_groundings (message_id, chunk_id)
+  where chunk_id is not null;
+
+comment on table public.message_groundings is
+  'Migration 0126 (spec 002, F5): a âncora como REGISTRO permanente (FR-021), não campo de '
+  'conveniência dentro de messages.metadata. source_ref é cópia histórica congelada, e '
+  'chunk_id/material_id NÃO têm FK de propósito: o acervo é recriado a cada reindexação e '
+  'a resposta precisa continuar provando o que valia na época (FR-023).';
+
+alter table public.message_groundings enable row level security;
+
+drop policy if exists tenant_isolation_message_groundings_all on public.message_groundings;
+create policy tenant_isolation_message_groundings_all on public.message_groundings
+  using ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin())
+  with check ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin());
+
+revoke all on public.message_groundings from anon;
+
+-- ── 2 · a recusa passa a dizer onde e por quê ───────────────────────────────
+alter table public.knowledge_searches
+  add column if not exists scope_id uuid references public.knowledge_scopes(id) on delete set null;
+
+-- `set null` e não `cascade`: o corretor que apaga um escopo não deve apagar a prova de
+-- que faltava material nele. A lacuna perde o nome, não a existência.
+
+alter table public.knowledge_searches
+  add column if not exists refusal_reason text;
+
+-- Vocabulário ABERTO, sem CHECK — a exceção deliberada do CLAUDE.md. Um CHECK aqui
+-- quebraria a re-aplicação do baseline em modo update assim que uma razão nova aparecesse
+-- em linha já gravada, e é exatamente isso que o job `invariants` roda. O vocabulário vive
+-- no TypeScript, com constante compartilhada, e esta coluna fica FORA do invariante
+-- `vocabulario-banco-x-typescript.test.ts`, que cobre só colunas que JÁ têm CHECK.
+comment on column public.knowledge_searches.refusal_reason is
+  'Migration 0126 (spec 002, FR-029): por que a busca não ancorou. Vocabulário aberto, sem '
+  'CHECK de propósito (ver CLAUDE.md, colunas de vocabulário aberto). Separa causas com '
+  'consertos opostos: base sem o assunto, escopo desligado, busca indisponível.';
+
+comment on column public.knowledge_searches.scope_id is
+  'Migration 0126 (spec 002, FR-029): em qual operadora a lacuna aconteceu. Sem isto a '
+  'lacuna aparece somada entre todas e o corretor não sabe qual material escrever.';
+
+-- A leitura de lacunas: recusas por escopo na janela.
+create index if not exists knowledge_searches_org_scope_idx
+  on public.knowledge_searches (organization_id, scope_id, created_at desc);
+
+notify pgrst, 'reload schema';
+
+
+-- ---- onde mora o texto de um documento (migration 0127) ----
+--
+-- Ver o cabeçalho de supabase/migrations/20260808230000_0127_texto_de_documento.sql para o porquê.
+
+create table if not exists public.ai_source_passages (
+  id                  uuid primary key default gen_random_uuid(),
+  organization_id     uuid not null references public.organizations(id) on delete cascade,
+  knowledge_source_id uuid not null references public.ai_knowledge_sources(id) on delete cascade,
+
+  -- O eixo de escopo, ESPELHANDO `ai_knowledge_sources` — as mesmas duas colunas que
+  -- `fn_buscar_lastro` filtra. Elas existem aqui, e não só na fonte, porque um documento
+  -- pode ser fatiado com escopos diferentes por seção (um manual que cobre duas
+  -- operadoras), e porque o indexador copia daqui para o trecho: derivar por junção na
+  -- hora da busca colocaria mais um `join` no caminho quente.
+  scope_id            uuid references public.knowledge_scopes(id) on delete set null,
+  applies_to_all      boolean not null default false,
+
+  -- O texto. É a razão de a tabela existir.
+  content             text not null check (length(btrim(content)) > 0),
+
+  -- Ordem no documento. `numeric` e não `int` pela mesma doutrina de
+  -- `position_in_stage`: reprocessar um PDF e precisar inserir uma passagem entre duas
+  -- existentes não pode exigir renumerar todas.
+  position            numeric not null default 0,
+
+  -- A âncora LEGÍVEL. É o que separa "está no seu manual, página 12, Carências" de
+  -- "trecho 47" — a citação que o corretor consegue ir conferir.
+  section_title       text,
+  page_number         integer,
+
+  tags                text[] not null default '{}'::text[],
+  locale              text   not null default 'pt-BR',
+
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+-- A leitura do indexador: as passagens daquela fonte, em ordem.
+create index if not exists ai_source_passages_source_pos_idx
+  on public.ai_source_passages (knowledge_source_id, position);
+
+create index if not exists ai_source_passages_org_scope_idx
+  on public.ai_source_passages (organization_id, scope_id);
+
+create index if not exists ai_source_passages_tags_gin
+  on public.ai_source_passages using gin (tags);
+
+-- Reprocessar o mesmo documento substitui, não empilha. Sem esta chave, subir de novo o
+-- mesmo manual dobraria as passagens e o mesmo texto ancoraria duas vezes — inflando a
+-- contagem de trechos que a tela mostra como prova de que o material entrou.
+create unique index if not exists ai_source_passages_fonte_posicao_key
+  on public.ai_source_passages (knowledge_source_id, position);
+
+comment on table public.ai_source_passages is
+  'Migration 0127 (spec 002, F4 · T140): onde mora o texto extraído de documento que NÃO é '
+  'par pergunta/resposta. Tabela própria em vez de afrouxar ai_faq_items.question: o motivo '
+  'é significado, não destrutividade — aquela tabela quer dizer "par pergunta/resposta", e '
+  'usá-la para passagem transferiria a cada leitor a obrigação de lembrar que question pode '
+  'ser nulo. Destino de T083; origem de T084.';
+
+drop trigger if exists ai_source_passages_updated_at on public.ai_source_passages;
+create trigger ai_source_passages_updated_at
+  before update on public.ai_source_passages
+  for each row execute function public.fn_set_updated_at();
+
+alter table public.ai_source_passages enable row level security;
+
+drop policy if exists tenant_isolation_ai_source_passages_all on public.ai_source_passages;
+create policy tenant_isolation_ai_source_passages_all on public.ai_source_passages
+  using ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin())
+  with check ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin());
+
+revoke all on public.ai_source_passages from anon;
+
+notify pgrst, 'reload schema';
+
+
+-- ---- a âncora do documento chega ao corretor (migration 0128) ----
+--
+-- Forward-fix: a T083 grava section_title no metadata do trecho, e a busca montava
+-- source_ref só da linha da fonte. Dado gravado e invisível é pior que ausente — parece
+-- feito. Ver o cabeçalho da migration.
+
+create or replace function public.fn_buscar_lastro(
+  p_agent_id            uuid,
+  p_scope_id            uuid,
+  p_embedding           public.vector,
+  p_k                   integer default 5,
+  p_threshold           real    default 0.40,
+  p_incluir_preteridos  boolean default false
+)
+returns table (
+  chunk_id               uuid,
+  layer                  text,
+  material_id            uuid,
+  content                text,
+  similarity             real,
+  source_ref             jsonb,
+  preterido              boolean,
+  preterido_por_material uuid
+)
+language sql
+stable
+security definer
+set search_path to 'public', 'pg_temp'
+as $$
+  with agente as (
+    select a.organization_id, a.active_kb_version_id
+      from public.ai_agents a
+     where a.id = p_agent_id
+  ),
+  escopo_ativo as (
+    select ks.id as scope_id, ks.catalog_scope_id
+      from public.knowledge_scopes ks
+      join agente g on g.organization_id = ks.organization_id
+     where ks.id = p_scope_id
+       and ks.is_active
+  ),
+  material_vigente as (
+    select distinct on (cm.slug) cm.id, cm.slug, cm.title, cm.version,
+           cm.published_at, cm.valid_until
+      from public.catalog_materials cm
+     where not cm.inert
+     order by cm.slug, cm.version desc
+  ),
+  camada_tenant as (
+    select
+      c.id                                            as chunk_id,
+      'tenant'::text                                  as layer,
+      s.id                                            as material_id,
+      c.content                                       as content,
+      (1 - (c.embedding <=> p_embedding))::real       as similarity,
+      case when c.applies_to_all then 'todos' else 'escopo' end as balde,
+      -- `strip_nulls` porque chave ausente e chave nula dizem coisas diferentes na tela:
+      -- a primeira é "este formato não informa", a segunda vira "informou nada".
+      jsonb_strip_nulls(jsonb_build_object(
+        'layer',       'tenant',
+        'title',       s.name,
+        'scope',       ks.display_name,
+        'updated_at',  s.updated_at,
+        'source_type', s.source_type,
+        -- A âncora DENTRO do documento (T083 · FR-022). Sem estas duas, o corretor recebe
+        -- o nome do manual inteiro e vai procurar a frase à mão.
+        'section_title', c.metadata->>'section_title',
+        'page_number',   c.metadata->>'page_number'
+      ))                                              as source_ref
+      from public.ai_chunks c
+      join agente g
+        on c.organization_id = g.organization_id
+       and c.kb_version_id   = g.active_kb_version_id
+      join public.ai_knowledge_sources s
+        on s.id = c.knowledge_source_id
+      left join public.knowledge_scopes ks
+        on ks.id = c.scope_id
+     where (s.valid_until is null or s.valid_until >= current_date)
+       and (c.applies_to_all or c.scope_id = (select scope_id from escopo_ativo))
+       and (1 - (c.embedding <=> p_embedding)) >= p_threshold
+  ),
+  camada_catalogo as (
+    select
+      cc.id                                           as chunk_id,
+      'catalog'::text                                 as layer,
+      cm.id                                           as material_id,
+      cc.content                                      as content,
+      (1 - (cc.embedding <=> p_embedding))::real      as similarity,
+      case when cc.applies_to_all then 'todos' else 'escopo' end as balde,
+      jsonb_build_object(
+        'layer',         'catalog',
+        'title',         cm.title,
+        'scope',         cs.display_name,
+        'updated_at',    cm.published_at,
+        'material_slug', cm.slug,
+        'version',       cm.version
+      )                                               as source_ref
+      from public.catalog_chunks cc
+      join material_vigente cm
+        on cm.id = cc.catalog_material_id
+      left join public.catalog_scopes cs
+        on cs.id = cc.catalog_scope_id
+     where (cm.valid_until is null or cm.valid_until >= current_date)
+       and (cc.applies_to_all or cc.catalog_scope_id = (select catalog_scope_id from escopo_ativo))
+       and (1 - (cc.embedding <=> p_embedding)) >= p_threshold
+  ),
+  tudo as (
+    select * from camada_tenant
+    union all
+    select * from camada_catalogo
+  ),
+  vencedor_por_balde as (
+    select distinct on (t.balde) t.balde, t.material_id
+      from tudo t
+     where t.layer = 'tenant'
+     order by t.balde, t.similarity desc
+  ),
+  marcado as (
+    select
+      t.*,
+      (t.layer = 'catalog'
+        and exists (select 1 from tudo x where x.layer = 'tenant' and x.balde = t.balde)
+      ) as preterido
+      from tudo t
+  ),
+  vencedoras as (
+    select m.chunk_id, m.layer, m.material_id, m.content, m.similarity, m.source_ref,
+           false::boolean as preterido,
+           null::uuid     as preterido_por_material,
+           0              as ordem
+      from marcado m
+     where not m.preterido
+     order by m.similarity desc
+     limit greatest(p_k, 0)
+  ),
+  rejeitadas as (
+    select m.chunk_id, m.layer, m.material_id, m.content, m.similarity, m.source_ref,
+           true::boolean  as preterido,
+           v.material_id  as preterido_por_material,
+           1              as ordem
+      from marcado m
+      join vencedor_por_balde v on v.balde = m.balde
+     where p_incluir_preteridos
+       and m.preterido
+  )
+  select u.chunk_id, u.layer, u.material_id, u.content, u.similarity, u.source_ref,
+         u.preterido, u.preterido_por_material
+    from (select * from vencedoras union all select * from rejeitadas) u
+   order by u.ordem, u.similarity desc;
+$$;
+
+comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) is
+  'Migrations 0123 + 0124 + 0125 + 0128 (spec 002): busca de lastro nas duas camadas. Tenant '
+  'e acervo derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou '
+  'desligado devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora '
+  '(FR-026). Precedência dentro do balde (research D7). No catálogo, por slug ancora só a '
+  'MAIOR versão não-inerte (FR-037). p_incluir_preteridos=true acrescenta as linhas que o '
+  'desempate rejeitou, marcadas — elas NUNCA ancoram resposta (FR-035). Na camada do tenant, '
+  'source_ref carrega a âncora DENTRO do documento (section_title, page_number) quando o '
+  'formato a informa — é o que FR-022 pede: chegar ao trecho, não ao manual inteiro.';
+
+-- `create or replace` preserva os grants, mas repetir é barato e protege contra a ordem em
+-- que os apêndices do baseline são aplicados num banco novo (doutrina de migrations, item 9).
+revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) from public, anon, authenticated;
+grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) to service_role;
+
+notify pgrst, 'reload schema';
+
+-- ---- lastro de fábrica no agente (migration 0129) ----
+--
+-- `ai_agents.guardrails` era `default '[]'`, e lista vazia desarma o gate
+-- `assistance_grounding`. Resultado: todo agente que não fosse o do onboarding nascia
+-- podendo afirmar procedimento de operadora sem material nenhum (spec 002 · FR-014, FR-030).
+-- O conserto mora no DEFAULT da coluna, e não em cada `insert`, porque foi assim que o buraco
+-- nasceu: um caminho de criação lembrava e os outros não. O default é o único ponto por onde
+-- todos passam. Cópia declarada de GUARDRAILS_DO_AGENTE_PADRAO
+-- (lib/ai/agents/guardrails-padrao.ts), vigiada por tests/invariants/agente-nasce-com-lastro.test.ts.
+alter table public.ai_agents
+  alter column guardrails set default
+    '[{"kind": "rag_must_hit", "min_citations": 1, "reason": "não afirmar procedimento, cobertura, carência ou rede sem material carregado que sustente"}]'::jsonb;
+
+-- Auto-curativo e idempotente: acrescenta em vez de substituir (guardrails que o admin
+-- configurou sobrevivem) e só toca em quem não tem `rag_must_hit`. `@>` devolve false sem
+-- erro em jsonb não-array; `jsonb_array_elements` levantaria erro e derrubaria o modo update.
+update public.ai_agents
+   set guardrails = case
+         when jsonb_typeof(guardrails) = 'array'
+           then guardrails || '{"kind": "rag_must_hit", "min_citations": 1, "reason": "não afirmar procedimento, cobertura, carência ou rede sem material carregado que sustente"}'::jsonb
+         else '[{"kind": "rag_must_hit", "min_citations": 1, "reason": "não afirmar procedimento, cobertura, carência ou rede sem material carregado que sustente"}]'::jsonb
+       end
+ where jsonb_typeof(guardrails) is distinct from 'array'
+    or not (guardrails @> '[{"kind": "rag_must_hit"}]'::jsonb);
+
+comment on column public.ai_agents.guardrails is
+  'Guardrails do agente (lib/ai/guardrails-schema.ts). O DEFAULT carrega rag_must_hit '
+  '(migration 0129, spec 002 · FR-014/FR-030): recusar afirmação de assistência sem material '
+  'que a sustente é comportamento de FÁBRICA, não opção avançada. O default é cópia declarada '
+  'de GUARDRAILS_DO_AGENTE_PADRAO (lib/ai/agents/guardrails-padrao.ts), vigiada por '
+  'tests/invariants/agente-nasce-com-lastro.test.ts. Lista vazia desarma o gate '
+  'assistance_grounding — o que agora só acontece por decisão explícita na tela.';

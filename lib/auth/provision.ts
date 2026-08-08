@@ -86,6 +86,34 @@ export async function ensureTenantForUser(
     throw new Error(`signup provisioning: membership insert failed: ${memberError.message}`);
   }
 
+  // T056 — o tenant novo tem de ENXERGAR o catálogo curado.
+  //
+  // A semeadura do `baseline.sql` termina sincronizando os espelhos para as organizações
+  // que existiam NAQUELE momento (T055). Toda organização criada depois — que é toda
+  // organização de usuário self-service — nasceria sem espelho nenhum, e o sintoma não
+  // seria um erro: seria a tela de Operadoras vazia numa instalação que tem catálogo. O
+  // corretor conclui que o produto não sabe nada, quando ele sabe e ninguém ligou o fio.
+  //
+  // A função é idempotente por construção, então chamá-la aqui também cura tenant que
+  // por qualquer motivo tenha ficado para trás.
+  const { error: syncError } = await admin.rpc("fn_sincronizar_escopos_do_catalogo", {
+    p_organization_id: org.id,
+  });
+  if (syncError) {
+    // NÃO bloqueia o cadastro: quem não consegue entrar não liga escopo nenhum, e os
+    // espelhos nascem inativos de qualquer forma (A-20). Mas também não é silêncio —
+    // Princípio II: falta de funcionamento não vira `return` mudo.
+    void audit({
+      action: "tenant.catalog_sync_failed",
+      actorUserId: user.id,
+      organizationId: org.id,
+      resourceType: "organization",
+      resourceId: org.id,
+      bypassedRls: true,
+      metadata: { error: syncError.message.slice(0, 160) },
+    });
+  }
+
   void audit({
     action: "tenant.created_by_signup",
     actorUserId: user.id,

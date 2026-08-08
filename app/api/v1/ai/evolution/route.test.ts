@@ -18,6 +18,8 @@ interface Espiao {
   eq: Array<[string, unknown]>;
   gte: Array<[string, unknown]>;
   lte: Array<[string, unknown]>;
+  /** `.is(col, null)` — a leitura de divergências ABERTAS (FR-035). */
+  is: Array<[string, unknown]>;
   order: Array<[string, string]>;
   tabelas: string[];
 }
@@ -33,7 +35,7 @@ function fakeDb(
   porTabela: Record<string, unknown[]> = {},
   erros: Record<string, string> = {},
 ): Espiao {
-  const espiao: Espiao = { eq: [], gte: [], lte: [], order: [], tabelas: [] };
+  const espiao: Espiao = { eq: [], gte: [], lte: [], is: [], order: [], tabelas: [] };
   from.mockImplementation((tabela: string) => {
     espiao.tabelas.push(tabela);
     const rows = porTabela[tabela] ?? [];
@@ -58,6 +60,13 @@ function fakeDb(
     };
     b.lte = (col: string, val: unknown) => {
       espiao.lte.push([col, val]);
+      return b;
+    };
+    // O fake precisa acompanhar o builder de verdade: método faltando aqui não vira
+    // asserção vermelha, vira `is not a function` em TODOS os casos do arquivo — falha que
+    // esconde o que ela devia medir.
+    b.is = (col: string, val: unknown) => {
+      espiao.is.push([col, val]);
       return b;
     };
     b.then = (resolve: (v: unknown) => void) =>
@@ -124,12 +133,23 @@ describe('GET /api/v1/ai/evolution', () => {
 
     expect(espiao.gte.every(([, v]) => v === '2026-07-01T00:00:00.000Z')).toBe(true);
     expect(espiao.lte.every(([, v]) => v === '2026-07-03T23:59:59.999Z')).toBe(true);
-    // Contra TODAS as consultas menos `crm_stages` (estado atual do funil, não
-    // evento do período). Comparar `gte.length` com `lte.length` NÃO serviria:
-    // some o par inteiro de uma leitura e a igualdade continua verdadeira — que é
-    // justamente o defeito "leitura sem janela nenhuma".
-    expect(espiao.gte.length).toBe(espiao.tabelas.length - 1);
-    expect(espiao.lte.length).toBe(espiao.tabelas.length - 1);
+    // Comparar `gte.length` com `lte.length` NÃO serviria: some o par inteiro de uma
+    // leitura e a igualdade continua verdadeira — que é justamente o defeito "leitura sem
+    // janela nenhuma". Então a conta é contra o total, descontando as leituras que
+    // legitimamente não têm janela.
+    //
+    // ⚠️ A lista é NOMEADA, e antes era um `- 1` anônimo. O número mudou duas vezes ao
+    // acrescentarmos leitura de estado atual, e das duas vezes a correção óbvia era mexer
+    // no número — que é como uma leitura sem janela entraria de contrabando, com o teste
+    // verde. Nomear obriga quem acrescenta a declarar POR QUE aquela consulta não tem data.
+    const SEM_JANELA_DE_DATA = [
+      'crm_stages', // mapeamento declarado do funil: estado atual, não evento do período
+      'knowledge_divergences', // FR-035: o que está errado AGORA continua errado hoje
+      'knowledge_scopes', // os nomes das operadoras, para rotular a lacuna
+    ];
+    const comJanela = espiao.tabelas.filter((t) => !SEM_JANELA_DE_DATA.includes(t));
+    expect(espiao.gte.length).toBe(comJanela.length);
+    expect(espiao.lte.length).toBe(comJanela.length);
   });
 
   it('soma as DUAS fontes de handoff — os dois runtimes registram em lugares diferentes', async () => {

@@ -33,7 +33,7 @@ ruim" — é dano ao cliente final, e quem responde por ele é o corretor. Por i
 - Do login à primeira conversa atendida por agente, **esta feature não acrescenta nenhum passo
   obrigatório**. Uma instalação recém-criada, sem acervo nenhum, precisa continuar atendendo em
   ≤10 minutos — o agente simplesmente **recusa assistência e escala**, que é o comportamento
-  correto de quem ainda não tem conhecimento carregado (FR-021).
+  correto de quem ainda não tem conhecimento carregado (FR-014).
 - O que entra no cronômetro é um teto **próprio e separado**: carregar a **primeira operadora**,
   do login ao primeiro trecho buscável, em **≤5 minutos** (SC-003) — e a **segunda em ≤2 minutos**
   (SC-004), porque a partir dela o custo é o de repetir, não o de aprender.
@@ -971,6 +971,10 @@ instalações** passa a exigir release e atualização do clone (SC-010); a atua
 apagar edição local (FR-037, SC-018); e quem instala um clone herda o papel de curador do catálogo
 dele (A-18).
 
-**Bloqueio de processo, não de escopo:** a implementação depende da **emenda ao princípio X**
-descrita no topo, que a Governança exige em PR próprio e anterior. Enquanto ela não entra, a spec
-está completa mas não é executável.
+**Bloqueio de processo — RESOLVIDO em 2026-08-08.** A implementação dependia da **emenda ao
+princípio X** descrita no topo, que a Governança exige em PR próprio e anterior. Ela foi mergeada
+(PR #10), e o princípio X hoje traz as duas camadas e as sete travas. A spec é executável.
+
+Nota de reconciliação: a emenda entrou na `main` como v2.2.0 ao mesmo tempo que outra frente
+publicava uma v2.2.0 diferente. A numeração foi reconciliada — a desta spec é a v2.3.0/v2.3.1 —,
+sem que uma vírgula do texto normativo mudasse.

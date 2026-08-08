@@ -32,11 +32,26 @@ export interface EscalacaoSemLastro {
   /** A pergunta do cliente, como ela chegou. FR-012 a exige no aviso. */
   perguntaOriginal: string;
   /**
-   * O escopo (operadora) envolvido, quando conhecido. Na fatia F1 ainda não existe
-   * vínculo cliente↔operadora, então é sempre null e o aviso diz "não identificada" —
-   * que é informação honesta, não campo vazio.
+   * O escopo (operadora) envolvido, quando conhecido. `null` quando o vínculo do contato
+   * não existe e o cliente não nomeou nenhuma — o aviso diz "não identificada", que é
+   * informação honesta, não campo vazio.
+   *
+   * Desde a fatia F2 este campo carrega a operadora de verdade: o vínculo de `contacts`
+   * ou o nome que o cliente escreveu na conversa. A rota de lacunas
+   * (`app/api/v1/catalog/gaps`) agrupa por ele lendo a linha `Operadora:` do corpo — mudar
+   * o formato daquela linha quebra o agrupamento do curador.
    */
   escopo: string | null;
+  /**
+   * FR-042 (T137): operadoras que existem no catálogo, cobririam este assunto, e estão
+   * **desligadas** para este corretor.
+   *
+   * Sem esta informação, a decisão A-20 ("tudo nasce desligado") produz o pior desfecho da
+   * feature: o corretor lê a recusa, conclui que o sistema não sabe responder, e desiste —
+   * quando o sistema sabe e ninguém ligou. Vazio = não há nada assim, e o aviso não
+   * inventa uma sugestão para parecer útil.
+   */
+  escoposDesligadosQueCobririam?: readonly string[];
   log: Logger;
 }
 
@@ -71,7 +86,23 @@ export async function escalarAssistenciaSemLastro(
     [input.tenantId, input.conversationId],
   );
 
-  // (b) O aviso acionável, com os três campos que FR-012 exige.
+  // (b) O aviso acionável, com os três campos que FR-012 exige — e, quando ela existe, a
+  // linha de FR-042 que transforma "o sistema não sabe" em "o sistema sabe, ligue aqui".
+  const desligadas = input.escoposDesligadosQueCobririam ?? [];
+  const linhaFr042 =
+    desligadas.length > 0
+      ? [
+          `Já existe material pronto sobre este assunto para: ${desligadas.join(', ')}. ` +
+            'Está desligado para você — por padrão nada vem ligado, para o agente não falar de ' +
+            'operadora que você não vende.',
+          'O que fazer agora: ligue essa operadora na tela de Operadoras (menu IA › Conhecimento). ' +
+            'É um clique, e a partir dele o agente responde sozinho este tipo de pergunta.',
+        ]
+      : [
+          'O que fazer: responda ao cliente e carregue o material que cobre este assunto — ' +
+            'da próxima vez o agente responde sozinho.',
+        ];
+
   const { rowCount } = await db.query(
     `insert into agent_inbox_items (organization_id, kind, severity, title, body, ref_kind, ref_id)
      select $1, 'assistance_without_grounding', 'warn', $2, $3, 'contact', $4
@@ -91,8 +122,7 @@ export async function escalarAssistenciaSemLastro(
         `Operadora: ${input.escopo ?? 'não identificada'}`,
         'Motivo: não há material carregado que responda a esta pergunta, e o agente não ' +
           'inventa procedimento de operadora. Ele avisou o cliente que uma pessoa vai confirmar.',
-        'O que fazer: responda ao cliente e carregue o material que cobre este assunto — ' +
-          'da próxima vez o agente responde sozinho.',
+        ...linhaFr042,
       ].join('\n'),
       input.leadId,
     ],
@@ -102,6 +132,10 @@ export async function escalarAssistenciaSemLastro(
   input.log.info('assistência recusada por falta de lastro — conversa escalada', {
     conversation_id: input.conversationId,
     aviso_criado: criados > 0,
+    // Contagem, nunca os nomes: o log é lido em agregado e nome de operadora num
+    // aviso pontual não ajuda ninguém a diagnosticar. Quem precisa vê na Central.
+    escopo_identificado: input.escopo !== null,
+    operadoras_desligadas_que_cobririam: desligadas.length,
   });
   return criados;
 }

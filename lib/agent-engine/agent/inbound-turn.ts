@@ -34,9 +34,30 @@ import type { ChannelAdapter, ChannelSendResult } from '../channel-adapter';
 
 import { withFields, type Logger } from '../obs/logger';
 import { getLeadContext, type LeadContext, type LeadContextResult } from '../edge/crm/get-lead-context';
+import { registrarGroundings } from './grounding-registry';
 import { citationsFromHits, searchKnowledge } from './search-knowledge';
 import { escalarAssistenciaSemLastro } from './escalar-sem-lastro';
-import type { Grounding } from '../guardrails/assistance-grounding';
+import { ehAprendizadoDeConversa, type Grounding } from '../guardrails/assistance-grounding';
+import { detectarAssuntoDeAssistencia } from '../guardrails/lexico-assistencia';
+import {
+  blocoDePerguntaDeEscopo,
+  carregarEscoposDoTenant,
+  carregarVinculoDoContato,
+  escopoJaFoiPerguntado,
+  escoposDesligadosQueCobririam,
+  gravarEscopoDaConversa,
+  marcarEscopoPerguntado,
+  reconhecerEscoposNoTexto,
+  VINCULO_DESCONHECIDO,
+  type EscopoConhecido,
+  type VinculoDeEscopo,
+} from './escopo-do-contato';
+import {
+  fraseDeRecusaParcial,
+  particionarPorEscopo,
+  type EscopoRecusado,
+  type LastroDeEscopo,
+} from './lastro-por-escopo';
 import type { CrmEdgeConfig } from '../edge/crm/mcp-client';
 import { WahaChannelAdapter } from '../edge/channel/waha-adapter';
 // applySendOutcome é disposição de FILA (cancel/reschedule + cache de opt-out), não
@@ -1117,11 +1138,20 @@ export async function runAgentTurn(
   // Citações acumuladas por buscas de conhecimento DESTE turno — anexadas à
   // próxima outbound enviada (shape de lib/ai/citations/types, que a UI já lê).
   let pendingCitations: ReturnType<typeof citationsFromHits> = [];
-  // As MESMAS buscas, na forma que o gate de lastro entende (spec 002, FR-009). Separado
-  // de `pendingCitations` de propósito: aquilo é o shape que a UI do inbox renderiza,
-  // isto é a prova de que a afirmação veio do acervo. Colapsar os dois faria uma mudança
-  // de layout de tela mexer num invariante de envio.
-  let pendingGroundings: Grounding[] = [];
+  // As MESMAS buscas, na forma que o gate de lastro entende (spec 002, FR-009) — e
+  // SEGREGADAS POR OPERADORA (F2, FR-018). Separado de `pendingCitations` de propósito:
+  // aquilo é o shape que a UI do inbox renderiza, isto é a prova de que a afirmação veio
+  // do acervo. Colapsar os dois faria uma mudança de layout de tela mexer num invariante
+  // de envio; colapsar os baldes faria o procedimento de uma operadora ancorar afirmação
+  // sobre outra, que é o defeito que a fatia inteira existe para impedir.
+  let lastrosPorEscopo: LastroDeEscopo[] = [];
+  /**
+   * O vetor da última pergunta buscada neste turno.
+   *
+   * Guardado só para FR-042: quando a recusa acontece, ele responde "existe operadora no
+   * catálogo que cobriria isto e está desligada?" sem pagar um segundo `embed`.
+   */
+  let ultimoEmbeddingDaBusca: string | null = null;
   // Quantas vezes o gate de lastro vetou NESTE turno. Diferente do fail-safe de
   // vocabulário: aqui não existe liberação após N tentativas. Sem material, a afirmação
   // não sai — nem na terceira tentativa. O contador serve para escalar UMA vez.
@@ -1171,6 +1201,122 @@ export async function runAgentTurn(
   } catch (err) {
     runLog.warn('skill_activations não gravadas', { error: (err instanceof Error ? err.message : String(err)).slice(0, 120) });
   }
+
+  // ── DE QUAL OPERADORA É O PLANO DESTE CLIENTE (spec 002, F2 · T060/T061) ────
+  //
+  // Resolvido AQUI, antes de montar as ferramentas: `search_knowledge` fecha sobre estas
+  // variáveis e as lê no momento da chamada, e o sufixo da abertura precisa do bloco de
+  // pergunta já decidido.
+  //
+  // Ordem que FR-017 fixa: o vínculo de `contacts` vale; quando ele não existe, o que o
+  // cliente ESCREVEU nesta mensagem cria o vínculo — e nada mais cria. Não há inferência
+  // por ser a única cadastrada, pela mais usada, nem por semelhança de texto (T061). O
+  // desconhecido é estado tratado: a busca devolve só material "vale para todos".
+  //
+  // Tolerante a falha de propósito, no mesmo molde da leitura de sticky/router acima: um
+  // clone que ainda não aplicou a migration 0118 não tem `knowledge_scopes` nem as colunas
+  // de vínculo, e o turno tem de continuar atendendo — sem operadora, que é exatamente o
+  // estado que o resto deste código sabe tratar.
+  let escoposDoTenant: EscopoConhecido[] = [];
+  let vinculoDeEscopo: VinculoDeEscopo = VINCULO_DESCONHECIDO;
+  let escoposNomeadosPeloCliente: EscopoConhecido[] = [];
+  let precisaPerguntarEscopo = false;
+  try {
+    [escoposDoTenant, vinculoDeEscopo] = await Promise.all([
+      carregarEscoposDoTenant(pool, tenantId),
+      carregarVinculoDoContato(pool, tenantId, leadId),
+    ]);
+    escoposNomeadosPeloCliente = reconhecerEscoposNoTexto(skillSignal, escoposDoTenant);
+
+    // O cliente respondeu (agora ou em qualquer turno anterior desta conversa): grava.
+    // `escoposNomeadosPeloCliente.length === 1` é a condição inteira — dois nomes na
+    // mesma mensagem é ambiguidade que o cliente criou, e escolher um seria a inferência
+    // que FR-017 proíbe. A busca segue por operadora nesse caso (FR-018), sem vínculo.
+    const unico = escoposNomeadosPeloCliente.length === 1 ? escoposNomeadosPeloCliente[0] : undefined;
+    if (unico !== undefined) {
+      // A precedência do cadastro é decidida DENTRO de `gravarEscopoDaConversa` (duas
+      // camadas, TS e SQL). Repeti-la aqui criaria uma terceira, que é onde a divergência
+      // nasce quando alguém muda uma e esquece as outras.
+      const gravou = await gravarEscopoDaConversa(pool, tenantId, leadId, unico.id, vinculoDeEscopo);
+      if (gravou) {
+        vinculoDeEscopo = {
+          scopeId: unico.id,
+          displayName: unico.displayName,
+          source: 'conversa',
+          confirmedAt: clock(),
+        };
+        runLog.info('operadora do cliente registrada pela conversa', {
+          knowledge_scope_id: unico.id,
+          origem: 'conversa',
+        });
+      }
+    }
+
+    // A-05: uma pergunta, uma operadora. Perguntar num tenant sem escopo nenhum seria
+    // pedir ao cliente um dado que o sistema não tem onde guardar.
+    precisaPerguntarEscopo =
+      vinculoDeEscopo.scopeId === null &&
+      escoposDoTenant.length > 0 &&
+      !(await escopoJaFoiPerguntado(pool, tenantId, input.conversationId));
+  } catch (err) {
+    runLog.warn('operadora do cliente não pôde ser resolvida — turno segue sem ela', {
+      error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
+    });
+  }
+
+  /**
+   * A escalação da recusa por falta de material — UMA vez por turno (FR-012).
+   *
+   * Vive aqui, e não solta em cada ponto de veto, porque os dois caminhos que a acionam
+   * (recusa total e recusa isolada de FR-018) precisam produzir exatamente o mesmo aviso,
+   * com a mesma operadora e a mesma informação de FR-042. Dois lugares montando o corpo
+   * do aviso divergiriam, e a divergência apareceria como um curador vendo metade das
+   * lacunas agrupadas e a outra metade em "não identificada".
+   *
+   * A operadora do aviso, na ordem: a que a afirmação recusada citava → o vínculo do
+   * contato → a única que o cliente nomeou nesta mensagem → nenhuma ("não identificada",
+   * que é informação honesta, não campo vazio).
+   */
+  const escalarRecusaDeAssistencia = async (recusados: readonly EscopoRecusado[]): Promise<void> => {
+    if (assistenciaSemLastroEscalada) return;
+    assistenciaSemLastroEscalada = true;
+
+    const nomeadoNaRecusa = recusados.find((r) => r.scopeName !== null)?.scopeName ?? null;
+    const unicoNomeadoPeloCliente =
+      escoposNomeadosPeloCliente.length === 1 ? (escoposNomeadosPeloCliente[0]?.displayName ?? null) : null;
+    const escopo = nomeadoNaRecusa ?? vinculoDeEscopo.displayName ?? unicoNomeadoPeloCliente;
+
+    // FR-042 / T137: a recusa que não diz "a resposta existe e está desligada" é o pior
+    // desfecho desta feature — o corretor conclui que o produto não sabe, quando ele sabe.
+    const desligadasQueCobririam = await escoposDesligadosQueCobririam(
+      pool,
+      {
+        tenantId,
+        embedding: ultimoEmbeddingDaBusca,
+        threshold: agentConfig?.ragSimilarityThreshold ?? 0.72,
+        mencionados: escoposNomeadosPeloCliente,
+      },
+      runLog,
+    );
+
+    try {
+      await escalarAssistenciaSemLastro(pool, {
+        tenantId,
+        leadId,
+        conversationId: input.conversationId,
+        perguntaOriginal: skillSignal,
+        escopo,
+        escoposDesligadosQueCobririam: desligadasQueCobririam,
+        log: runLog,
+      });
+    } catch (err) {
+      // A escalação falhar não pode impedir o cliente de ser avisado. O aviso na Central
+      // é importante; a pessoa do outro lado da conversa é mais.
+      runLog.error('escalação da recusa por falta de lastro falhou', {
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+      });
+    }
+  };
 
   /**
    * Os ids de catálogo que de fato ENTRARAM neste turno — não os que a tela
@@ -1342,41 +1488,100 @@ export async function runAgentTurn(
             error: { code: 'no_knowledge_base', message: 'este agente não tem base de conhecimento ativa — siga sem ela.' },
           };
         }
+        // Quais operadoras estão em jogo NESTA busca, nesta ordem (FR-017/FR-018):
+        //   1. as que o próprio texto da busca nomeia — o modelo escreveu "carência Amil";
+        //   2. as que o CLIENTE nomeou na mensagem deste turno;
+        //   3. o vínculo do contato;
+        //   4. nenhuma — e aí `p_scope_id` é NULL, que a função trata como "só o que vale
+        //      para todos". NÃO é busca ampla, e não existe caminho aqui que a torne uma.
+        const nomeadosNaBusca = reconhecerEscoposNoTexto(query, escoposDoTenant);
+        const emJogo =
+          nomeadosNaBusca.length > 0
+            ? nomeadosNaBusca
+            : escoposNomeadosPeloCliente.length > 0
+              ? escoposNomeadosPeloCliente
+              : escoposDoTenant.filter((e) => e.id === vinculoDeEscopo.scopeId);
+        const nomes: Record<string, string> = {};
+        for (const e of emJogo) nomes[e.id] = e.displayName;
+
         const out = await searchKnowledge(pool, {
           organizationId: tenantId,
+          // O tenant e o acervo saem DAQUI dentro da função (FR-019). O
+          // `organizationId` acima existe só para orçamento de embed e telemetria.
+          agentId: agentConfig.agentId,
           kbVersionId: agentConfig.activeKbVersionId,
+          scopeIds: emJogo.length > 0 ? emJogo.map((e) => e.id) : [null],
+          scopeNames: nomes,
           query,
           topK: agentConfig.ragTopK,
           threshold: agentConfig.ragSimilarityThreshold,
           jobId: job.id,
         }, { log: runLog });
-        if (out.ok && out.results.length > 0) {
+
+        if (out.ok) {
+          ultimoEmbeddingDaBusca = out.embedding;
+          const todos = out.porEscopo.flatMap((b) => b.results);
           // As citações são montadas AQUI, pelo código, a partir do resultado
           // cru — é por isso que os ids podem sair do que vai ao modelo sem
           // perder nada: quem precisa deles é esta linha, não o modelo.
-          pendingCitations = citationsFromHits(out.results);
+          pendingCitations = citationsFromHits(todos);
           // A âncora do gate sai do MESMO resultado, e não de uma segunda leitura: o
           // que o gate exige é exatamente o que a busca devolveu, sem espaço para os
-          // dois divergirem. `layer: 'tenant'` é o único valor possível na fatia F1 —
-          // o catálogo curado ainda não existe (ele chega na F2, e o campo já está aqui
-          // para não migrar âncora gravada depois).
-          pendingGroundings = out.results.map((r) => ({
-            chunk_id: r.chunk_id,
-            material_id: r.knowledge_source_id,
-            layer: 'tenant' as const,
-            similarity: r.similarity,
+          // dois divergirem. Uma busca que não achou nada ZERA o balde — sem isso, o
+          // resultado de uma busca anterior no mesmo turno sustentaria uma afirmação
+          // sobre outro assunto (lastro emprestado, pior que lastro nenhum porque
+          // parece correto). E os baldes ficam separados por operadora: fundi-los aqui
+          // seria refazer, em TypeScript, o defeito que a função de busca evita no SQL.
+          lastrosPorEscopo = out.porEscopo.map((b) => ({
+            scopeId: b.scopeId,
+            scopeName: b.scopeName,
+            groundings: b.results.map((r) => ({
+              chunk_id: r.chunk_id,
+              material_id: r.material_id,
+              layer: r.layer,
+              similarity: r.similarity,
+              // O ASSUNTO do trecho, pela mesma régua que classifica a afirmação (T138).
+              // Calculado aqui, onde o texto do trecho existe: o gate recebe categoria
+              // fechada e nunca o conteúdo — que não pode entrar no trace persistido.
+              categorias: detectarAssuntoDeAssistencia(r.content).categorias,
+              // FR-040: trecho tirado de conversa passada não sustenta afirmação de
+              // assistência. Ele continua entrando na busca e ajudando o modelo a
+              // escrever — o que não pode é virar a PROVA de um procedimento.
+              aprendidoDeConversa: ehAprendizadoDeConversa(r.source_ref ?? undefined),
+              ...(r.source_ref !== null ? { source_ref: r.source_ref } : {}),
+            })),
           }));
-        } else if (out.ok) {
-          // Busca que não achou nada ZERA a âncora. Sem esta linha, o resultado de uma
-          // busca anterior no mesmo turno sustentaria uma afirmação sobre outro assunto
-          // — lastro emprestado, que é pior que lastro nenhum porque parece correto.
-          pendingGroundings = [];
         }
-        // `chunk_id` e `knowledge_source_id` viajavam CRUS para o modelo em toda
-        // busca com RAG — dois UUIDs por resultado, sem uso nenhum do lado dele
-        // (nenhuma ferramenta os aceita como argumento). UUID cru na resposta ao
-        // cliente foi MEDIDO nesta base; esta era uma fonte silenciosa dele.
-        return turnoProjeta(mcpToolIdsDoTurno) ? projetarRetornoDeTool(out) : out;
+
+        // O que volta ao MODELO é montado à mão, sem um único id: `chunk_id` e
+        // `material_id` não são argumento de ferramenta nenhuma, e UUID cru chegando à
+        // resposta do cliente foi MEDIDO nesta base. E vem agrupado por operadora, com a
+        // instrução explícita de não misturar — é a metade de FR-018 que depende de o
+        // modelo saber que os montes são de donos diferentes.
+        if (!out.ok) {
+          return turnoProjeta(mcpToolIdsDoTurno) ? projetarRetornoDeTool(out) : out;
+        }
+        const paraOModelo = {
+          ok: true as const,
+          por_operadora: out.porEscopo.map((b) => ({
+            operadora: b.scopeName ?? 'não identificada (só material que vale para qualquer plano)',
+            trechos: b.results.map((r) => ({
+              conteudo: r.content,
+              titulo: typeof r.source_ref?.title === 'string' ? r.source_ref.title : null,
+              origem: r.layer === 'catalog' ? 'material do catálogo' : 'material carregado pelo corretor',
+              similaridade: r.similarity,
+            })),
+          })),
+          ...(out.porEscopo.length > 1
+            ? {
+                instrucao:
+                  'Estes trechos são de operadoras DIFERENTES. Responda cada operadora separadamente e ' +
+                  'NUNCA use o trecho de uma para afirmar algo sobre a outra. A parte que não tiver ' +
+                  'trecho, não afirme: diga que uma pessoa vai confirmar.',
+              }
+            : {}),
+        };
+        return turnoProjeta(mcpToolIdsDoTurno) ? projetarRetornoDeTool(paraOModelo) : paraOModelo;
       },
     }),
     send_message: tool({
@@ -1402,6 +1607,54 @@ export async function runAgentTurn(
             agentConfig?.casesEnabled === true
               ? await hasOpenCaseForContact(pool, tenantId, input.conversationId)
               : false;
+
+          // ── FR-018 · o veto é por AFIRMAÇÃO, não por mensagem ──────────────────
+          //
+          // O cliente perguntou sobre o plano dele e o da mãe, de operadoras diferentes.
+          // A busca já veio segregada; aqui cada FRASE é conferida contra o material da
+          // operadora de que ela fala. A parte sem material é recusada isoladamente e a
+          // parte que tem continua saindo — derrubar a mensagem inteira puniria o cliente
+          // pela metade que estava certa.
+          //
+          // Só corta quando a mensagem ATRAVESSA operadoras. Numa resposta sobre uma só,
+          // recortar frases e emendar uma recusa produziria um texto pior que a recusa
+          // inteira que a fatia F1 já entrega — então esse caso segue exatamente como
+          // antes, com o gate vetando o corpo original.
+          //
+          // E só quando a exigência de lastro está LIGADA: com `rag_must_hit` desligado o
+          // corretor escolheu que o agente responde sem material, e recortar a mensagem
+          // dele seria aplicar meio guardrail sem que ninguém tivesse pedido nenhum.
+          const particao = particionarPorEscopo({
+            corpo: body,
+            lastros: lastrosPorEscopo,
+            escopoPadrao: { scopeId: vinculoDeEscopo.scopeId, scopeName: vinculoDeEscopo.displayName },
+            escoposConhecidos: escoposDoTenant,
+            minCitations: agentConfig?.minCitations ?? 1,
+          });
+          const recusaIsolada =
+            (agentConfig?.exigeLastro ?? false) &&
+            particao.recusados.length > 0 &&
+            particao.escoposTocados.length > 1 &&
+            particao.corpoAprovado.trim() !== '';
+          if (recusaIsolada) {
+            runLog.info('resposta recusada por operadora, isoladamente (FR-018)', {
+              operadoras_tocadas: particao.escoposTocados.length,
+              operadoras_recusadas: particao.recusados.length,
+            });
+            // As três coisas que o veto sempre produz (contrato do gate): a frase ao
+            // cliente — aqui emendada no MESMO envio, porque a outra metade da resposta
+            // vai junto —, a escalação, e o item na Central.
+            await escalarRecusaDeAssistencia(particao.recusados);
+          }
+          const corpoCandidato = recusaIsolada
+            ? `${particao.corpoAprovado}\n\n${fraseDeRecusaParcial(particao.recusados)}`
+            : body;
+          // Âncoras do que de fato vai sair. Quando a recusa NÃO é isolada e há afirmação
+          // sem lastro, o conjunto vazio é o que faz o gate vetar — a decisão continua
+          // sendo dele, este cálculo só diz o que ele vê.
+          const ancorasDoCorpo: readonly Grounding[] =
+            particao.recusados.length > 0 && !recusaIsolada ? [] : particao.groundings;
+
           // Args reusados EXATAMENTE (mesmo objeto) no re-run do fail-safe abaixo — só
           // hasOpenCase/openedCaseThisTurn mudam depois do auto-abre-caso.
           const beforeSendArgs = {
@@ -1411,7 +1664,7 @@ export async function runAgentTurn(
             leadId,
             jobId: job.id,
             channelSessionId: input.channelSessionId,
-            body,
+            body: corpoCandidato,
             optedOutThisTurn,
             // ponytail: channel_sessions.daily_message_limit do CRM ainda não é lido
             // no runtime — null cai nos degraus de warm-up (conservadores). Injetar
@@ -1435,9 +1688,11 @@ export async function runAgentTurn(
             // único corpo escrito pelo modelo e o único caminho em que o veto vira erro
             // instrutivo. E só quando o corretor ligou a exigência na tela — é o
             // guardrail `rag_must_hit`, que até esta fatia salvava e ninguém avaliava
-            // (FR-015). O agente que a instalação cria já nasce com ela ligada.
+            // (FR-015). TODO agente nasce com ela ligada, e não só o do onboarding: é o
+            // DEFAULT de `ai_agents.guardrails` (migration 0129). Desligar continua
+            // possível, mas virou decisão explícita na tela.
             enforceAssistanceGrounding: agentConfig?.exigeLastro ?? false,
-            groundings: pendingGroundings,
+            groundings: ancorasDoCorpo,
             minCitations: agentConfig?.minCitations ?? 1,
             ...(deps.knobs.disclosureMode !== undefined ? { disclosureMode: deps.knobs.disclosureMode } : {}),
             // Gate 5 (F4-02): classificador semântico roteado pelo MESMO seam agnóstico (budget
@@ -1451,9 +1706,9 @@ export async function runAgentTurn(
                 maxChars: agentConfig?.splitMaxChars ?? 600,
                 sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
                 jitter: () => 1200 + Math.floor(Math.random() * 800), // piso no throttle anti-ban (1.2s) — bolhas são mensagens físicas
-                send: (bubble): Promise<ChannelSendResult> => {
+                send: async (bubble): Promise<ChannelSendResult> => {
                   seq += 1;
-                  return channel.send({
+                  const enviada = await channel.send({
                     tenantId,
                     leadId,
                     jobId: job.id,
@@ -1467,6 +1722,28 @@ export async function runAgentTurn(
                       ? { metadata: { citations: pendingCitations, ai_generated: true } }
                       : {}),
                   });
+                  // FR-021 · T105: a mesma âncora vira REGISTRO consultável, ao lado da
+                  // cópia que já viaja em `metadata`. Depois do envio porque a linha
+                  // referencia `messages.id`, que não existe antes dele — e é por isso
+                  // que falhar aqui não derruba o turno: a resposta já saiu, e o cliente
+                  // já leu. A fronteira está escrita por extenso no docblock de
+                  // `grounding-registry.ts`.
+                  if (
+                    pendingCitations.length > 0 &&
+                    (enviada.kind === 'sent' || enviada.kind === 'already_sent') &&
+                    enviada.messageId
+                  ) {
+                    await registrarGroundings(
+                      pool,
+                      {
+                        organizationId: tenantId,
+                        messageId: enviada.messageId,
+                        citations: pendingCitations,
+                      },
+                      runLog,
+                    );
+                  }
+                  return enviada;
                 },
               }),
           };
@@ -1546,25 +1823,12 @@ export async function runAgentTurn(
             // invariante 4 do sistema vivo proíbe — e seria causado pelo guardrail que
             // veio melhorar o atendimento.
             if (!assistenciaSemLastroEscalada) {
-              assistenciaSemLastroEscalada = true;
-              try {
-                await escalarAssistenciaSemLastro(pool, {
-                  tenantId,
-                  leadId,
-                  conversationId: input.conversationId,
-                  perguntaOriginal: skillSignal,
-                  // F1 não tem vínculo cliente↔operadora ainda (chega na F2). "não
-                  // identificada" é informação honesta; um campo em branco não seria.
-                  escopo: null,
-                  log: runLog,
-                });
-              } catch (err) {
-                // A escalação falhar não pode impedir o cliente de ser avisado. O aviso
-                // na Central é importante; a pessoa do outro lado da conversa é mais.
-                runLog.error('escalação da recusa por falta de lastro falhou', {
-                  error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
-                });
-              }
+              // Desde a F2 a escalação sabe QUAL operadora ficou sem material e se existe
+              // uma no catálogo, desligada, que cobriria o assunto (T137 / FR-042). Os
+              // escopos recusados vêm da partição do corpo — quando ela não identificou
+              // nenhum, o helper cai no vínculo do contato e, por último, em "não
+              // identificada", que é informação honesta e não campo vazio.
+              await escalarRecusaDeAssistencia(particao.recusados);
               const avisoAoCliente = await runBeforeSend({
                 ...beforeSendArgs,
                 body: FRASE_DE_RECUSA_SEM_LASTRO,
@@ -1608,7 +1872,7 @@ export async function runAgentTurn(
           // conseguia dizer de onde ela tinha saído. Rastreabilidade que depende de uma
           // segunda escrita dar certo não é rastreabilidade.
           pendingCitations = [];
-          pendingGroundings = [];
+          lastrosPorEscopo = [];
           switch (outcome.kind) {
             case 'sent':
             case 'already_sent':
@@ -2117,9 +2381,19 @@ export async function runAgentTurn(
         `Se a mensagem dele responde a isso, chame provide_case_update com este case_id e a informação recebida — ` +
         `NÃO diga que já repassou/avisou o responsável sem chamar a tool.`
       : '';
-  const openingSuffixes = [matchedSkillsBlock, stageHintBlock, splitHint, caseAwaitingLeadBlock].filter(
-    (b) => b !== '',
-  );
+  // Spec 002, T060/A-05: a pergunta da operadora entra no SUFIXO por-lead (volátil, nunca
+  // no prefixo cacheável) e só quando ela ainda é desconhecida e nunca foi feita nesta
+  // conversa. O bloco carrega, junto, a proibição de supor (T061) — o código impede o
+  // vínculo errado de ser GRAVADO, e esta linha impede o modelo de AFIRMAR sobre uma
+  // operadora que ele supôs, que é a metade que o cliente sentiria.
+  const perguntaDeEscopoBlock = precisaPerguntarEscopo ? blocoDePerguntaDeEscopo(escoposDoTenant) : '';
+  const openingSuffixes = [
+    matchedSkillsBlock,
+    stageHintBlock,
+    splitHint,
+    caseAwaitingLeadBlock,
+    perguntaDeEscopoBlock,
+  ].filter((b) => b !== '');
   const openingText =
     openingSuffixes.length === 0 ? openingBase : `${openingBase}\n\n${openingSuffixes.join('\n\n')}`;
   // Onda 3 (aprimoramento): mídia inbound recente vira part nativa (image/file) SÓ para
@@ -2172,6 +2446,24 @@ export async function runAgentTurn(
     if (created > 0) {
       runLog.warn('jailbreak: escalação humana criada (flag alta + promessa fora de tabela no turno)', {
         jailbreak_level: jailbreakLevel,
+      });
+    }
+  }
+
+  // A-05: uma pergunta, uma operadora. A marca é gravada quando o bloco foi injetado E
+  // alguma mensagem de fato saiu — não na injeção. A diferença importa nos dois sentidos:
+  // marcar na injeção gastaria a única pergunta num turno em que o cliente não recebeu
+  // nada (o gate vetou, o canal caiu), e não marcar nunca faria o agente perguntar a
+  // mesma coisa em todo turno, que é o incômodo que A-05 nomeia.
+  //
+  // Fire-and-forget: falhar aqui repete a pergunta uma vez, o que é chato; derrubar o
+  // turno por causa disso é pior.
+  if (precisaPerguntarEscopo && outcomes.some((o) => o.kind === 'sent' || o.kind === 'already_sent')) {
+    try {
+      await marcarEscopoPerguntado(pool, tenantId, input.conversationId);
+    } catch (err) {
+      runLog.warn('marca de "operadora já perguntada" não gravada', {
+        error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
       });
     }
   }

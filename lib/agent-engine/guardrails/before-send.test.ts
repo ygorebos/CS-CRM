@@ -31,6 +31,10 @@ const ancora: Grounding = {
   material_id: '00000000-0000-4000-8000-0000000000a1',
   layer: 'tenant',
   similarity: 0.83,
+  // Âncora do assunto por construção: este arquivo exercita OUTRO eixo, e a pertinência
+  // (T138) tem suíte própria em assistance-grounding.test.ts.
+  categorias: ['cobranca', 'acesso', 'rede', 'cobertura', 'prazos', 'canais', 'regras'],
+  aprendidoDeConversa: false,
 };
 
 function chamaCadeiaReal(args: {
@@ -79,12 +83,17 @@ describe('o veto de lastro atravessa a cadeia real', () => {
     if (r.status !== 'vetoed') throw new Error('inalcançável');
     expect(r.gate).toBe('assistance_grounding');
     expect(r.code).toBe('assistencia_sem_lastro');
-    expect(r.trace).toContainEqual({
-      gate: 'assistance_grounding',
-      verdict: 'veto',
-      code: 'assistencia_sem_lastro',
-      detail: { ancoras: 0, piso: 1 },
-    });
+    expect(r.trace).toContainEqual(
+      expect.objectContaining({
+        gate: 'assistance_grounding',
+        verdict: 'veto',
+        code: 'assistencia_sem_lastro',
+        // `objectContaining` no detail de propósito: ele ganhou o diagnóstico de
+        // pertinência (T138) e vai ganhar mais. O que ESTE teste vigia é o veto no gate
+        // certo com zero âncoras — não o formato inteiro do detail, que tem suíte própria.
+        detail: expect.objectContaining({ ancoras: 0, piso: 1 }),
+      }),
+    );
     const sql = String(inserts.mock.calls[0]?.[0] ?? '');
     expect(sql).toMatch(/insert into before_send_traces/);
   });
@@ -136,11 +145,14 @@ describe('o veto de lastro atravessa a cadeia real', () => {
     }).run;
     expect(r.status).toBe('vetoed');
     if (r.status !== 'vetoed') throw new Error('inalcançável');
-    expect(r.trace).toContainEqual({
-      gate: 'assistance_grounding',
-      verdict: 'veto',
-      code: 'assistencia_sem_lastro',
-      detail: { ancoras: 1, piso: 2 },
-    });
+    expect(r.trace).toContainEqual(
+      expect.objectContaining({
+        gate: 'assistance_grounding',
+        verdict: 'veto',
+        code: 'assistencia_sem_lastro',
+        // O que este teste vigia é o piso chegar pela cadeia — a âncora É pertinente aqui.
+        detail: expect.objectContaining({ ancoras: 1, pertinentes: 1, piso: 2 }),
+      }),
+    );
   });
 });
