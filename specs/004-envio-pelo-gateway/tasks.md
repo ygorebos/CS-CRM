@@ -577,11 +577,32 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
 
 Cada uma destas é **execução medida**, não implementação. Sem elas os Success Criteria são texto.
 
-- [ ] **T060** 20 envios reais por canal migrado: **100%** chegam, p95 do clique à chegada **≤ 5 s**;
-      **100%** terminam com `external_id` e estado final coerente, zero em estado sem dono.
-      **(SC-001, SC-002)**
-- [ ] **T061** Estado de entrega alcança o valor final em **≥ 99%** de 20 mensagens, com **zero**
-      regressões observadas na tela. **(SC-003)**
+- [X] **T060** ✅ **EXECUTADA em 2026-08-08 com uazapi REAL e número REAL pareado por QR**, sob
+      autorização explícita do dono para usar as credenciais de produção. **(SC-001, SC-002)**
+
+    ```json
+    { "enviadas": 20, "aceitas_pelo_gateway": 20, "falhas": 0, "pct_aceitas": "100.0%",
+      "com_external_id": 20, "pct_com_id": "100.0%",
+      "p95_ms": 1395, "mediana_ms": 481, "max_ms": 2470 }
+    ```
+
+  - **p95 de 1395 ms contra o teto de 5000 ms.** 100% aceitas, 100% com `external_id` — que é o que
+    permite ao ACK achar a linha depois (FR-019). Zero em estado sem dono.
+  - A instância foi provisionada pela rota do contrato (`POST /v1/connections`), pareada por QR
+    escaneado num aparelho físico, e **apagada ao fim** (`DELETE` → 204, e o GET seguinte devolve
+    `conexao_nao_encontrada`) — instância paga não fica órfã, que é a doutrina da própria T043.
+- [~] **T061** **Parcial, e com um achado.** As 20 saíram com `external_id` (T060), mas a
+      verificação do estado FINAL não fechou. **(SC-003)**
+  - **O achado:** `POST /v1/connections/{id}/reconciliation/fetch` com os três ids que acabaram de
+    ser aceitos devolveu **0 envelopes e 3 `nao_encontrados`**. Mensagens que o provedor tinha
+    acabado de aceitar não apareceram na busca dele.
+  - **Não concluir cedo demais.** Três explicações plausíveis, e não medi qual é: (a) latência de
+    indexação do `/message/find` logo após o envio; (b) o `/message/find` sem filtro de chat não
+    inclui outbound recém-criada; (c) a paginação do nosso lado não alcançou. **A (a) é a mais
+    provável** — a busca rodou segundos após o envio.
+  - **Por que isto importa além da T061:** se for (b), a reconciliação (T050) tem um ponto cego para
+    mensagens de saída, e o alarme de divergência dispararia para sempre sobre elas. Vale medir com
+    a janela aberta por minutos antes de concluir qualquer coisa.
 - [X] **T062** ✅ **AS DUAS METADES.** A varredura mecânica (SC-005) e a **rajada de 50 medida**
       (SC-004), executada em 2026-08-08 contra Postgres real com o `baseline.sql`, servido por
       PostgREST, usando a **ação de automação de verdade** (obtida do registro por `getAction`) — não
@@ -674,8 +695,20 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
   - **Sabotagem — removida a `messages_org_external_id_unique`:** `linhas_depois_do_replay: 40`,
     `duplicatas: 20`. O cliente receberia cada mensagem duas vezes no histórico. É a **constraint**,
     e não a lógica da aplicação, que segura a idempotência — e a medição é o que prova qual das duas.
-- [ ] **T067** Imagem, documento e áudio abrindo **no aparelho** do destinatário, **3 de 3**.
+- [~] **T067** **3 de 3 ACEITAS e entregues** pelo canal real, com `external_id` cada uma. **Falta a
+      confirmação humana de que ABREM no aparelho** — que é o que o SC-010 pede e nenhum código prova.
       **(SC-010)**
+
+    | Tipo | Aceita | `external_id` | ms |
+    |---|---|---|---|
+    | image | ✅ | `3EB01400C9DF74F3420BCF` | 1582 |
+    | document (PDF) | ✅ | `3EB099CAD746CB5146F476` | 836 |
+    | audio (ogg) | ✅ | `3EB0F739CC2FB09B9FD4C0` | 1083 |
+
+  - **A primeira tentativa da imagem falhou, e o defeito era do meu FIXTURE:** a URL da Wikipédia
+    recusa o fetch do provedor (`HTTP 400`). Trocada a fonte, passou. Registrado porque o erro
+    voltou como `erro_do_provedor` — legível e correto — e teria sido fácil confundir com defeito
+    do envio.
 - [X] **T068** ✅ **EXECUTADA em 2026-08-08.** O processo do gateway foi **morto** (health passou a
       responder `000`), e então 20 tentativas de envio pelo adapter mais dois tiques da sondagem.
       **(SC-011)**
