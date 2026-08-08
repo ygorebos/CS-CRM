@@ -38,20 +38,20 @@
 
 | Princípio | Como esta spec responde |
 |---|---|
-| **I** — isolamento de tenant | FR-012: conexão de destino resolvida do próprio canal, **nunca** do corpo. O pior caso da feature está nomeado nos Edge Cases: `connection_id` errado manda a mensagem pelo número de outra organização |
-| **II** — nada é ilha | FR-018 (queda vira alerta **e** aviso na Central), FR-043 (auditoria de toda mudança de canal). O Living System Checklist completo é do `plan.md` |
+| **I** — isolamento de tenant | FR-017: conexão de destino resolvida do próprio canal, **nunca** do corpo. O pior caso da feature está nomeado nos Edge Cases: `connection_id` errado manda a mensagem pelo número de outra organização |
+| **II** — nada é ilha | FR-023 (queda vira alerta **e** aviso na Central), FR-043 (auditoria de toda mudança de canal). O Living System Checklist completo é do `plan.md` |
 | **III** — schema muda por migration | FR-040. Reversibilidade por canal em FR-041 é o caminho de volta declarado |
 | **IV** — prova pela tela | US4 e SC-006 exigem conta nova, estado vazio, cronometrado; SC-010 exige o anexo abrindo **no aparelho** |
-| **V** — evento na fila | FR-017: estado com dono declarado, nunca órfão. A lacuna herdada está nomeada: hoje só a direção de **entrada** tem fila durável |
-| **VI** — contrato de API | FR-013: credencial em cabeçalho, nunca em query string |
-| **VII** — interoperável por contrato | FR-001 e a entidade "conexão do lado do gateway": o CRM guarda ponteiro, nenhuma FK atravessa fronteira de produto |
+| **V** — evento na fila | FR-022: estado com dono declarado, nunca órfão. A lacuna herdada está nomeada: hoje só a direção de **entrada** tem fila durável |
+| **VI** — contrato de API | FR-018: credencial em cabeçalho, nunca em query string |
+| **VII** — interoperável por contrato | ⚠️ **CONFLITO ABERTO.** A decisão de 2026-08-08 põe o gateway escrevendo no banco do CRM, contra o texto vigente. FR-001 a FR-003 preservam a *intenção* (contrato versionado, papel sem grant de tabela, schema não vaza) e FR-004 preserva a outra metade (tenant nunca vem do corpo). Mas o texto do princípio **precisa de emenda** — é a T001 do `tasks.md`, e até ela existir esta linha é uma não-conformidade declarada, não resolvida |
 | **VIII** — corretor em 10 minutos | US4 é o passo 2 do onboarding. SC-006 exige contagem de passos **idêntica** |
 | **IX** — vender ou assistir | Declarado no cabeçalho: serve às duas |
 | **X** — operadora é dado curado | N/A — feature de transporte |
 | **XI** — teste que prova e vigia | SC-012 exige sabotagem confirmada em **cada** teste novo. SC-005 exige varredura mecânica, não inspeção |
 | **XII** — contexto antes de ação | Esta sessão leu a constituição (v2.2.0), o `CLAUDE.md` e os artefatos da spec 001 antes de escrever, e releu depois da compactação de contexto |
 | **XIII** — cobrança mora no Cotador | Assumption explícita e item em "Fora de escopo" |
-| **XIV** — gateway único e sem réplica | FR-013 (endereço é configuração), FR-018 (queda visível), FR-042 (só envelope). **A frente 1 existe justamente porque XIV proíbe o atalho** de o CRM escrever no banco do outro produto |
+| **XIV** — gateway único e sem réplica | FR-018 (endereço é configuração), FR-023 (queda visível), FR-042 (só envelope). **A frente 1 existe justamente porque XIV proíbe o atalho** de o CRM escrever no banco do outro produto — e isso **continua valendo** na direção CRM→Cotador; o que a decisão de 2026-08-08 mudou foi a direção oposta. O que XIV cobra a mais agora é FR-013: sem réplica e sem o `webhook_events_log` no caminho, a fila em disco do gateway virou a **única** rede contra perda |
 
 ## Notas
 

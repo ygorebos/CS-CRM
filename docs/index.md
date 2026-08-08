@@ -10,8 +10,9 @@ audited_against: origin/main @ 789dfa6 (v1.0.0, 2026-07-27)
 
 # Índice da documentação — DeskcommCRM
 
-Mapa dos **119** arquivos `.md` de `docs/`, espalhados por **23** subpastas — régua:
-`git ls-files 'docs/**/*.md' | wc -l`. Existe porque a documentação cresceu sem ponto
+Mapa dos **136** arquivos `.md` em subpastas de `docs/`, espalhados por **17** subpastas, mais
+**11** na raiz de `docs/` — **147** no total. Réguas: `git ls-files 'docs/**/*.md' | wc -l` e
+`git ls-files 'docs/*.md' 'docs/**/*.md' | sort -u | wc -l`. Existe porque a documentação cresceu sem ponto
 de entrada: sem este índice, humano e agente não acham o que já foi decidido e
 reescrevem por cima.
 

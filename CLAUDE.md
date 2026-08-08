@@ -5,7 +5,7 @@
 **Este arquivo é a doutrina — a autoridade final sobre convenção e anti-pattern.** Complementos, na ordem em que ajudam:
 
 - [`AGENTS.md`](AGENTS.md) — mesmo contrato em forma portável (para Codex/Cursor/Copilot e afins). É derivado deste arquivo, não o substitui. **Ao mudar doutrina aqui, verifique se `AGENTS.md` desatualizou.**
-- [`docs/index.md`](docs/index.md) — índice dos 123 docs, com regra de precedência quando dois docs discordam. Use antes de sair varrendo `docs/`.
+- [`docs/index.md`](docs/index.md) — índice dos 147 docs, com regra de precedência quando dois docs discordam. Use antes de sair varrendo `docs/`.
 - [`docs/current-state.md`](docs/current-state.md) — o que está pronto, incompleto e quebrado. **Leia antes de estimar ou prometer qualquer coisa.**
 - [`docs/harness-audit.md`](docs/harness-audit.md) — onde a verificação tem buraco. Importante: `pnpm gov:verify` **não** cobre `test:db` nem `test:e2e` — verde ali não é prova para mudança de schema ou de UI.
 - [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real da instância.

@@ -14,6 +14,28 @@ de **sabotagem**, que prova que o teste realmente vigia.
 **Organization**: por história, na ordem de risco decrescente do plano (fatias 1→5). Cada fase é
 um incremento utilizável sozinho.
 
+> ### ⚠️ Leia antes de retomar qualquer task aberta (nota de 2026-08-08)
+>
+> A [decisão de escrita direta](../004-envio-pelo-gateway/decisao-escrita-direta.md) põe o fork do
+> gateway gravando **direto no banco do CRM**. O caminho de entrada que esta spec construiu — rota
+> assinada `/api/v1/webhooks/gateway/[token]`, ACK-primeiro, `webhook_events_log` como fila durável,
+> `lib/gateway/ingest.ts` — **fica sem uso no caminho do gateway** quando a spec 004 entrar.
+>
+> **O que isso muda para as tasks abertas:**
+>
+> - **T030, T038, T038a, T064, T065** medem exatamente esse caminho (roteiros do `quickstart.md`
+>   §1, §2, §7, §9, §4). Continuam válidas — o caminho está em produção para todo canal já migrado —
+>   mas passam a ter **fim de vida planejado**. Executá-las é prova do que roda hoje, não
+>   investimento de longo prazo. Priorize-as **acima** das outras se um canal real já estiver
+>   migrado; **abaixo**, se nenhum estiver.
+> - **T069, T070, T071** são independentes da decisão e não perdem valor. T071 (retenção de
+>   `webhook_events_log`) **continua obrigatória**: a tabela segue em uso pelos demais provedores, e
+>   é dívida de LGPD.
+>
+> **Nada aqui deve ser desfeito.** O código entregue por esta spec é o que atende hoje. A nota existe
+> para ninguém investir uma semana endurecendo um caminho que a 004 aposenta — e para ninguém
+> apagá-lo achando que já foi aposentado.
+
 ## Format: `[ID] [P?] [Story] Description`
 
 - **[P]**: paralelizável (arquivos distintos, sem dependência pendente)

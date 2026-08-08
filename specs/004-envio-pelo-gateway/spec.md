@@ -359,31 +359,31 @@ cada um no aparelho.
 
 ### Frente 2 — Envio
 
-- **FR-010**: O CRM MUST enviar mensagem pelo gateway para canais marcados com caminho de gateway,
+- **FR-015**: O CRM MUST enviar mensagem pelo gateway para canais marcados com caminho de gateway,
   e continuar enviando pelo caminho antigo para os demais — a chave de corte é **por canal**, a
   mesma que o recebimento já usa.
-- **FR-011**: O envio pelo gateway MUST entrar como um tradutor de canal atrás do seam existente,
+- **FR-016**: O envio pelo gateway MUST entrar como um tradutor de canal atrás do seam existente,
   sem que nenhuma feature do CRM passe a nomear provedor (doutrina de restrição de canal).
-- **FR-012**: O CRM MUST identificar a conexão de destino pelo identificador de conexão gravado no
+- **FR-017**: O CRM MUST identificar a conexão de destino pelo identificador de conexão gravado no
   próprio canal, resolvido de fonte confiável, **nunca** de corpo de requisição.
-- **FR-013**: A credencial de acesso ao gateway MUST viajar em cabeçalho, nunca em query string, e
+- **FR-018**: A credencial de acesso ao gateway MUST viajar em cabeçalho, nunca em query string, e
   MUST ser configuração — o endereço do gateway não é `localhost` nem nome de serviço de compose
   (Princípio XIV).
-- **FR-014**: O identificador devolvido pelo gateway MUST ser gravado como referência externa da
+- **FR-019**: O identificador devolvido pelo gateway MUST ser gravado como referência externa da
   mensagem, e MUST casar com o identificador que volta nas confirmações de entrega. Se não casar, a
   confirmação não acha a mensagem e o visto nunca chega.
-- **FR-015**: Toda saída de mensagem por canal migrado MUST passar pelas mesmas travas de vazão e
+- **FR-020**: Toda saída de mensagem por canal migrado MUST passar pelas mesmas travas de vazão e
   janela que hoje protegem o envio do agente — **inclusive** a rotina de recuperação de mensagens
   presas, que hoje fala direto com o provedor antigo.
-- **FR-016**: O CRM MUST tratar a resposta de sucesso do gateway como **aceite provisório**: o
+- **FR-021**: O CRM MUST tratar a resposta de sucesso do gateway como **aceite provisório**: o
   estado definitivo vem pela confirmação assíncrona.
-- **FR-017**: Falha de envio MUST produzir estado com dono declarado — reagendável ou falho — e
+- **FR-022**: Falha de envio MUST produzir estado com dono declarado — reagendável ou falho — e
   nunca um estado órfão sem quem o resolva.
-- **FR-018**: Queda ou indisponibilidade do gateway MUST virar alerta para a operação **e** aviso
+- **FR-023**: Queda ou indisponibilidade do gateway MUST virar alerta para a operação **e** aviso
   na Central para o usuário (Princípio XIV). Silêncio é proibido.
-- **FR-019**: Mídia MUST ser entregue ao gateway por referência de endereço, não embutida no corpo,
+- **FR-024**: Mídia MUST ser entregue ao gateway por referência de endereço, não embutida no corpo,
   e a validade dessa referência MUST cobrir com folga o tempo de busca pelo provedor.
-- **FR-020**: O envio para conversa de grupo MUST permanecer impedido pelo caminho novo, com o
+- **FR-025**: O envio para conversa de grupo MUST permanecer impedido pelo caminho novo, com o
   mesmo desfecho de hoje.
 
 ### Frente 3 — Conexão
