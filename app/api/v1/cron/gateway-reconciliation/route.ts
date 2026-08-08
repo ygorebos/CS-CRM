@@ -28,6 +28,7 @@ import { env } from "@/lib/env";
 import { provisionamentoConfigurado } from "@/lib/gateway/provisionamento";
 import {
   alarmarDivergencia,
+  CARENCIA_DE_INDEXACAO_MS,
   JANELA_MS,
   reconciliarConexao,
 } from "@/lib/gateway/reconciliacao";
@@ -75,7 +76,10 @@ async function handle(req: NextRequest): Promise<Response> {
   if (error) return fail("internal_error", error.message, 500, { requestId });
 
   const conexoes = (data ?? []) as Conexao[];
-  const until = new Date();
+  // A janela termina no passado, não em `agora` (T061, medido): o provedor leva
+  // dezenas de minutos para indexar mensagem enviada pela API, e varrer até
+  // agora declararia faltante tudo o que acabou de sair.
+  const until = new Date(Date.now() - CARENCIA_DE_INDEXACAO_MS);
   const since = new Date(until.getTime() - JANELA_MS);
 
   let faltantes = 0;

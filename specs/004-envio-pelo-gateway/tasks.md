@@ -591,8 +591,21 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
   - A instância foi provisionada pela rota do contrato (`POST /v1/connections`), pareada por QR
     escaneado num aparelho físico, e **apagada ao fim** (`DELETE` → 204, e o GET seguinte devolve
     `conexao_nao_encontrada`) — instância paga não fica órfã, que é a doutrina da própria T043.
-- [~] **T061** **Parcial, e com um achado.** As 20 saíram com `external_id` (T060), mas a
-      verificação do estado FINAL não fechou. **(SC-003)**
+- [X] **T061** ✅ **MEDIDA E FECHADA em 2026-08-08 — e mudou o desenho da T050.** **(SC-003)**
+  - **A sequência de medições, e por que nenhuma podia ser pulada:** o `fetch` da reconciliação
+    devolveu `nao_encontrados` para ids recém-aceitos. Consulta crua ao provedor mostrou que o
+    formato **não** era o problema (`messageid` puro, idêntico ao do envio; o prefixado é o campo
+    `id`, separado) e que **outbound aparece** (`fromMe: true`). Varredura das 200 mais recentes, um
+    minuto após o envio: **ausente**. **Vinte e cinco minutos depois: presente.**
+  - **Era LATÊNCIA DE INDEXAÇÃO, não ponto cego.** A reconciliação funciona — desde que **não olhe o
+    passado imediato**.
+  - **A correção é de desenho, e é uma constante:** `CARENCIA_DE_INDEXACAO_MS = 30 min`. A janela
+    agora **termina no passado**, não em `agora`. Sem isso, toda mensagem recém-enviada seria
+    declarada faltante em toda rodada, e o alarme de divergência viraria ruído constante — que é
+    como se ensina a ignorá-lo.
+  - **Este é o achado mais valioso da Fase 6 inteira.** A T050 passava por 5 testes com sabotagem, e
+    teria falhado em produção do primeiro tique em diante. Nenhum dublê pegaria: o dublê responde na
+    hora, porque fui eu que o escrevi assim.
   - **O achado:** `POST /v1/connections/{id}/reconciliation/fetch` com os três ids que acabaram de
     ser aceitos devolveu **0 envelopes e 3 `nao_encontrados`**. Mensagens que o provedor tinha
     acabado de aceitar não apareceram na busca dele.

@@ -55,6 +55,23 @@ export const KIND_DIVERGENCIA: InboxKind = "gateway_reconciliation_gap";
  */
 export const JANELA_MS = 60 * 60 * 1000;
 
+/**
+ * Quanto do passado IMEDIATO a janela ignora (spec 004, T061 — medido).
+ *
+ * Medido em 2026-08-08 contra o provedor real: mensagem enviada pela API **não
+ * aparece** no `/message/find` um minuto depois — nem entre as 200 mais
+ * recentes. Vinte e cinco minutos depois, aparece. É **latência de indexação**,
+ * não ponto cego.
+ *
+ * A consequência é de desenho, e é esta constante: reconciliar até `agora`
+ * declararia faltante toda mensagem recém-enviada, em toda rodada, e o alarme de
+ * divergência viraria ruído constante — que é como se ensina a ignorá-lo.
+ *
+ * Trinta minutos: acima da latência observada, com folga, e bem dentro da janela
+ * de uma hora, então nada deixa de ser varrido — só é varrido mais tarde.
+ */
+export const CARENCIA_DE_INDEXACAO_MS = 30 * 60 * 1000;
+
 /** Teto de ids por chamada de conteúdo — o mesmo do outro lado. */
 const TETO_DE_IDS = 200;
 
