@@ -10588,3 +10588,172 @@ revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, in
 grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) to service_role;
 
 notify pgrst, 'reload schema';
+
+
+-- ---- a âncora como registro, e a recusa com escopo e motivo (migration 0126) ----
+--
+-- Ver o cabeçalho de supabase/migrations/20260808220000_0126_rastreabilidade_validade_lacunas.sql para o porquê.
+
+-- ── 1 · a âncora como registro ──────────────────────────────────────────────
+create table if not exists public.message_groundings (
+  id              uuid primary key default gen_random_uuid(),
+  organization_id uuid not null references public.organizations(id) on delete cascade,
+
+  -- `cascade`: apagada a mensagem, a âncora dela não tem o que provar. E a anonimização
+  -- da LGPD passa por aqui — âncora órfã de mensagem redigida seria dado sobrevivente de
+  -- uma conversa que o titular pediu para apagar.
+  message_id      uuid not null references public.messages(id) on delete cascade,
+
+  layer           text not null check (layer in ('tenant', 'catalog')),
+
+  -- SEM FK, e isto é a feature, não um esquecimento. O trecho e o material são recriados
+  -- a cada reindexação; uma FK aqui ou impediria reindexar (violação de referência) ou
+  -- apagaria o histórico em cascata. O id fica como PISTA para quem investiga hoje, e
+  -- `source_ref` é o que responde quando ele não existe mais.
+  chunk_id        uuid,
+  material_id     uuid,
+
+  -- A cópia congelada: título, escopo, data do material e camada, como estavam quando a
+  -- resposta saiu. É o que FR-023 exige que sobreviva à reconstrução do acervo.
+  source_ref      jsonb not null default '{}'::jsonb,
+  similarity      real,
+
+  created_at      timestamptz not null default now()
+);
+
+-- A leitura natural: "que âncoras esta resposta teve?" — é o que a tela pergunta.
+create index if not exists message_groundings_message_idx
+  on public.message_groundings (message_id);
+
+-- E a que `metadata` não conseguia responder: "que material ancorou respostas na janela?".
+create index if not exists message_groundings_org_material_idx
+  on public.message_groundings (organization_id, material_id, created_at desc);
+
+-- Reprocessar o mesmo turno não duplica âncora. Sem isto, um retry de worker dobraria a
+-- contagem de "quantas vezes este material respondeu" — número que vira decisão de
+-- curadoria.
+create unique index if not exists message_groundings_mensagem_trecho_key
+  on public.message_groundings (message_id, chunk_id)
+  where chunk_id is not null;
+
+comment on table public.message_groundings is
+  'Migration 0126 (spec 002, F5): a âncora como REGISTRO permanente (FR-021), não campo de '
+  'conveniência dentro de messages.metadata. source_ref é cópia histórica congelada, e '
+  'chunk_id/material_id NÃO têm FK de propósito: o acervo é recriado a cada reindexação e '
+  'a resposta precisa continuar provando o que valia na época (FR-023).';
+
+alter table public.message_groundings enable row level security;
+
+drop policy if exists tenant_isolation_message_groundings_all on public.message_groundings;
+create policy tenant_isolation_message_groundings_all on public.message_groundings
+  using ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin())
+  with check ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin());
+
+revoke all on public.message_groundings from anon;
+
+-- ── 2 · a recusa passa a dizer onde e por quê ───────────────────────────────
+alter table public.knowledge_searches
+  add column if not exists scope_id uuid references public.knowledge_scopes(id) on delete set null;
+
+-- `set null` e não `cascade`: o corretor que apaga um escopo não deve apagar a prova de
+-- que faltava material nele. A lacuna perde o nome, não a existência.
+
+alter table public.knowledge_searches
+  add column if not exists refusal_reason text;
+
+-- Vocabulário ABERTO, sem CHECK — a exceção deliberada do CLAUDE.md. Um CHECK aqui
+-- quebraria a re-aplicação do baseline em modo update assim que uma razão nova aparecesse
+-- em linha já gravada, e é exatamente isso que o job `invariants` roda. O vocabulário vive
+-- no TypeScript, com constante compartilhada, e esta coluna fica FORA do invariante
+-- `vocabulario-banco-x-typescript.test.ts`, que cobre só colunas que JÁ têm CHECK.
+comment on column public.knowledge_searches.refusal_reason is
+  'Migration 0126 (spec 002, FR-029): por que a busca não ancorou. Vocabulário aberto, sem '
+  'CHECK de propósito (ver CLAUDE.md, colunas de vocabulário aberto). Separa causas com '
+  'consertos opostos: base sem o assunto, escopo desligado, busca indisponível.';
+
+comment on column public.knowledge_searches.scope_id is
+  'Migration 0126 (spec 002, FR-029): em qual operadora a lacuna aconteceu. Sem isto a '
+  'lacuna aparece somada entre todas e o corretor não sabe qual material escrever.';
+
+-- A leitura de lacunas: recusas por escopo na janela.
+create index if not exists knowledge_searches_org_scope_idx
+  on public.knowledge_searches (organization_id, scope_id, created_at desc);
+
+notify pgrst, 'reload schema';
+
+
+-- ---- onde mora o texto de um documento (migration 0127) ----
+--
+-- Ver o cabeçalho de supabase/migrations/20260808230000_0127_texto_de_documento.sql para o porquê.
+
+create table if not exists public.ai_source_passages (
+  id                  uuid primary key default gen_random_uuid(),
+  organization_id     uuid not null references public.organizations(id) on delete cascade,
+  knowledge_source_id uuid not null references public.ai_knowledge_sources(id) on delete cascade,
+
+  -- O eixo de escopo, ESPELHANDO `ai_knowledge_sources` — as mesmas duas colunas que
+  -- `fn_buscar_lastro` filtra. Elas existem aqui, e não só na fonte, porque um documento
+  -- pode ser fatiado com escopos diferentes por seção (um manual que cobre duas
+  -- operadoras), e porque o indexador copia daqui para o trecho: derivar por junção na
+  -- hora da busca colocaria mais um `join` no caminho quente.
+  scope_id            uuid references public.knowledge_scopes(id) on delete set null,
+  applies_to_all      boolean not null default false,
+
+  -- O texto. É a razão de a tabela existir.
+  content             text not null check (length(btrim(content)) > 0),
+
+  -- Ordem no documento. `numeric` e não `int` pela mesma doutrina de
+  -- `position_in_stage`: reprocessar um PDF e precisar inserir uma passagem entre duas
+  -- existentes não pode exigir renumerar todas.
+  position            numeric not null default 0,
+
+  -- A âncora LEGÍVEL. É o que separa "está no seu manual, página 12, Carências" de
+  -- "trecho 47" — a citação que o corretor consegue ir conferir.
+  section_title       text,
+  page_number         integer,
+
+  tags                text[] not null default '{}'::text[],
+  locale              text   not null default 'pt-BR',
+
+  created_at          timestamptz not null default now(),
+  updated_at          timestamptz not null default now()
+);
+
+-- A leitura do indexador: as passagens daquela fonte, em ordem.
+create index if not exists ai_source_passages_source_pos_idx
+  on public.ai_source_passages (knowledge_source_id, position);
+
+create index if not exists ai_source_passages_org_scope_idx
+  on public.ai_source_passages (organization_id, scope_id);
+
+create index if not exists ai_source_passages_tags_gin
+  on public.ai_source_passages using gin (tags);
+
+-- Reprocessar o mesmo documento substitui, não empilha. Sem esta chave, subir de novo o
+-- mesmo manual dobraria as passagens e o mesmo texto ancoraria duas vezes — inflando a
+-- contagem de trechos que a tela mostra como prova de que o material entrou.
+create unique index if not exists ai_source_passages_fonte_posicao_key
+  on public.ai_source_passages (knowledge_source_id, position);
+
+comment on table public.ai_source_passages is
+  'Migration 0127 (spec 002, F4 · T140): onde mora o texto extraído de documento que NÃO é '
+  'par pergunta/resposta. Tabela própria em vez de afrouxar ai_faq_items.question: o motivo '
+  'é significado, não destrutividade — aquela tabela quer dizer "par pergunta/resposta", e '
+  'usá-la para passagem transferiria a cada leitor a obrigação de lembrar que question pode '
+  'ser nulo. Destino de T083; origem de T084.';
+
+drop trigger if exists ai_source_passages_updated_at on public.ai_source_passages;
+create trigger ai_source_passages_updated_at
+  before update on public.ai_source_passages
+  for each row execute function public.fn_set_updated_at();
+
+alter table public.ai_source_passages enable row level security;
+
+drop policy if exists tenant_isolation_ai_source_passages_all on public.ai_source_passages;
+create policy tenant_isolation_ai_source_passages_all on public.ai_source_passages
+  using ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin())
+  with check ((organization_id in (select public.fn_user_org_ids())) or public.fn_is_platform_admin());
+
+revoke all on public.ai_source_passages from anon;
+
+notify pgrst, 'reload schema';

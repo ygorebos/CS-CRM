@@ -34,6 +34,7 @@ import type { ChannelAdapter, ChannelSendResult } from '../channel-adapter';
 
 import { withFields, type Logger } from '../obs/logger';
 import { getLeadContext, type LeadContext, type LeadContextResult } from '../edge/crm/get-lead-context';
+import { registrarGroundings } from './grounding-registry';
 import { citationsFromHits, searchKnowledge } from './search-knowledge';
 import { escalarAssistenciaSemLastro } from './escalar-sem-lastro';
 import type { Grounding } from '../guardrails/assistance-grounding';
@@ -1699,9 +1700,9 @@ export async function runAgentTurn(
                 maxChars: agentConfig?.splitMaxChars ?? 600,
                 sleep: deps.sleep ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms))),
                 jitter: () => 1200 + Math.floor(Math.random() * 800), // piso no throttle anti-ban (1.2s) — bolhas são mensagens físicas
-                send: (bubble): Promise<ChannelSendResult> => {
+                send: async (bubble): Promise<ChannelSendResult> => {
                   seq += 1;
-                  return channel.send({
+                  const enviada = await channel.send({
                     tenantId,
                     leadId,
                     jobId: job.id,
@@ -1715,6 +1716,28 @@ export async function runAgentTurn(
                       ? { metadata: { citations: pendingCitations, ai_generated: true } }
                       : {}),
                   });
+                  // FR-021 · T105: a mesma âncora vira REGISTRO consultável, ao lado da
+                  // cópia que já viaja em `metadata`. Depois do envio porque a linha
+                  // referencia `messages.id`, que não existe antes dele — e é por isso
+                  // que falhar aqui não derruba o turno: a resposta já saiu, e o cliente
+                  // já leu. A fronteira está escrita por extenso no docblock de
+                  // `grounding-registry.ts`.
+                  if (
+                    pendingCitations.length > 0 &&
+                    (enviada.kind === 'sent' || enviada.kind === 'already_sent') &&
+                    enviada.messageId
+                  ) {
+                    await registrarGroundings(
+                      pool,
+                      {
+                        organizationId: tenantId,
+                        messageId: enviada.messageId,
+                        citations: pendingCitations,
+                      },
+                      runLog,
+                    );
+                  }
+                  return enviada;
                 },
               }),
           };
