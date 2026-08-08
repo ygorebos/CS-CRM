@@ -66,6 +66,11 @@ import { escalateLgpdVeto, isLegalBasisValid } from './lgpd/legal-basis';
 import type { LgpdInput } from './lgpd/legal-basis';
 import { detectHumanPromise } from './human-promise';
 import { detectarVazamentoInterno, renderVetoDeVazamento } from './vazamento-interno';
+// O gate vive em módulo próprio (spec 002): `inbound-turn.ts` já tem 1789 linhas e a
+// classificação é lógica pura, testável sem banco. O `import type` de volta (Gate,
+// GateVerdict) é apagado na compilação, então não há ciclo em runtime.
+import { assistanceGroundingGate } from './assistance-grounding';
+import type { Grounding } from './assistance-grounding';
 // Módulo PURO de propósito (`capabilities`, não `index`): o seam não arrasta o
 // adapter — e com ele o cliente HTTP do canal — para dentro do worker.
 import { capabilitiesOf, DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
@@ -196,6 +201,29 @@ export interface GateContext {
    * fiação nos dois sentidos: presente no `send_message`, ausente no follow-up.
    */
   internalVocabularyEnforced?: boolean;
+  /**
+   * Arma o `assistanceGroundingGate` (spec 002, FR-009/FR-010). Ausente = DESARMADO,
+   * pelo mesmo motivo do `internalVocabularyEnforced` acima: no caminho determinístico
+   * (follow-up por template) o veto seria drop silencioso, e cliente mudo não pode ser
+   * desfecho de um gate que existe para melhorar o atendimento.
+   *
+   * Quem arma é o caminho do agente, e só quando o agente tem `rag_must_hit` ligado.
+   */
+  assistanceGroundingEnforced?: boolean;
+  /**
+   * Trechos que fundamentam ESTE corpo. Vazio ou ausente = sem lastro. É o insumo que
+   * transforma a citação de enfeite pós-envio em condição de envio (FR-024).
+   */
+  groundings?: readonly Grounding[];
+  /**
+   * Classificação já feita pelo chamador. Ausente = o gate classifica. A função é a
+   * mesma nos dois caminhos (`classificarAfirmacaoDeAssistencia`) — o campo existe para
+   * não classificar duas vezes o mesmo texto no turno, não para permitir uma segunda
+   * regra.
+   */
+  isAssistanceClaim?: boolean;
+  /** `min_citations` do guardrail `rag_must_hit` (FR-015). Ausente = 1. */
+  minCitations?: number;
 }
 
 /**
@@ -211,7 +239,12 @@ export type GateVerdict =
   // `skipped: 'not_applicable'` (invariante 4 de `docs/doctrine/restricao-de-canal.md`): a
   // restrição não existe NESTE canal. Passa, mas o trace registra que não se aplicava — um
   // `pass` silencioso apagaria a diferença entre "não regrediu" e "provo que não regrediu".
-  | { pass: true; waitMs?: number; amendBody?: string; skipped?: 'not_applicable' }
+  // `skipped: 'disarmed'` (spec 002, FR-015): o gate EXISTE na cadeia mas não está armado
+  // neste caminho. Distinto de 'not_applicable' (a restrição não existe no canal) e de
+  // 'pass' (avaliou e liberou). Sem essa terceira palavra, "ninguém ligou" e "avaliou e
+  // liberou" ficam indistinguíveis no trace — e é justamente sobre essa medição que o
+  // léxico da classificação vai ser ajustado.
+  | { pass: true; waitMs?: number; amendBody?: string; skipped?: 'not_applicable' | 'disarmed' }
   | { pass: false; code: string; reason: string; nextAllowedAt?: Date; detail?: Record<string, string | number> };
 
 export interface Gate {
@@ -514,8 +547,15 @@ const spinningGate: Gate = {
  * nasce DESARMADO por default (ver `GateContext.internalVocabularyEnforced`): só o
  * caminho do agente o arma, então, como a v5, a v6 não muda o destino de nenhum envio
  * que já existia — muda o TRACE, e passa a medir o vazamento onde há modelo para ensinar.
+ * v7 = insere `assistanceGroundingGate` na posição 2.5, entre `lgpd` e `pacing` (spec 002,
+ * FR-009/FR-010): afirmação de assistência sem trecho âncora não sai. Vai DEPOIS dos vetos
+ * de conformidade irrevogáveis e ANTES do anti-ban — não faz sentido gastar cota, throttle
+ * e janela de spinning com um texto que será barrado de qualquer forma. Nasce DESARMADO,
+ * como a v6 e pelo mesmo motivo (veto no caminho determinístico seria cliente mudo); no
+ * trace ele aparece como `skipped: 'disarmed'`, então a v7 também muda o TRACE antes de
+ * mudar o destino de qualquer envio.
  */
-export const BEFORE_SEND_CHAIN_VERSION = 6;
+export const BEFORE_SEND_CHAIN_VERSION = 7;
 
 /**
  * Ordem FINAL da cadeia (F4-08/F4-09; edge-contract §before_send / blueprint órgão 5) — DADO
@@ -523,6 +563,8 @@ export const BEFORE_SEND_CHAIN_VERSION = 6;
  * precedência é invariante de segurança/compliance, não config de runtime.
  *   (1) stop/opt-out/force_human — irrevogável, 1ª linha (regra dura nº 2);
  *   (2) lgpd — anonimização/base legal de prospecção, veto de conformidade HARD (F4-09);
+ *   (2.5) assistance_grounding — afirmação de assistência sem trecho âncora (spec 002,
+ *         FR-009); depois dos vetos irrevogáveis, antes do anti-ban;
  *   (3) pacing — janela/throttle/warm-up/caps anti-ban (F2-11);
  *   (4) spinning — template idêntico em massa (F2-12);
  *   (5) promise — validação determinística de preço/desconto/parcelamento (F4-01);
@@ -536,6 +578,7 @@ export const BEFORE_SEND_CHAIN_VERSION = 6;
 export const BEFORE_SEND_GATES: readonly Gate[] = [
   stopGate,
   lgpdGate,
+  assistanceGroundingGate,
   pacingGate,
   messagingWindowGate,
   spinningGate,
@@ -644,6 +687,18 @@ export interface RunBeforeSendArgs {
    */
   enforceInternalVocabulary?: boolean;
   /**
+   * Arma o `assistanceGroundingGate` (spec 002). Ausente (default) = no-op — ver a
+   * justificativa em `GateContext.assistanceGroundingEnforced`. Só o caminho do agente
+   * arma, e só quando o agente tem `rag_must_hit` ligado.
+   */
+  enforceAssistanceGrounding?: boolean;
+  /** Trechos que fundamentam este corpo (FR-024). Ausente = sem lastro. */
+  groundings?: readonly Grounding[];
+  /** Classificação já feita no turno; ausente = o gate classifica com a MESMA função. */
+  isAssistanceClaim?: boolean;
+  /** `min_citations` do guardrail `rag_must_hit` (FR-015). Ausente = 1. */
+  minCitations?: number;
+  /**
    * Enviado SÓ se TODOS os gates passarem — ChannelAdapter (própria tx/idempotência). Recebe o
    * corpo FINAL (o disclosureGate F4-05 pode emendá-lo via `amendBody`): quem monta o send DEVE
    * enviar este `body`, não o corpo original capturado antes da cadeia.
@@ -721,6 +776,10 @@ export async function runBeforeSend(args: RunBeforeSendArgs): Promise<BeforeSend
       hasOpenCase: args.hasOpenCase ?? false,
       openedCaseThisTurn: args.openedCaseThisTurn ?? false,
       internalVocabularyEnforced: args.enforceInternalVocabulary ?? false,
+      assistanceGroundingEnforced: args.enforceAssistanceGrounding ?? false,
+      groundings: args.groundings ?? [],
+      ...(args.isAssistanceClaim !== undefined ? { isAssistanceClaim: args.isAssistanceClaim } : {}),
+      ...(args.minCitations !== undefined ? { minCitations: args.minCitations } : {}),
     };
 
     const trace: GateTraceEntry[] = [];

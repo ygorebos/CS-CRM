@@ -9028,6 +9028,12 @@ alter table public.agent_inbox_items
     -- uma promessa sem dono precisa aparecer onde o humano olha — não no log do
     -- worker. Entra NESTA lista pela mesma razão que a de cima.
     'promise_unfulfilled',
+    -- (migration 0116, spec 002 FR-012) O agente recusou uma afirmação de assistência
+    -- por falta de trecho âncora no acervo do corretor. Não é erro do sistema: é a
+    -- resposta correta do princípio IX, e o aviso existe para que ela vire trabalho
+    -- (carregar o material que falta) em vez de virar silêncio. Entra NESTA lista pela
+    -- mesma razão das duas de cima.
+    'assistance_without_grounding',
     'other'
   ));
 

@@ -15,6 +15,8 @@
  */
 import type pg from 'pg';
 
+import { resolverExigenciaDeLastro } from '../guardrails/assistance-grounding';
+
 export interface PublishedAgentConfig {
   agentId: string;
   versionId: string;
@@ -41,6 +43,16 @@ export interface PublishedAgentConfig {
   /** knobs de RAG do ai_agents.config (defaults do guardrails-schema: 5 / 0.72). */
   ragTopK: number;
   ragSimilarityThreshold: number;
+  /**
+   * O guardrail `rag_must_hit` está ligado nesta configuração? (spec 002, FR-015)
+   *
+   * Vem de `ai_agents.guardrails`, que a tela já edita e o Zod já valida — e que
+   * **nenhum runtime lia**. É a fiação que faltava: sem ela a opção "Exigir citação da
+   * base" continua sendo um botão que grava e não faz nada.
+   */
+  exigeLastro: boolean;
+  /** `min_citations` do mesmo guardrail. 1 quando não declarado — nunca 0. */
+  minCitations: number;
   /**
    * O papel OPERADOR está ligado nesta versão (spec 16 §3.2)?
    *
@@ -82,6 +94,7 @@ interface Row {
   tool_ids: string[] | null;
   active_kb_version_id: string | null;
   config: Record<string, unknown> | null;
+  guardrails: unknown;
   operator_enabled: boolean | null;
   operator_model: string | null;
   operator_tool_ids: string[] | null;
@@ -108,6 +121,7 @@ const SELECT_AGENT_CONFIG_COLUMNS = `a.id as agent_id,
             v.tool_ids,
             a.active_kb_version_id,
             a.config,
+            a.guardrails,
             v.operator_enabled,
             v.operator_model,
             v.operator_tool_ids,
@@ -126,6 +140,10 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     typeof cfg.rag_similarity_threshold === 'number' && cfg.rag_similarity_threshold >= 0 && cfg.rag_similarity_threshold <= 1
       ? cfg.rag_similarity_threshold
       : 0.72;
+
+  // `r.guardrails` chega como `unknown` de propósito: é jsonb, e um clone antigo
+  // pode ter qualquer coisa ali. O resolvedor devolve 'não arma' em vez de explodir.
+  const exigencia = resolverExigenciaDeLastro(r.guardrails);
 
   return {
     agentId: r.agent_id,
@@ -148,6 +166,8 @@ function mapAgentConfigRow(r: Row): PublishedAgentConfig {
     activeKbVersionId: r.active_kb_version_id,
     ragTopK,
     ragSimilarityThreshold,
+    exigeLastro: exigencia.enforce,
+    minCitations: exigencia.minCitations,
     // `?? false` cobre o clone que ainda não aplicou a 0111: coluna ausente vem
     // como null/undefined, e a direção segura é o papel DESLIGADO — nunca gastar
     // modelo por causa de um schema desatualizado.

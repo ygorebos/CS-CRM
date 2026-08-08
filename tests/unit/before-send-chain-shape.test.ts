@@ -26,6 +26,7 @@ import {
 const ORDEM_ESPERADA = [
   "stop",
   "lgpd",
+  "assistance_grounding",
   "pacing",
   "messaging_window",
   "spinning",
@@ -64,8 +65,17 @@ describe("forma da cadeia before_send", () => {
     // O par (tamanho, versão) é o que amarra os dois. Acrescentar um gate sem
     // bumpar deixa o trace de auditoria mentindo sobre qual cadeia rodou — e o
     // trace é justamente a prova que as Fases 0–2 usam para dizer "não regrediu".
-    expect(BEFORE_SEND_GATES).toHaveLength(10);
-    expect(BEFORE_SEND_CHAIN_VERSION).toBe(6);
+    expect(BEFORE_SEND_GATES).toHaveLength(11);
+    expect(BEFORE_SEND_CHAIN_VERSION).toBe(7);
+  });
+
+  it("assistance_grounding fica entre os vetos irrevogáveis e o anti-ban", () => {
+    // Depois de lgpd (conformidade não se negocia) e ANTES de pacing: gastar cota,
+    // throttle e janela de spinning com um texto que vai ser barrado de qualquer forma
+    // é desperdício de recurso escasso — e o recurso aqui é a reputação do número.
+    const nomes = BEFORE_SEND_GATES.map((g) => g.name);
+    expect(nomes.indexOf("assistance_grounding")).toBe(nomes.indexOf("lgpd") + 1);
+    expect(nomes.indexOf("assistance_grounding")).toBeLessThan(nomes.indexOf("pacing"));
   });
 
   it("internal_vocabulary roda ANTES do disclosure — inspeciona o texto do modelo, não o emendado", () => {

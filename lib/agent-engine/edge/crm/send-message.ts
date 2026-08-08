@@ -134,7 +134,11 @@ export async function sendTurnMessage(
             }
           : { type: 'text' as const }),
         body: input.body,
-        metadata: { idempotency_key: idempotencyKey },
+        // A âncora da resposta viaja AQUI, no insert (spec 002, FR-024) — não num
+        // `update` posterior. `idempotency_key` fica por ÚLTIMO de propósito: ela é a
+        // chave de reconciliação do ledger, e um chamador que a sobrescrevesse por
+        // engano quebraria o replay de crash sem sintoma visível.
+        metadata: { ...(input.metadata ?? {}), idempotency_key: idempotencyKey },
       },
     );
   } catch (err) {
