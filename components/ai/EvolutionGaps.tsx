@@ -39,6 +39,27 @@ function plural(n: number, um: string, muitos: string): string {
   return n === 1 ? um : muitos;
 }
 
+/**
+ * O léxico de assistência em palavra de corretor.
+ *
+ * As chaves são as categorias fechadas de `lib/agent-engine/guardrails/lexico-assistencia.ts`
+ * — a MESMA régua que classifica a afirmação no gate de lastro e que a divergência grava.
+ * Traduzir aqui em vez de gravar o rótulo no banco é DIRC: Calcular; e um rótulo só existe
+ * num lugar, senão a tela e o gate passam a chamar a mesma coisa por nomes diferentes.
+ *
+ * Categoria fora do mapa cai no próprio nome (o `??` de quem monta a frase): vocabulário
+ * novo aparece feio, e não some.
+ */
+const ASSUNTO_EM_PORTUGUES: Record<string, string> = {
+  cobranca: "cobrança e boleto",
+  acesso: "acesso e cadastro",
+  rede: "rede credenciada",
+  cobertura: "cobertura",
+  prazos: "prazos e carência",
+  canais: "canais de atendimento",
+  regras: "regras do contrato",
+};
+
 interface Lacuna {
   chave: string;
   texto: string;
@@ -119,6 +140,30 @@ export function montaLacunas(gaps: EvolutionPayload["gaps"]): Lacuna[] {
         `perguntas do jeito que chegam.`,
       href: "/app/ai/knowledge/sources",
       cta: "Abrir a base de conhecimento",
+    });
+  }
+
+  for (const d of gaps.knowledge_divergences) {
+    out.push({
+      chave: `divergencia-${d.winner_title}-${d.loser_title}-${d.subject}`,
+      // ⚠️ NOMEIA OS DOIS MATERIAIS, e é isso que separa esta linha de um alarme inútil.
+      // "Há divergência na sua base" manda o corretor procurar agulha no palheiro; dizer
+      // QUAL texto dele contradiz QUAL texto da operadora é o que ele consegue ir conferir
+      // hoje. Por isso `knowledge_divergences` é lista, e não contagem.
+      //
+      // O texto NÃO afirma quem está errado, porque o sistema não sabe: o desempate é por
+      // ORIGEM (material do corretor vence), nunca por correção. Escrever "o seu material
+      // está errado" mandaria corrigir justamente o texto que ele pode ter escrito de
+      // propósito quando a operadora mudou a regra e o catálogo ficou para trás.
+      texto:
+        `O seu material "${d.winner_title}" está sendo usado no lugar de "${d.loser_title}"` +
+        (d.scope_name ? `, em ${d.scope_name}` : "") +
+        (d.subject ? ` — os dois falam de ${ASSUNTO_EM_PORTUGUES[d.subject] ?? d.subject}` : "") +
+        `. Quando isso acontece, o agente responde pelo seu, e o outro texto fica em silêncio. ` +
+        (d.occurrences > 1 ? `Já foi assim em ${d.occurrences} respostas. ` : "") +
+        `Vale abrir os dois e conferir qual está atualizado: se o certo for o outro, quem responde hoje é o texto errado.`,
+      href: "/app/ai/knowledge/sources",
+      cta: "Conferir os dois materiais",
     });
   }
 

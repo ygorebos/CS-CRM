@@ -30,6 +30,16 @@ const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_RANGE_DAYS = 90;
 const ROW_CAP = 50_000;
 
+/**
+ * Quantas divergências a tela lista de uma vez (FR-035 · T081).
+ *
+ * Teto baixo de propósito, e por motivo oposto ao do `ROW_CAP`: aqui cada linha é uma
+ * TAREFA para o corretor — abrir dois materiais e comparar. Cinquenta delas de uma vez não
+ * são mais informação, são a lista inteira sendo ignorada. As mais recentes primeiro, que
+ * são as que ainda estão acontecendo.
+ */
+const DIVERGENCIAS_NA_TELA = 10;
+
 const querySchema = z.object({
   from: z.string().regex(DAY_RE).optional(),
   to: z.string().regex(DAY_RE).optional(),
@@ -154,6 +164,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     handoffInbox,
     handoffEvents,
     stages,
+    divergencias,
   ] = await Promise.all([
     ler<{ created_at: string; title: string }>("org_memory_entries", "created_at, title", "created_at"),
     // `applied_at` é nulo enquanto a proposta não foi aplicada, e `NULL` não
@@ -204,9 +215,29 @@ export async function GET(req: NextRequest): Promise<Response> {
       .eq("crm_pipelines.organization_id", orgId)
       .eq("is_archived", false)
       .limit(ROW_CAP),
+    // FR-035, segunda metade (migration 0125). **Sem janela de data**, como o mapeamento
+    // do funil acima e pelo mesmo motivo: é estado ATUAL, não evento do período. Uma
+    // divergência aberta continua produzindo resposta contraditória hoje — sumir da tela
+    // porque o usuário trocou o período apagaria um problema que ninguém resolveu.
+    //
+    // Título e escopo vêm por JUNÇÃO, nunca copiados para a tabela (DIRC: Referenciar):
+    // material renomeado aparece com o nome novo, sem backfill nenhum.
+    supabase
+      .from("knowledge_divergences")
+      .select(
+        "subject, occurrences, ai_knowledge_sources!inner(name), catalog_materials!inner(title), knowledge_scopes(display_name)",
+      )
+      .eq("organization_id", orgId)
+      .is("resolved_at", null)
+      .order("last_seen_at", { ascending: false })
+      .limit(DIVERGENCIAS_NA_TELA),
   ]);
 
   if (stages.error) fonteFalhou("crm_stages", stages.error);
+  // Falha aqui não derruba o painel — as outras lacunas continuam valendo, e um relatório
+  // que some inteiro porque uma fonte caiu é pior que um com uma seção a menos. Mas também
+  // não some calada: `fonteFalhou` é o mesmo canal de aviso das demais.
+  if (divergencias.error) fonteFalhou("knowledge_divergences", divergencias.error);
 
   const porPipeline = new Map<string, Array<string | null>>();
   for (const r of (stages.data ?? []) as Array<{
@@ -228,6 +259,36 @@ export async function GET(req: NextRequest): Promise<Response> {
     skillActivations,
     routerDecisions,
     knowledgeSearches,
+    // Uma linha por (par de materiais, assunto) já vem do banco — o `unique` da 0125 faz
+    // a deduplicação, e não há o que agregar aqui.
+    knowledgeDivergences: (
+      (divergencias.data ?? []) as unknown as Array<{
+        subject: string | null;
+        occurrences: number | null;
+        ai_knowledge_sources: { name: string } | { name: string }[] | null;
+        catalog_materials: { title: string } | { title: string }[] | null;
+        knowledge_scopes: { display_name: string } | { display_name: string }[] | null;
+      }>
+    ).flatMap((d) => {
+      // PostgREST devolve objeto ou array conforme a cardinalidade que ele infere do
+      // schema. Tratar só um dos dois formatos faz a lista vir vazia sem erro nenhum.
+      const um = <T,>(v: T | T[] | null): T | null => (Array.isArray(v) ? (v[0] ?? null) : v);
+      const winner = um(d.ai_knowledge_sources);
+      const loser = um(d.catalog_materials);
+      // Sem um dos dois nomes não há o que o corretor compare, e uma linha pela metade
+      // na tela é pior que linha nenhuma. `!inner` já deveria garantir os dois; isto é o
+      // cinto que impede a tela de renderizar "undefined" se a junção mudar.
+      if (!winner || !loser) return [];
+      return [
+        {
+          winner_title: winner.name,
+          loser_title: loser.title,
+          scope_name: um(d.knowledge_scopes)?.display_name ?? null,
+          subject: d.subject ?? "",
+          occurrences: d.occurrences ?? 1,
+        },
+      ];
+    }),
     stageTransitions,
     // ⚠️ COERÇÃO OBRIGATÓRIA. `cost_cents` é `numeric`, e o agregador repassa este
     // total sem tocar nele. Se uma linha vier como string, `acc + '12.5'` concatena

@@ -47,6 +47,11 @@ import type pg from 'pg';
 
 import { embedText } from '@/lib/ai/embed';
 import type { Citation } from '@/lib/ai/citations/types';
+import {
+  divergenciasDe,
+  registrarDivergencias,
+  type DivergenciaARegistrar,
+} from './divergencia';
 import type { Logger } from '../obs/logger';
 
 export type CamadaDeLastro = 'tenant' | 'catalog';
@@ -115,8 +120,23 @@ export interface SearchKnowledgeArgs {
  */
 const MARGEM_DE_QUASE_ACERTO = 0.1;
 
-const SQL_BUSCA = `select chunk_id, layer, material_id, content, similarity, source_ref
-   from fn_buscar_lastro($1, $2, $3::vector, $4, $5)`;
+/**
+ * `$6 = true` liga as linhas que o desempate rejeitou (migration 0125).
+ *
+ * ⚠️ Elas vêm no MESMO conjunto, marcadas com `preterido`. O contrato da função é explícito:
+ * linha preterida **nunca** ancora resposta — é justamente o texto que a precedência
+ * rejeitou. Por isso a separação acontece na linha seguinte à do `query`, sem nada entre as
+ * duas: qualquer código que se instale no meio herda um array em que o trecho errado ainda
+ * está presente.
+ */
+const SQL_BUSCA = `select chunk_id, layer, material_id, content, similarity, source_ref,
+          preterido, preterido_por_material
+   from fn_buscar_lastro($1, $2, $3::vector, $4, $5, $6)`;
+
+interface LinhaDeLastro extends KnowledgeHit {
+  preterido: boolean;
+  preterido_por_material: string | null;
+}
 
 export async function searchKnowledge(
   pool: pg.Pool,
@@ -134,21 +154,29 @@ export async function searchKnowledge(
     const vec = `[${embedding.join(',')}]`;
 
     const porEscopo: BuscaPorEscopo[] = [];
+    const divergencias: DivergenciaARegistrar[] = [];
     for (const scopeId of escopos) {
       // UMA chamada por escopo. O `p_agent_id` é o mesmo; o `p_scope_id` é o que muda —
       // e é o que impede o trecho de uma operadora de ancorar afirmação sobre outra.
-      const { rows } = await pool.query<KnowledgeHit>(SQL_BUSCA, [
+      const { rows } = await pool.query<LinhaDeLastro>(SQL_BUSCA, [
         args.agentId,
         scopeId,
         vec,
         args.topK,
         args.threshold,
+        true,
       ]);
+      // Separação imediata — ver o comentário de `SQL_BUSCA`. `results` daqui para baixo
+      // não contém nenhuma linha rejeitada pelo desempate.
+      const results = rows.filter((r) => !r.preterido);
+      const preteridas = rows.filter((r) => r.preterido);
+
       porEscopo.push({
         scopeId,
         scopeName: scopeId !== null ? (args.scopeNames?.[scopeId] ?? null) : null,
-        results: rows,
+        results,
       });
+      divergencias.push(...divergenciasDe({ scopeId, preteridas, vencedoras: results }));
     }
 
     const achados = porEscopo.reduce((n, b) => n + b.results.length, 0);
@@ -177,6 +205,11 @@ export async function searchKnowledge(
         error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
       });
     }
+
+    // FR-035, segunda metade. Derivado do que a busca JÁ trouxe — nenhuma consulta
+    // vetorial a mais —, e engolido em caso de falha pelo mesmo motivo da telemetria
+    // acima: registro de diagnóstico não derruba resposta ao cliente.
+    await registrarDivergencias(pool, args.organizationId, divergencias, deps?.log);
 
     return { ok: true, porEscopo, embedding: vec };
   } catch {
@@ -222,12 +255,16 @@ async function diagnosticoDeQuaseAcerto(
   try {
     const similaridades: number[] = [];
     for (const scopeId of escopos) {
+      // `false`: aqui só interessa a distância do melhor candidato. Trazer as preteridas
+      // inflaria o `top_score` com o texto que o desempate rejeitou, e o painel de lacunas
+      // passaria a dizer "quase acertou" sobre um trecho que nunca vai responder.
       const { rows } = await pool.query<{ similarity: number }>(SQL_BUSCA, [
         args.agentId,
         scopeId,
         vec,
         args.topK,
         piso,
+        false,
       ]);
       similaridades.push(...rows.map((r) => r.similarity));
     }

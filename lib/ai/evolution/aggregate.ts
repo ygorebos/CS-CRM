@@ -30,6 +30,22 @@ export interface EvolutionInput {
     top_score: number | null;
     threshold: number;
   }>;
+  /**
+   * Divergências entre camadas ainda abertas (spec 002, FR-035 · T081).
+   *
+   * ⚠️ **Não é recortado pela janela do relatório, e isso é deliberado.** As outras fontes
+   * respondem "o que aconteceu entre tal e tal dia"; esta responde "o que está errado
+   * AGORA". Uma divergência aberta continua produzindo resposta contraditória hoje, mesmo
+   * que o desempate que a revelou tenha sido no mês passado — sumir da tela porque o
+   * usuário mudou o período seria esconder problema que ninguém resolveu.
+   */
+  knowledgeDivergences: Array<{
+    winner_title: string;
+    loser_title: string;
+    scope_name: string | null;
+    subject: string;
+    occurrences: number;
+  }>;
   stageTransitions: Array<{ created_at: string; to_stage: string }>;
   costCents: number;
   inboundCount: number;
@@ -89,6 +105,21 @@ export interface EvolutionPayload {
     pipelines_evaluated: number;
     knowledge_near_misses: number;
     knowledge_empty: number;
+    /**
+     * FR-035, segunda metade: onde o material do corretor contradiz o do catálogo.
+     *
+     * Vem como LISTA, não contagem, porque o conserto exige saber QUAIS dois textos
+     * discordam — "você tem 3 divergências" não diz o que abrir. É a diferença entre um
+     * número e uma ação, que é o que a doutrina do sistema vivo cobra de todo dado
+     * nesta tela.
+     */
+    knowledge_divergences: Array<{
+      winner_title: string;
+      loser_title: string;
+      scope_name: string | null;
+      subject: string;
+      occurrences: number;
+    }>;
     router_no_match: number;
     router_failed: number;
   };
@@ -222,6 +253,7 @@ export function aggregateEvolution(input: EvolutionInput): EvolutionPayload {
       pipelines_evaluated: input.pipelines.length,
       knowledge_near_misses: nearMisses,
       knowledge_empty: empty,
+      knowledge_divergences: input.knowledgeDivergences,
       router_no_match: input.routerDecisions.filter((r) => r.outcome === 'no_match').length,
       router_failed: input.routerDecisions.filter((r) => r.outcome === 'classifier_failed').length,
     },

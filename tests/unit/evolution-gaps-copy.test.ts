@@ -70,6 +70,7 @@ describe("lacuna de funil — o botão fecha o ciclo, e o ciclo tem guarda", () 
     pipelines_evaluated: 1,
     knowledge_near_misses: 0,
     knowledge_empty: 0,
+    knowledge_divergences: [],
     router_no_match: 0,
     router_failed: 0,
   };
@@ -152,6 +153,7 @@ describe("aggregateEvolution expõe o fato exato no payload", () => {
     skillActivations: [],
     routerDecisions: [],
     knowledgeSearches: [],
+    knowledgeDivergences: [],
     stageTransitions: [],
     costCents: 0,
     inboundCount: 0,
@@ -188,5 +190,88 @@ describe("taxaDeAjuda — o zero tem que ser zero de verdade", () => {
 
   it("acima de 0,1 mostra o número", () => {
     expect(taxaDeAjuda(0.059)).toBe("5,9 a cada 100");
+  });
+});
+
+/**
+ * A divergência entre camadas na tela (spec 002, FR-035 · SC-016 · T081).
+ *
+ * A metade do requisito que existia parava no banco: o desempate escolhe o material do
+ * corretor e silencia o do catálogo. Sem estes casos, "registrar a divergência" viraria uma
+ * contagem — e contagem não diz QUAIS dois textos discordam, que é a única coisa com que o
+ * corretor consegue fazer alguma coisa hoje.
+ */
+describe("lacuna de divergência — o corretor sabe quais dois textos conferir", () => {
+  const semNada = {
+    unmapped_agent_steps: [],
+    pipelines_evaluated: 1,
+    knowledge_near_misses: 0,
+    knowledge_empty: 0,
+    router_no_match: 0,
+    router_failed: 0,
+  };
+  const divergencia = (over: Partial<{
+    winner_title: string;
+    loser_title: string;
+    scope_name: string | null;
+    subject: string;
+    occurrences: number;
+  }> = {}) => ({
+    winner_title: "Boletos 2026",
+    loser_title: "Segunda via — Operadora A",
+    scope_name: "Operadora A",
+    subject: "cobranca",
+    occurrences: 1,
+    ...over,
+  });
+  const lacuna = (...ds: ReturnType<typeof divergencia>[]) =>
+    montaLacunas({ ...semNada, knowledge_divergences: ds });
+
+  it("nomeia OS DOIS materiais — sem isso o aviso é agulha no palheiro", () => {
+    const l = lacuna(divergencia())[0]!;
+    expect(l.texto).toContain("Boletos 2026");
+    expect(l.texto).toContain("Segunda via — Operadora A");
+  });
+
+  it("NÃO afirma qual dos dois está errado", () => {
+    // O desempate é por ORIGEM, não por correção: o sistema não sabe quem está certo.
+    // Mandar "corrija o seu material" faria o corretor desfazer justamente a correção que
+    // ele escreveu quando a operadora mudou a regra e o catálogo ficou para trás.
+    const l = lacuna(divergencia())[0]!;
+    expect(l.texto).not.toMatch(/seu material está errado|corrija o seu/i);
+    expect(l.texto).toContain("conferir qual está atualizado");
+  });
+
+  it("traduz o assunto para palavra de corretor, não para o nome da categoria", () => {
+    expect(lacuna(divergencia({ subject: "prazos" }))[0]!.texto).toContain("prazos e carência");
+    expect(lacuna(divergencia({ subject: "rede" }))[0]!.texto).toContain("rede credenciada");
+  });
+
+  it("assunto que o léxico não classifica não vira frase quebrada", () => {
+    // `subject: ''` é registro legítimo (o texto não caiu em nenhuma categoria). A frase
+    // tem que continuar lendo bem, sem "os dois falam de ." pendurado.
+    const t = lacuna(divergencia({ subject: "" }))[0]!.texto;
+    expect(t).not.toContain("falam de .");
+    expect(t).toContain("Boletos 2026");
+  });
+
+  it("só menciona repetição quando houve repetição", () => {
+    expect(lacuna(divergencia({ occurrences: 1 }))[0]!.texto).not.toContain("Já foi assim");
+    expect(lacuna(divergencia({ occurrences: 7 }))[0]!.texto).toContain("Já foi assim em 7 respostas");
+  });
+
+  it("cada divergência é uma linha própria, com chave distinta", () => {
+    // Duas divergências colapsadas numa só fariam a segunda sumir quando o corretor
+    // resolvesse a primeira — e ele nunca saberia que existiu.
+    const ls = lacuna(divergencia(), divergencia({ subject: "rede", loser_title: "Rede — Operadora A" }));
+    expect(ls).toHaveLength(2);
+    expect(new Set(ls.map((l) => l.chave)).size).toBe(2);
+  });
+
+  it("o botão leva à tela onde os materiais moram, com verbo de ação", () => {
+    const l = lacuna(divergencia())[0]!;
+    expect(l.href).toBe("/app/ai/knowledge/sources");
+    expect(l.cta).toBe("Conferir os dois materiais");
+    expect(l.cta).not.toMatch(/^Ver/);
   });
 });

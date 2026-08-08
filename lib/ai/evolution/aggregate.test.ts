@@ -13,6 +13,7 @@ function base(): EvolutionInput {
     skillActivations: [],
     routerDecisions: [],
     knowledgeSearches: [],
+    knowledgeDivergences: [],
     stageTransitions: [],
     costCents: 0,
     inboundCount: 0,
