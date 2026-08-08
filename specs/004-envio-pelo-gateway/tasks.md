@@ -51,14 +51,14 @@ opcionais nem agrupáveis no fim.
 
 ---
 
-## Fase 1 — Superfície de escrita no banco do CRM (F1)
+## Fase 1 — Superfície de escrita no banco do CRM (F1) — ✅ **COMPLETA em 2026-08-08**
 
-- [ ] **T010** Papel `gateway_writer` na migration `<ts>_0127_gateway_writer.sql`: zero grant de
+- [X] **T010** ✅ `20260809120000_0127_gateway_writer.sql` + apêndice no baseline + MANIFEST. Papel `gateway_writer` na migration `<ts>_0127_gateway_writer.sql`: zero grant de
       tabela, `EXECUTE` só nas funções desta fase. Apêndice no baseline + MANIFEST. **(FR-002)**
-- [ ] **T011** Invariante que **reprova** se `gateway_writer` tiver qualquer privilégio em
+- [X] **T011** ✅ `tests/invariants/gateway-writer-sem-tabela.test.ts` (6 asserções, verdes). Invariante que **reprova** se `gateway_writer` tiver qualquer privilégio em
       `information_schema.role_table_grants`. É a trava que impede o acoplamento voltar por
       acidente. **(FR-002)**
-- [ ] **T012** `fn_gateway_ingest_message` na migration `<ts>_0128_gateway_escrita.sql`. Esqueleto na
+- [X] **T012** ✅ `20260809130000_0128_gateway_escrita.sql` + apêndice + MANIFEST. `fn_gateway_ingest_message` na migration `<ts>_0128_gateway_escrita.sql`. Esqueleto na
       §4 da decisão. Cada item tem motivo medido:
       - resolve `organization_id` de `channel_sessions.gateway_connection_id` **(FR-004)**;
       - `set constraints public.messages_org_external_id_unique immediate` **antes** do insert
@@ -67,7 +67,7 @@ opcionais nem agrupáveis no fim.
       - emite `ai_agent.dispatch_requested` na mesma transação, só inbound e só se não for eco
         **(FR-008, FR-009)**;
       - `revoke execute ... from public, anon` + `grant ... to gateway_writer` **(FR-003)**.
-- [ ] **T013** Taxonomia de erro das funções: **definitivo** (conexão desconhecida, arquivada, de
+- [X] **T013** ✅ SQLSTATE `GW001` (conexão desconhecida/arquivada) e `GW003` (argumento inválido) — o gateway distingue por classe, sem parsear string. Taxonomia de erro das funções: **definitivo** (conexão desconhecida, arquivada, de
       outro dono, corpo inválido) vs **transitório** (banco fora, tempo esgotado, conflito de
       serialização), com erro sem classe caindo em transitório. É o que decide se o gateway retenta
       para sempre ou descarta cedo demais. **(FR-005)**
@@ -75,20 +75,32 @@ opcionais nem agrupáveis no fim.
       na rota HTTP do gateway, quem grava `channel_sessions` é o CRM pelo caminho dele (T043) — não
       há função de provisionamento a criar. Mantida riscada, não apagada, para a próxima sessão não
       reabrir a discussão achando que foi esquecimento. **(FR-011 agora é servida por T029 + T043)**
-- [ ] **T015** `fn_gateway_update_message_status` — o ACK. Portar a guarda de não-regressão de
+- [X] **T015** ✅ na 0128, com 4 testes de ACK verdes. `fn_gateway_update_message_status` — o ACK. Portar a guarda de não-regressão de
       `lib/gateway/ingest.ts:278-340` (`ORDEM_DO_ESTADO`): estado que não avança é ignorado com
       sucesso, `failed` sempre passa. Sem a guarda, um ACK atrasado apaga um `read` com um `sent`.
       **(FR-021, FR-022)**
-- [ ] **T016** Invariante que varre as funções desta fase e reprova qualquer chamada HTTP
+- [X] **T016** ✅ em `gateway-escrita-direta.test.ts`. Invariante que varre as funções desta fase e reprova qualquer chamada HTTP
       (`http`, `pg_net`, `net.http_*`) — anti-pattern 9. **(FR-010)**
-- [ ] **T017** [TEST] Isolamento entre 2 organizações nas funções novas: conexão da org A **não**
+- [X] **T017** ✅ 4 testes verdes, e **vermelhos sob sabotagem** (ver T019). [TEST] Isolamento entre 2 organizações nas funções novas: conexão da org A **não**
       escreve na org B, nem passando id de fora. **(FR-004)**
-- [ ] **T018** [TEST] Idempotência ponta a ponta: mesma `external_id` duas vezes devolve o mesmo id,
+- [X] **T018** ✅ 3 testes verdes, e **vermelhos sob sabotagem** (ver T019). [TEST] Idempotência ponta a ponta: mesma `external_id` duas vezes devolve o mesmo id,
       `duplicada = true` na segunda, **uma** linha em `messages`, **um** dispatch em `event_log`.
       **(FR-006, FR-007, FR-008)**
-- [ ] **T019** [SABOTAGEM] Provar que T017 e T018 vigiam: remover o `set constraints` e ver a
-      transação morrer no commit; trocar a resolução de tenant por leitura do corpo e ver T017 ficar
-      vermelho. **(SC-012)**
+- [X] **T019** ✅ [SABOTAGEM] **Executada em 2026-08-08, as duas, com o resultado observado.**
+      Não é declaração de intenção: o `baseline.sql` foi editado, o gate rodou, o vermelho foi lido
+      e o arquivo restaurado.
+
+      **Sabotagem A — removido o `set constraints ... immediate`:** 3 testes vermelhos, todos com
+      `ERROR: duplicate key value violates unique constraint "messages_org_external_id_unique"`.
+      É exatamente a falha prevista — sem a linha, o `exception when unique_violation` **nunca
+      dispara** e o 23505 escapa. Prova que T018 vigia a linha, e não apenas o caminho feliz.
+
+      **Sabotagem B — removido o filtro `where cs.gateway_connection_id = ...`:** 3 testes de
+      isolamento vermelhos, **incluindo os dois de `GW001`** — sem o filtro, conexão desconhecida
+      resolve para uma organização qualquer e a escrita é **aceita** em vez de recusada. Prova que
+      T017 pega o vazamento de tenant, que é o pior modo de falha da feature.
+
+      Gate completo depois de restaurar: **82 arquivos, 551 passed, 1 skipped**. **(SC-012)**
 
 ---
 

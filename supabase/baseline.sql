@@ -9840,3 +9840,277 @@ comment on index public.idx_webhook_events_log_pendentes is
   'minuto seria custo crescente sem fim.';
 
 notify pgrst, 'reload schema';
+
+-- ---- gateway_writer: a quarta superfície ganha dono (migration 0127) ----
+-- Constituição v2.3.0, Princípio VII: o gateway_go escreve no CRM SÓ por função
+-- versionada, e SÓ sob seis travas. Aqui ficam as travas 1 e 2 — zero grant de
+-- tabela, e papel dedicado que nunca é service_role.
+--
+-- `authenticator` é condicional de propósito: ele NÃO existe no Postgres efêmero
+-- do `pnpm test:db` (scripts/test-db.sh cria só anon/authenticated/service_role),
+-- e um grant solto reprovaria o job `invariants` — obrigatório na branch
+-- protection — enquanto passa na nossa instância. Pior padrão de falha possível.
+do $$
+begin
+  if not exists (select 1 from pg_roles where rolname = 'gateway_writer') then
+    create role gateway_writer nologin;
+  end if;
+  execute 'grant usage on schema public to gateway_writer';
+  if exists (select 1 from pg_roles where rolname = 'authenticator') then
+    execute 'grant gateway_writer to authenticator';
+  end if;
+end $$;
+
+revoke all on all tables in schema public from gateway_writer;
+revoke all on all sequences in schema public from gateway_writer;
+revoke all privileges on schema public from gateway_writer;
+grant usage on schema public to gateway_writer;
+
+grant execute on function public.fn_upsert_wa_contact(uuid, text, text, text, text, text) to gateway_writer;
+grant execute on function public.fn_upsert_wa_conversation(uuid, uuid, uuid) to gateway_writer;
+grant execute on function public.fn_mark_conversation_message(uuid, text, text, timestamptz) to gateway_writer;
+
+comment on role gateway_writer is
+  'Quarta superficie (constituicao v2.3.0, Principio VII): o gateway_go escreve no CRM SO por funcao security definer versionada. Este papel NAO pode receber grant de tabela — nem select. Vigiado por tests/invariants/gateway-writer-sem-tabela.test.ts.';
+
+-- ---- superfície de escrita do gateway: 2 funções (migration 0128) ----
+-- Idempotente por `create or replace`. O "porquê" completo está no cabeçalho da
+-- migration; aqui vai o resumo que não pode se perder:
+--
+--   `set constraints public.messages_org_external_id_unique immediate` NÃO é
+--   zelo. A constraint é DEFERRABLE INITIALLY DEFERRED (baseline:2116), então sem
+--   essa linha o `exception when unique_violation` NUNCA dispara — o 23505
+--   estoura no COMMIT, fora do bloco, e mata a transação inteira. `on conflict`
+--   também não serve (árbitro deferrable é recusado), e índice único imediato
+--   adicional não resolve — os três foram medidos em pg17.
+--
+--   Toda função nova que inserir em `messages` precisa da linha.
+
+create or replace function public.fn_gateway_ingest_message(
+  p_gateway_connection_id text,
+  p_external_id           text,
+  p_direction             text,
+  p_type                  text,
+  p_contact_kind          text,
+  p_contact_phone         text    default null,
+  p_contact_lid           text    default null,
+  p_contact_chat_id       text    default null,
+  p_contact_notify        text    default null,
+  p_body                  text    default null,
+  p_sent_at               timestamptz default now(),
+  p_eh_eco                boolean default false,
+  p_status                text    default null,
+  p_sent_via              text    default null,
+  p_media_url             text    default null,
+  p_media_mime            text    default null,
+  p_media_size_bytes      bigint  default null,
+  p_media_storage_path    text    default null,
+  p_metadata              jsonb   default '{}'::jsonb
+)
+returns table (message_id uuid, duplicada boolean)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_org       uuid;
+  v_session   uuid;
+  v_contact   uuid;
+  v_conv      uuid;
+  v_id        uuid;
+  v_status    text;
+  v_sent_via  text;
+begin
+  -- ── 1. Tenant, resolvido DENTRO do banco pela conexão de origem ──
+  -- Trava nº 3 do Princípio VII. `organization_id` não é parâmetro e não pode
+  -- ser: quem chama escolhe qual conexão usar, nunca de quem é o dado.
+  select cs.organization_id, cs.id
+    into v_org, v_session
+    from public.channel_sessions cs
+   where cs.gateway_connection_id = p_gateway_connection_id
+     and cs.archived_at is null
+   limit 1;
+
+  if v_org is null then
+    -- DEFINITIVO: conexão inexistente ou arquivada. Retentar não vai criar a
+    -- linha; o gateway tem de descartar e abrir aviso, não insistir para sempre.
+    raise exception 'gateway: conexao desconhecida ou arquivada (%)', p_gateway_connection_id
+      using errcode = 'GW001';
+  end if;
+
+  if p_direction is null or p_direction not in ('inbound', 'outbound') then
+    raise exception 'gateway: direction invalida (%)', p_direction using errcode = 'GW003';
+  end if;
+
+  if p_external_id is null or length(btrim(p_external_id)) = 0 then
+    -- Sem referência externa não há idempotência possível, e uma redelivery
+    -- viraria mensagem duplicada na conversa do cliente.
+    raise exception 'gateway: external_id obrigatorio' using errcode = 'GW003';
+  end if;
+
+  -- ── 2. A linha sem a qual nada abaixo funciona. Ver o cabeçalho. ──
+  set constraints public.messages_org_external_id_unique immediate;
+
+  -- ── 3. Contato e conversa, pelas funções que já existem ──
+  v_contact := public.fn_upsert_wa_contact(
+    v_org, p_contact_kind, p_contact_phone, p_contact_lid, p_contact_chat_id, p_contact_notify);
+  v_conv := public.fn_upsert_wa_conversation(v_org, v_contact, v_session);
+
+  v_status   := coalesce(p_status, case when p_direction = 'inbound' then 'received' else 'sent' end);
+  -- Eco = a mensagem saiu pelo celular, não pelo CRM (T054 da spec 001).
+  v_sent_via := coalesce(p_sent_via, case when p_eh_eco then 'external_device' else 'crm' end);
+
+  -- ── 4. A mensagem. Duplicata é SUCESSO, não erro (FR-006). ──
+  begin
+    insert into public.messages (
+      organization_id, conversation_id, channel_session_id, contact_id,
+      external_id, type, direction, status, body, sent_via, sent_at,
+      media_url, media_mime, media_size_bytes, media_storage_path, metadata)
+    values (
+      v_org, v_conv, v_session, v_contact,
+      p_external_id, p_type, p_direction, v_status, p_body, v_sent_via, p_sent_at,
+      p_media_url, p_media_mime, p_media_size_bytes, p_media_storage_path,
+      coalesce(p_metadata, '{}'::jsonb))
+    returning id into v_id;
+  exception when unique_violation then
+    select m.id into v_id
+      from public.messages m
+     where m.organization_id = v_org and m.external_id = p_external_id
+     limit 1;
+    -- Sai cedo de propósito: reprocessar contato/conversa/dispatch numa
+    -- redelivery acordaria o agente duas vezes para a mesma mensagem.
+    return query select v_id, true;
+    return;
+  end;
+
+  -- ── 5. A cadeia viva, na MESMA transação do insert (FR-008) ──
+  -- O trigger `trg_messages_emit_event` já emite `message.received`, mas ele NÃO
+  -- acorda o agente. Quem acorda é este evento, e até aqui ele só era emitido por
+  -- código de aplicação, numa viagem separada — morrer entre o insert e a emissão
+  -- deixava mensagem sem atendimento, sem ninguém perceber. Aqui: os dois ou
+  -- nenhum.
+  if p_direction = 'inbound' and not coalesce(p_eh_eco, false) then
+    perform public.emit_event(
+      'ai_agent.dispatch_requested', 'message', v_id,
+      jsonb_build_object(
+        'organization_id',    v_org,
+        'conversation_id',    v_conv,
+        'contact_id',         v_contact,
+        'channel_session_id', v_session,
+        'inbound_message_id', v_id),
+      jsonb_build_object('source', 'gateway_funcao'),
+      v_org);
+  end if;
+
+  perform public.fn_mark_conversation_message(v_conv, p_direction, left(coalesce(p_body, ''), 200), p_sent_at);
+
+  return query select v_id, false;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 2 · fn_gateway_update_message_status — o ACK
+-- ══════════════════════════════════════════════════════════════════════════════
+--
+-- Porta a guarda de não-regressão de `lib/gateway/ingest.ts:279-322`, sem mudar
+-- regra nenhuma. Ela existe porque ACK chega fora de ordem: sem a guarda, um
+-- `sent` atrasado sobrescreve um `read` e o visto azul some da tela do corretor.
+-- Note que o caminho do WAHA (`lib/waha/ingest.ts:657-677`) NÃO tem essa guarda —
+-- migrar para o gateway herda um ACK melhor que o atual, de graça.
+create or replace function public.fn_gateway_update_message_status(
+  p_gateway_connection_id text,
+  p_external_id           text,
+  p_status                text,
+  p_at                    timestamptz default now(),
+  p_error_code            text default null,
+  p_error_message         text default null
+)
+returns table (efeito text, motivo text)
+language plpgsql
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_org    uuid;
+  v_id     uuid;
+  v_atual  text;
+  v_antes  int;
+  v_depois int;
+begin
+  select cs.organization_id into v_org
+    from public.channel_sessions cs
+   where cs.gateway_connection_id = p_gateway_connection_id
+     and cs.archived_at is null
+   limit 1;
+
+  if v_org is null then
+    raise exception 'gateway: conexao desconhecida ou arquivada (%)', p_gateway_connection_id
+      using errcode = 'GW001';
+  end if;
+
+  select m.id, m.status into v_id, v_atual
+    from public.messages m
+   where m.organization_id = v_org and m.external_id = p_external_id
+   limit 1;
+
+  if v_id is null then
+    -- Confirmação para mensagem que o CRM ainda não conhece. Acontece com
+    -- entrega fora de ordem. Criar mensagem fantasma seria PIOR que não fazer
+    -- nada: ela apareceria na conversa sem corpo e sem autor.
+    return query select 'ignorado'::text, 'mensagem_desconhecida'::text;
+    return;
+  end if;
+
+  -- Ordem dos estados. Espelha ORDEM_DO_ESTADO do TypeScript; mudar um lado sem
+  -- o outro faz os dois caminhos discordarem sobre o que é regressão.
+  v_antes  := case v_atual  when 'queued' then 0 when 'sending' then 1
+                            when 'sent' then 2 when 'received' then 2
+                            when 'delivered' then 3 when 'read' then 4
+                            when 'failed' then 5 else -1 end;
+  v_depois := case p_status when 'queued' then 0 when 'sending' then 1
+                            when 'sent' then 2 when 'received' then 2
+                            when 'delivered' then 3 when 'read' then 4
+                            when 'failed' then 5 else -1 end;
+
+  -- `failed` sempre entra: é informação nova mesmo depois de `read` (mensagem que
+  -- falhou numa segunda tentativa). Os demais só avançam.
+  if p_status <> 'failed' and v_depois <= v_antes then
+    return query select 'ignorado'::text, 'estado_nao_regride'::text;
+    return;
+  end if;
+
+  update public.messages m
+     set status        = p_status,
+         delivered_at  = case when p_status = 'delivered' then coalesce(m.delivered_at, p_at) else m.delivered_at end,
+         read_at       = case when p_status = 'read'      then coalesce(m.read_at, p_at)      else m.read_at end,
+         error_code    = coalesce(p_error_code, m.error_code),
+         error_message = coalesce(p_error_message, m.error_message),
+         updated_at    = now()
+   where m.id = v_id;
+
+  return query select 'aplicado'::text, null::text;
+end $$;
+
+-- ══════════════════════════════════════════════════════════════════════════════
+-- 3 · Grants — as DUAS origens de EXECUTE, e por que revogar só uma não basta
+-- ══════════════════════════════════════════════════════════════════════════════
+--
+-- (A) O baseline tem `ALTER DEFAULT PRIVILEGES ... GRANT ALL ON FUNCTIONS TO
+--     anon`, que alcança TODA função criada depois dele — isto é, todo apêndice
+--     novo. `revoke from public` NÃO remove esse grant.
+-- (B) O Postgres concede EXECUTE a PUBLIC em qualquer função ao criá-la.
+--     `revoke from anon` NÃO remove esse.
+--
+-- Tratar só uma das duas deixa a função exposta como RPC alcançável pela anon
+-- key — que vai para o browser — com o gate verde. Vigiado por
+-- `tests/invariants/hardening-definer-varredura.test.ts`.
+revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from public;
+revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from anon;
+revoke execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) from authenticated;
+grant  execute on function public.fn_gateway_ingest_message(text,text,text,text,text,text,text,text,text,text,timestamptz,boolean,text,text,text,text,bigint,text,jsonb) to gateway_writer, service_role;
+
+revoke execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) from public;
+revoke execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) from anon;
+revoke execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) from authenticated;
+grant  execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) to gateway_writer, service_role;
+
+notify pgrst, 'reload schema';
