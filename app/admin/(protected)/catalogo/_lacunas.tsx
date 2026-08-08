@@ -16,8 +16,10 @@
  * conversa. O curador precisa saber QUAL assunto ficou descoberto; saber de quem é o
  * cliente transformaria esta tela num navegador de clientes alheios.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
+import { ASSUNTO_EM_PORTUGUES } from "@/components/ai/EvolutionGaps";
+import { detectarAssuntoDeAssistencia } from "@/lib/agent-engine/guardrails/lexico-assistencia";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import {
@@ -58,12 +60,42 @@ function Numero({
   );
 }
 
+/**
+ * O eixo de ASSUNTO, calculado das perguntas reais que a rota devolve por extenso.
+ *
+ * Mesmo léxico fechado que o painel do corretor usa (`ASSUNTO_EM_PORTUGUES` é a tradução
+ * dele) e mesma régua que o gate de lastro aplica na conversa — se o curador agrupasse por
+ * um vocabulário próprio, ele e o corretor passariam a chamar de nomes diferentes a mesma
+ * lacuna, e nenhum dos dois saberia disso.
+ *
+ * ⚠️ É AMOSTRA, e a tela diz isso em voz alta. A rota devolve as perguntas por extenso com
+ * teto próprio (`limit_examples`), então este agrupamento descreve as perguntas recentes que
+ * dá para ler — não o período inteiro. Apresentá-lo como censo faria o curador escolher o
+ * próximo material pelo assunto que por acaso caiu na amostra.
+ */
+export function assuntosDasPerguntas(
+  perguntas: readonly { question: string }[],
+): Array<{ assunto: string; vezes: number }> {
+  const contagem = new Map<string, number>();
+  for (const p of perguntas) {
+    // Mesma convenção de `assuntoDaDivergencia`: a primeira categoria que casa, e `''`
+    // quando nada casa — que é registro legítimo e continua aparecendo, porque pergunta que
+    // o léxico não classifica é justamente a que ninguém previu.
+    const chave = detectarAssuntoDeAssistencia(p.question).categorias[0] ?? "";
+    contagem.set(chave, (contagem.get(chave) ?? 0) + 1);
+  }
+  return [...contagem.entries()]
+    .map(([assunto, vezes]) => ({ assunto, vezes }))
+    .sort((a, b) => b.vezes - a.vezes || a.assunto.localeCompare(b.assunto));
+}
+
 export function PainelDeLacunas() {
   const [dias, setDias] = useState("30");
   const { data, isLoading, isError, error } = useLacunas(Number(dias));
 
   const lacunas = data?.data;
   const truncado = data?.meta?.truncated === true;
+  const porAssunto = useMemo(() => assuntosDasPerguntas(lacunas?.refusals.examples ?? []), [lacunas]);
 
   return (
     <div className="space-y-4">
@@ -120,7 +152,12 @@ export function PainelDeLacunas() {
             <Numero
               titulo="Quase acharam"
               valor={String(lacunas.searches.near_miss)}
-              explicacao="Havia material perto do assunto. Aqui o conserto costuma ser melhorar o texto que já existe, não escrever um novo."
+              // ⚠️ "DESTAS" É O QUE FAZ O NÚMERO SER LIDO CERTO. O quase-acerto é medido
+              // DENTRO das buscas que não acharam nada — é subconjunto, não um segundo
+              // problema. Sem a palavra, quem lê "12 não acharam" e "5 quase acharam"
+              // conclui 17 lacunas, e a mesma tela do corretor já diz "Destas". Duas
+              // leituras do mesmo banco não podem contar histórias de tamanhos diferentes.
+              explicacao="Destas, as que tinham material perto do assunto. Aqui o conserto costuma ser melhorar o texto que já existe, não escrever um novo."
             />
           </div>
 
@@ -181,6 +218,51 @@ export function PainelDeLacunas() {
               </Table>
             )}
           </Card>
+
+          {porAssunto.length > 0 ? (
+            <Card className="overflow-hidden">
+              <div className="border-b px-4 py-3">
+                <h3 className="text-sm font-medium">Por assunto</h3>
+                <p className="text-xs text-muted-foreground">
+                  Sobre o que eram as {plural(
+                    lacunas.refusals.examples.length,
+                    "pergunta recente que dá para ler",
+                    "perguntas recentes que dá para ler",
+                  )}. É uma amostra das {plural(lacunas.refusals.total, "recusa", "recusas")} do período,
+                  não a conta fechada — serve para escolher o próximo material, não para medir o tamanho da
+                  lacuna.
+                </p>
+              </div>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Assunto</TableHead>
+                    <TableHead>Perguntas</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {porAssunto.map((linha) => (
+                    <TableRow key={linha.assunto || "—sem-assunto—"}>
+                      <TableCell className="font-medium">
+                        {linha.assunto ? (
+                          // Categoria fora do mapa cai no próprio nome: vocabulário novo
+                          // aparece feio, e não some.
+                          (ASSUNTO_EM_PORTUGUES[linha.assunto] ?? linha.assunto)
+                        ) : (
+                          <span className="text-muted-foreground">
+                            Fora dos assuntos conhecidos — vale ler a pergunta abaixo
+                          </span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant="neutral">{linha.vezes}</Badge>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </Card>
+          ) : null}
 
           {lacunas.refusals.examples.length > 0 ? (
             <Card className="space-y-3 p-4">

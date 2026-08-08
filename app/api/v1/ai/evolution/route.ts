@@ -40,6 +40,20 @@ const ROW_CAP = 50_000;
  */
 const DIVERGENCIAS_NA_TELA = 10;
 
+/**
+ * Quantos avisos de recusa entram no agrupamento por operadora e assunto (FR-028).
+ *
+ * Teto próprio, MUITO abaixo do `ROW_CAP`, porque estas linhas carregam texto: o corpo do
+ * aviso traz a pergunta do cliente (até 400 caracteres) e cinquenta mil deles seriam
+ * dezenas de megabytes atravessando a rota para produzir uma lista de no máximo algumas
+ * dezenas de baldes. O agrupamento satura muito antes disso — o que muda com mais linhas é
+ * a contagem, não quais assuntos aparecem.
+ */
+const RECUSAS_ANALISADAS = 2_000;
+
+/** O aviso que a recusa por falta de lastro abre na Central (migration 0116). */
+const KIND_RECUSA = "assistance_without_grounding";
+
 const querySchema = z.object({
   from: z.string().regex(DAY_RE).optional(),
   to: z.string().regex(DAY_RE).optional(),
@@ -165,6 +179,8 @@ export async function GET(req: NextRequest): Promise<Response> {
     handoffEvents,
     stages,
     divergencias,
+    escopos,
+    recusas,
   ] = await Promise.all([
     ler<{ created_at: string; title: string }>("org_memory_entries", "created_at, title", "created_at"),
     // `applied_at` é nulo enquanto a proposta não foi aplicada, e `NULL` não
@@ -185,11 +201,20 @@ export async function GET(req: NextRequest): Promise<Response> {
       "created_at, outcome, intent_name",
       "created_at",
     ),
-    ler<{ created_at: string; hits: number; top_score: number | null; threshold: number }>(
-      "knowledge_searches",
-      "created_at, hits, top_score, threshold",
-      "created_at",
-    ),
+    // `scope_id` e `refusal_reason` vêm da migration 0126 e são nulos nas linhas anteriores
+    // a ela. O agregador tolera os dois formatos — ver o comentário do campo no
+    // `EvolutionInput`. O nome da operadora NÃO vem por junção embutida aqui de propósito:
+    // um embed que falhe (cache de schema do PostgREST desatualizado, por exemplo) zeraria
+    // a leitura INTEIRA de buscas, e o painel diria "ninguém consultou sua base". Resolver
+    // o nome numa leitura separada faz a falha custar o nome, não o número.
+    ler<{
+      created_at: string;
+      hits: number;
+      top_score: number | null;
+      threshold: number;
+      scope_id: string | null;
+      refusal_reason: string | null;
+    }>("knowledge_searches", "created_at, hits, top_score, threshold, scope_id, refusal_reason", "created_at"),
     ler<{ created_at: string; to_stage: string }>("lead_state_transitions", "created_at, to_stage", "created_at"),
     ler<{ cost_cents: number | null }>("llm_calls", "cost_cents", "created_at"),
     contar("messages", "created_at", ["direction", "inbound"]),
@@ -231,6 +256,22 @@ export async function GET(req: NextRequest): Promise<Response> {
       .is("resolved_at", null)
       .order("last_seen_at", { ascending: false })
       .limit(DIVERGENCIAS_NA_TELA),
+    // Nome das operadoras. **Sem filtro de `is_active`**: a lacuna de um escopo que o
+    // corretor desligou ontem continua sendo lacuna de ontem, e mostrá-la sem nome faria a
+    // tela dizer "operadora não identificada" sobre uma operadora que ela sabe nomear.
+    supabase.from("knowledge_scopes").select("id, display_name").eq("organization_id", orgId).limit(ROW_CAP),
+    // As recusas como o corretor as recebeu, com o corpo cru — quem lê o formato é o
+    // agregador, num lugar só. É a ÚNICA fonte da pergunta real que FR-028 exige: a
+    // telemetria de busca não guarda texto de conversa, por contrato da migration 0086.
+    supabase
+      .from("agent_inbox_items")
+      .select("created_at, body")
+      .eq("organization_id", orgId)
+      .eq("kind", KIND_RECUSA)
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso)
+      .order("created_at", { ascending: false })
+      .limit(RECUSAS_ANALISADAS),
   ]);
 
   if (stages.error) fonteFalhou("crm_stages", stages.error);
@@ -238,6 +279,17 @@ export async function GET(req: NextRequest): Promise<Response> {
   // que some inteiro porque uma fonte caiu é pior que um com uma seção a menos. Mas também
   // não some calada: `fonteFalhou` é o mesmo canal de aviso das demais.
   if (divergencias.error) fonteFalhou("knowledge_divergences", divergencias.error);
+  if (escopos.error) fonteFalhou("knowledge_scopes", escopos.error);
+  if (recusas.error) fonteFalhou("agent_inbox_items", recusas.error);
+
+  // id → nome, resolvido aqui para o agregador continuar puro. Escopo que sumiu do mapa
+  // (apagado) cai em `null`, que a tela lê como "operadora não identificada" — a lacuna
+  // perde o nome, nunca a existência, que é exatamente o que o `on delete set null` da
+  // migration 0126 escolheu.
+  const nomeDoEscopo = new Map<string, string>();
+  for (const e of (escopos.data ?? []) as Array<{ id: string; display_name: string }>) {
+    nomeDoEscopo.set(e.id, e.display_name);
+  }
 
   const porPipeline = new Map<string, Array<string | null>>();
   for (const r of (stages.data ?? []) as Array<{
@@ -258,7 +310,11 @@ export async function GET(req: NextRequest): Promise<Response> {
     skillInstalls,
     skillActivations,
     routerDecisions,
-    knowledgeSearches,
+    knowledgeSearches: knowledgeSearches.map((k) => ({
+      ...k,
+      scope_name: k.scope_id !== null ? (nomeDoEscopo.get(k.scope_id) ?? null) : null,
+    })),
+    knowledgeRefusals: (recusas.data ?? []) as Array<{ created_at: string; body: string | null }>,
     // Uma linha por (par de materiais, assunto) já vem do banco — o `unique` da 0125 faz
     // a deduplicação, e não há o que agregar aqui.
     knowledgeDivergences: (

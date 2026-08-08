@@ -1,8 +1,9 @@
 import { describe, it, expect } from "vitest";
 
-import { boaNoticia, montaLacunas } from "@/components/ai/EvolutionGaps";
+import { ASSUNTO_EM_PORTUGUES, boaNoticia, montaLacunas } from "@/components/ai/EvolutionGaps";
+import { assuntosDasPerguntas } from "@/app/admin/(protected)/catalogo/_lacunas";
 import { descricaoResultado, taxaDeAjuda } from "@/app/app/ai/evolution/_client";
-import { aggregateEvolution, type EvolutionInput } from "@/lib/ai/evolution/aggregate";
+import { aggregateEvolution, type EvolutionInput, type EvolutionPayload } from "@/lib/ai/evolution/aggregate";
 
 /**
  * Estes dois pedaços são INALCANÇÁVEIS pela tela nas orgs que temos: basta um
@@ -70,6 +71,9 @@ describe("lacuna de funil — o botão fecha o ciclo, e o ciclo tem guarda", () 
     pipelines_evaluated: 1,
     knowledge_near_misses: 0,
     knowledge_empty: 0,
+    knowledge_unavailable: 0,
+    knowledge_by_scope: [],
+    knowledge_refusals: [],
     knowledge_divergences: [],
     router_no_match: 0,
     router_failed: 0,
@@ -153,6 +157,7 @@ describe("aggregateEvolution expõe o fato exato no payload", () => {
     skillActivations: [],
     routerDecisions: [],
     knowledgeSearches: [],
+    knowledgeRefusals: [],
     knowledgeDivergences: [],
     stageTransitions: [],
     costCents: 0,
@@ -207,6 +212,9 @@ describe("lacuna de divergência — o corretor sabe quais dois textos conferir"
     pipelines_evaluated: 1,
     knowledge_near_misses: 0,
     knowledge_empty: 0,
+    knowledge_unavailable: 0,
+    knowledge_by_scope: [],
+    knowledge_refusals: [],
     router_no_match: 0,
     router_failed: 0,
   };
@@ -273,5 +281,211 @@ describe("lacuna de divergência — o corretor sabe quais dois textos conferir"
     expect(l.href).toBe("/app/ai/knowledge/sources");
     expect(l.cta).toBe("Conferir os dois materiais");
     expect(l.cta).not.toMatch(/^Ver/);
+  });
+});
+
+/**
+ * A lacuna de conhecimento com contagem, operadora, assunto e a PERGUNTA REAL
+ * (spec 002, FR-028/FR-029 · US5 · T114).
+ *
+ * O que estes casos vigiam é o conselho, não o número. Três coisas passam despercebidas em
+ * qualquer revisão de contagem e viram trabalho errado do corretor: (a) a pergunta de
+ * exemplo sumir, deixando-o com uma categoria e nenhuma pista do que escrever; (b) "não
+ * achei nada" e "achei quase" virarem a mesma frase, que manda escrever de novo um texto
+ * que já existe; (c) a falha de infraestrutura entrar na conta de material faltando, que é
+ * a única lacuna desta tela cujo dono não é o usuário.
+ */
+describe("lacuna de conhecimento — o corretor sai sabendo o que escrever", () => {
+  const semNada = {
+    unmapped_agent_steps: [],
+    pipelines_evaluated: 1,
+    knowledge_near_misses: 0,
+    knowledge_empty: 0,
+    knowledge_unavailable: 0,
+    knowledge_by_scope: [],
+    knowledge_refusals: [],
+    knowledge_divergences: [],
+    router_no_match: 0,
+    router_failed: 0,
+  };
+  type Recusa = EvolutionPayload["gaps"]["knowledge_refusals"][number];
+  const recusa = (over: Partial<Recusa> = {}): Recusa => ({
+    scope_name: "Operadora A",
+    subject: "cobranca",
+    count: 3,
+    example_question: "perdi meu boleto, como pego a segunda via?",
+    last_seen_at: "2026-07-03T10:00:00Z",
+    ...over,
+  });
+  const daRecusa = (over: Parameters<typeof recusa>[0] = {}) =>
+    montaLacunas({ ...semNada, knowledge_refusals: [recusa(over)] })[0]!;
+
+  it("mostra a contagem E a pergunta como o cliente escreveu", () => {
+    const l = daRecusa();
+    expect(l.texto).toContain("3 conversas");
+    expect(l.texto).toContain("«perdi meu boleto, como pego a segunda via?»");
+    expect(l.texto).toContain("Operadora A");
+  });
+
+  it("traduz o assunto para palavra de corretor, não para o nome da categoria", () => {
+    expect(daRecusa({ subject: "rede" }).texto).toContain("rede credenciada");
+    expect(daRecusa({ subject: "prazos" }).texto).toContain("prazos e carência");
+    expect(daRecusa().texto).not.toContain("cobranca");
+  });
+
+  it("uma conversa só não vira «em 1 conversas»", () => {
+    const l = daRecusa({ count: 1 });
+    expect(l.texto).toContain("Um cliente");
+    expect(l.texto).not.toContain("1 conversas");
+    expect(l.texto).not.toContain("em 1 conversa");
+  });
+
+  it("sem pergunta legível, a frase continua inteira — sem aspas vazias", () => {
+    const t = daRecusa({ example_question: null }).texto;
+    expect(t).not.toContain("«»");
+    expect(t).not.toContain("escreveu:");
+    expect(t).toContain("Operadora A");
+  });
+
+  it("assunto que o léxico não classificou não deixa «sobre .» pendurado", () => {
+    const t = daRecusa({ subject: "" }).texto;
+    expect(t).not.toMatch(/sobre\s*[.,]/);
+    expect(t).toContain("«perdi meu boleto, como pego a segunda via?»");
+  });
+
+  it("sem operadora identificada, diz isso em vez de calar", () => {
+    const t = daRecusa({ scope_name: null }).texto;
+    expect(t).toContain("não identificou a operadora");
+    expect(t).not.toContain(" da null");
+  });
+
+  it("o botão manda ESCREVER, não «ver»", () => {
+    const l = daRecusa();
+    expect(l.href).toBe("/app/ai/knowledge/sources");
+    expect(l.cta).toBe("Escrever esse material");
+    expect(l.cta).not.toMatch(/^Ver/);
+  });
+
+  it("cada assunto é uma linha própria, com chave distinta", () => {
+    const ls = montaLacunas({
+      ...semNada,
+      knowledge_refusals: [recusa(), recusa({ subject: "rede", scope_name: "Operadora B" })],
+    });
+    expect(ls).toHaveLength(2);
+    expect(new Set(ls.map((l) => l.chave)).size).toBe(2);
+  });
+
+  it("lista longa não vira ruído: o excedente aponta para os Alertas", () => {
+    // Cada linha aqui é uma tarefa. Quinze de uma vez é a lista inteira sendo ignorada —
+    // que é como um mecanismo anti-morte morre.
+    const muitos = ["cobranca", "rede", "prazos", "acesso", "cobertura", "canais", "regras"].map((s) =>
+      recusa({ subject: s }),
+    );
+    const ls = montaLacunas({ ...semNada, knowledge_refusals: muitos });
+    const resto = ls.find((l) => l.chave === "recusas-restantes")!;
+    expect(ls).toHaveLength(6);
+    expect(resto.texto).toContain("mais 2 assuntos");
+    expect(resto.href).toBe("/app/ai/inbox");
+  });
+
+  it("diz EM QUAL operadora falta material, sem repetir a totalização", () => {
+    const l = montaLacunas({
+      ...semNada,
+      knowledge_empty: 6,
+      knowledge_near_misses: 2,
+      knowledge_by_scope: [
+        { scope_name: "Operadora A", sem_material: 4, quase_no_limiar: 1, busca_indisponivel: 0 },
+        { scope_name: "Operadora B", sem_material: 2, quase_no_limiar: 1, busca_indisponivel: 0 },
+      ],
+    });
+    const vazias = l.find((x) => x.chave === "knowledge-empty")!;
+    const quase = l.find((x) => x.chave === "knowledge-near")!;
+
+    expect(vazias.texto).toContain("Onde: Operadora A (4) e Operadora B (2).");
+    // O recorte do "quase" é o do QUASE, não o do "não achei nada" repetido: quem lê os
+    // dois números iguais conclui que a operadora tem o dobro do problema que tem.
+    expect(quase.texto).toContain("Onde: Operadora A (1) e Operadora B (1).");
+  });
+
+  it("não escreve «Onde: sem operadora identificada» quando nenhuma foi identificada", () => {
+    const l = montaLacunas({
+      ...semNada,
+      knowledge_empty: 3,
+      knowledge_by_scope: [{ scope_name: null, sem_material: 3, quase_no_limiar: 0, busca_indisponivel: 0 }],
+    });
+    expect(l.find((x) => x.chave === "knowledge-empty")!.texto).not.toContain("Onde:");
+  });
+
+  it("falha técnica vira linha PRÓPRIA, que não manda escrever nada", () => {
+    const l = montaLacunas({ ...semNada, knowledge_unavailable: 4 });
+    const tecnica = l.find((x) => x.chave === "knowledge-unavailable")!;
+
+    expect(tecnica.texto).toContain("falha técnica, não material faltando");
+    expect(tecnica.texto).toContain("Não há nada para você escrever");
+    expect(tecnica.href).toBe("/app/ai/credentials");
+    // E ela não some: lacuna sem linha é lacuna que ninguém conserta.
+    expect(l.map((x) => x.chave)).toContain("knowledge-unavailable");
+  });
+
+  it("a pergunta real vem antes dos números, porque é ela que diz o que fazer", () => {
+    const l = montaLacunas({
+      ...semNada,
+      knowledge_empty: 9,
+      knowledge_refusals: [recusa()],
+    });
+    expect(l.findIndex((x) => x.chave.startsWith("recusa-"))).toBeLessThan(
+      l.findIndex((x) => x.chave === "knowledge-empty"),
+    );
+  });
+});
+
+/**
+ * A MESMA leitura do lado do administrador de plataforma (FR-028, segunda metade · T115).
+ *
+ * O requisito não pede "uma tela para o curador": pede a mesma leitura, restrita à própria
+ * instalação. Duas telas sobre o mesmo banco que agrupam por vocabulários diferentes fazem
+ * o curador e o corretor chamarem de nomes diferentes a mesma lacuna — e nenhum dos dois
+ * descobre isso, porque cada um só vê a sua.
+ */
+describe("lacunas do catálogo — o curador lê pelo mesmo léxico que o corretor", () => {
+  const p = (question: string) => ({ question });
+
+  it("agrupa as perguntas pelas categorias fechadas do léxico de assistência", () => {
+    expect(
+      assuntosDasPerguntas([
+        p("perdi meu boleto, como pego a segunda via?"),
+        p("a mensalidade subiu, por quê?"),
+        p("esse hospital está credenciado?"),
+      ]),
+    ).toEqual([
+      { assunto: "cobranca", vezes: 2 },
+      { assunto: "rede", vezes: 1 },
+    ]);
+  });
+
+  it("toda categoria que ele agrupa tem tradução no MESMO mapa da tela do corretor", () => {
+    // A prova que importa é a de cobertura: se o curador agrupasse por um vocabulário
+    // próprio, alguma categoria cairia fora de `ASSUNTO_EM_PORTUGUES` e a tela mostraria o
+    // nome técnico da categoria para uma pessoa que nunca viu o léxico.
+    const assuntos = assuntosDasPerguntas([
+      p("perdi meu boleto"),
+      p("preciso da minha carteirinha"),
+      p("esse hospital está credenciado?"),
+      p("isso está coberto pelo plano?"),
+      p("qual é a carência?"),
+      p("qual a central de atendimento?"),
+      p("como faço a portabilidade?"),
+    ]).map((a) => a.assunto);
+
+    expect(assuntos.length).toBeGreaterThanOrEqual(7);
+    for (const a of assuntos) expect(ASSUNTO_EM_PORTUGUES[a]).toBeTruthy();
+  });
+
+  it("pergunta que o léxico não classifica NÃO some do agrupamento", () => {
+    // Some seria perder justamente o assunto que ninguém previu — o mais interessante
+    // para quem cura o catálogo.
+    expect(assuntosDasPerguntas([p("vocês têm plano com academia inclusa?")])).toEqual([
+      { assunto: "", vezes: 1 },
+    ]);
   });
 });

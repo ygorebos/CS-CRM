@@ -52,6 +52,7 @@ import {
   registrarDivergencias,
   type DivergenciaARegistrar,
 } from './divergencia';
+import { MOTIVO_DE_RECUSA, type MotivoDeRecusa } from '@/lib/ai/knowledge/motivo-de-recusa';
 import type { Logger } from '../obs/logger';
 
 export type CamadaDeLastro = 'tenant' | 'catalog';
@@ -191,9 +192,18 @@ export async function searchKnowledge(
     try {
       await pool.query(
         `insert into knowledge_searches
-           (organization_id, job_id, kb_version_id, hits, top_score, threshold)
-         values ($1, $2, $3, $4, $5, $6)`,
-        [args.organizationId, args.jobId ?? null, args.kbVersionId, achados, topScore, args.threshold],
+           (organization_id, job_id, kb_version_id, hits, top_score, threshold, scope_id, refusal_reason)
+         values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [
+          args.organizationId,
+          args.jobId ?? null,
+          args.kbVersionId,
+          achados,
+          topScore,
+          args.threshold,
+          escopoDaLinha(escopos),
+          motivoDaRecusa(achados, topScore, args.threshold),
+        ],
       );
     } catch (err) {
       // Engolido de propósito — o `catch` externo transformaria isto em
@@ -221,6 +231,31 @@ export async function searchKnowledge(
     // O veto de verdade é do gate `assistance_grounding`: sem âncora a afirmação não sai,
     // e a busca que falhou não devolve âncora nenhuma. Esta mensagem é o ensino que volta
     // ao modelo, para que ele escolha o desfecho certo antes de tentar.
+    // FR-029 (migration 0126): a queda entra na telemetria com motivo PRÓPRIO, não como
+    // silêncio. Sem esta linha, uma hora de busca fora do ar chega ao painel do corretor
+    // como "ninguém consultou sua base" — indistinguível de um dia sem cliente. Ele conclui
+    // que está tudo calmo justamente quando o agente está cego.
+    //
+    // Fire-and-forget com um motivo a mais que o insert de cima: a falha que trouxe até aqui
+    // pode SER o banco, e aí não há onde gravar coisa nenhuma.
+    try {
+      await pool.query(
+        `insert into knowledge_searches
+           (organization_id, job_id, kb_version_id, hits, top_score, threshold, scope_id, refusal_reason)
+         values ($1, $2, $3, 0, null, $4, $5, $6)`,
+        [
+          args.organizationId,
+          args.jobId ?? null,
+          args.kbVersionId,
+          args.threshold,
+          escopoDaLinha(escopos),
+          MOTIVO_DE_RECUSA.BUSCA_INDISPONIVEL,
+        ],
+      );
+    } catch {
+      // Sem log: o caminho que trouxe até aqui já avisou, e esta falha é quase sempre a mesma.
+    }
+
     return {
       ok: false,
       error: {
@@ -297,4 +332,39 @@ export function citationsFromHits(hits: readonly KnowledgeHit[]): Citation[] {
     snippet: h.content.slice(0, 240),
     metadata: { ...(h.source_ref ?? {}), layer: h.layer, material_id: h.material_id },
   }));
+}
+
+/**
+ * Em qual operadora gravar a lacuna (migration 0126, FR-029).
+ *
+ * ⚠️ Só quando a busca teve UM escopo. A linha é uma e a coluna é uma: com dois escopos,
+ * escolher um faria o painel dizer "falta material na Amil" sobre uma pergunta que também
+ * era da Unimed, e o corretor escreveria o material do lado errado. `null` a tela lê como
+ * "operadora não identificada", que é a verdade.
+ */
+function escopoDaLinha(escopos: readonly (string | null)[]): string | null {
+  return escopos.length === 1 ? (escopos[0] ?? null) : null;
+}
+
+/**
+ * Por que esta busca não ancorou nada. `null` = ancorou, não é lacuna.
+ *
+ * DERIVADO do que a busca já mediu, sem consulta nova: `topScore` só é não-nulo no caso
+ * vazio porque `diagnosticoDeQuaseAcerto` rodou, e ele só roda quando nada foi achado.
+ *
+ * ⚠️ Residual conhecido: aquele diagnóstico devolve `null` tanto para "não havia nada
+ * perto" quanto para "a consulta de diagnóstico falhou". No segundo caso a linha sai como
+ * `sem_material` em vez de `busca_indisponivel` — uma linha rotulada errado num caminho que
+ * já emite warn. Distinguir exige mudar o retorno daquela função.
+ */
+function motivoDaRecusa(
+  achados: number,
+  topScore: number | null,
+  threshold: number,
+): MotivoDeRecusa | null {
+  if (achados > 0) return null;
+  if (topScore !== null && topScore < threshold && topScore >= threshold - MARGEM_DE_QUASE_ACERTO) {
+    return MOTIVO_DE_RECUSA.QUASE_NO_LIMIAR;
+  }
+  return MOTIVO_DE_RECUSA.SEM_MATERIAL;
 }
