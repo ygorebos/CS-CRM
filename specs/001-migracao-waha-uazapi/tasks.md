@@ -163,8 +163,16 @@ e a contagem não muda.
   > `baseline.sql`, exercitando a MESMA função. Regra reescrita no teste provaria uma cópia — e cópia
   > não vigia nada. (`lib/channels/meta/ingest.ts` ainda tem a sua própria; unificar é dívida
   > registrada, fora do escopo desta fatia.)
-- [ ] T028 [US1] Substituir `internal/handlers/webhook_forward.go` no gateway por entrega do **envelope normalizado** assinado (HMAC + timestamp + `X-Gateway-Delivery-Id`), conforme `contracts/gateway-inbound-v1.md` §2–§3
-- [ ] T029 [US1] Mapear `MensagemNormalizada` → envelope v1 em pacote novo do gateway, cobrindo os campos da tabela de vocabulário da análise (`analise-gateway-go-recebimentos.md`)
+- [x] T028 [US1] Substituir `internal/handlers/webhook_forward.go` no gateway por entrega do **envelope normalizado** assinado (HMAC + timestamp + `X-Gateway-Delivery-Id`), conforme `contracts/gateway-inbound-v1.md` §2–§3
+
+  > **Substituição COM caminho de volta, e a razão.** O encaminhamento cru não foi apagado: destino
+  > sem `formato` continua recebendo o payload do provedor, e só quem tiver `formato:
+  > "envelope_v1"` (+ `segredo`) recebe o envelope assinado. Trocar tudo no mesmo deploy derrubaria
+  > todos os integradores que já consomem o formato antigo — e num produto que roda em máquina de
+  > terceiros isso não se conserta remotamente. É a mesma doutrina da chave `ingest_path` por
+  > conexão deste lado. Ligado nos quatro canais (uazapi, cloud, instagram, messenger), em
+  > mensagem e em estado. Sem retentativa e sem fila em disco — é a Fase 4.
+- [x] T029 [US1] Mapear `MensagemNormalizada` → envelope v1 em pacote novo do gateway, cobrindo os campos da tabela de vocabulário da análise (`analise-gateway-go-recebimentos.md`)
 
 ### Prova
 
