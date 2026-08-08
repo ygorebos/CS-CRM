@@ -248,8 +248,19 @@ pelo celular e conferir que aparece uma vez só, do lado certo.
   MUST gerar aviso operacional — nunca sumir em log.
 - **FR-016**: A entrega MUST ser idempotente ponta a ponta: reentregar o mesmo evento MUST NOT
   produzir segunda mensagem no inbox, e o CRM MUST responder sucesso à reentrega.
-- **FR-017**: O CRM MUST manter registro auditável de cada entrega recebida (aceita ou recusada),
-  suficiente para reconstruir o que aconteceu.
+- **FR-017**: O CRM MUST manter registro auditável, **visível ao tenant dono da conexão**, de cada
+  entrega **cuja conexão foi resolvida** — aceita ou recusada —, suficiente para reconstruir o que
+  aconteceu.
+- **FR-017a**: Entrega cuja conexão **não** pôde ser resolvida (credencial de origem desconhecida)
+  MUST ser contabilizada como sinal de plataforma, sem tentar atribuí-la a nenhuma organização.
+  Esse registro MUST NOT ser exposto a tenant nenhum, e MUST ser suficiente para detectar varredura
+  de endereços.
+
+  > **Por que a separação existe.** O registro auditável é isolado por organização, e uma entrega
+  > sem conexão resolvida não tem organização a que pertencer. Escrevê-la sem dono a tornaria
+  > invisível para todo mundo — registro que ninguém lê não é auditoria; e atribuí-la por
+  > aproximação seria adivinhar tenant, que é a falha mais grave possível aqui. Por isso são dois
+  > requisitos, não um.
 
 **Ingestão e dados**
 

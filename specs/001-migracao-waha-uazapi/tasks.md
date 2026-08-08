@@ -34,7 +34,7 @@ um incremento utilizável sozinho.
 **Purpose**: deixar os dois lados capazes de se falar em desenvolvimento, sem tocar em
 comportamento de produção.
 
-- [ ] T001 Declarar `GATEWAY_BASE_URL`, `GATEWAY_INBOUND_ENABLED` e o teto de tamanho de corpo em `lib/env.ts`, com Zod que lança no startup quando a rota estiver ligada e a base faltar
+- [ ] T001 Declarar `GATEWAY_BASE_URL`, `GATEWAY_INBOUND_ENABLED`, `GATEWAY_MAX_BODY_BYTES` e `GATEWAY_MAX_MEDIA_BYTES` em `lib/env.ts`, com Zod que lança no startup quando a rota estiver ligada e a base faltar. **Os dois tetos nascem com número, não com `TODO`**: medir o maior corpo e a maior mídia que os canais suportados pelo gateway realmente entregam (`internal/normalizer/*.go` e os limites publicados de cada provedor) e adotar esse valor com folga — inventar um número aqui é o que transforma o edge case "corpo gigante" em incidente de produção
 - [ ] T002 [P] Espelhar as mesmas variáveis em `.env.example`, com comentário do que cada uma faz (item 9 do DoD; `docs/current-state.md` §4.5 registra que este arquivo desgarra de `lib/env.ts`)
 - [ ] T003 [P] Acrescentar o serviço `gateway` em `docker-compose.yml` (desenvolvimento) em modo relay, com portas presas a `127.0.0.1` e volume nomeado para a fila em disco
 - [ ] T004 [P] Documentar o modo relay e as variáveis novas em `docs/runbooks/` (arquivo novo `gateway-relay.md`), incluindo como conferir que ele subiu
@@ -63,6 +63,7 @@ desta fase fechar.**
 
 - [ ] T010 [TEST] [P] Escrever `tests/unit/gateway-envelope.test.ts` cobrindo: envelope válido aceito; campo desconhecido preservado em `metadata`; `envelope_version` futura aceita; `type` desconhecido vira `system` com `metadata.original_type`; `event_kind` desconhecido ignorado com motivo; corpo malformado recusado
 - [ ] T011 Implementar `lib/gateway/envelope.ts` — schema Zod do envelope v1 conforme `contracts/gateway-inbound-v1.md` §3, tolerante a campo desconhecido, exportando os tipos consumidos pelo ingest
+- [ ] T011a [TEST] `tests/invariants/gateway-sem-payload-cru.test.ts` — nenhum arquivo fora de `lib/waha/**` e `lib/channels/meta/**` importa parser de provedor ou lê campo cru de payload de canal; o caminho novo só conhece o envelope. **FR-005 está escrito como invariante e hoje não tem vigia** — o Princípio XI diz que invariante só em prosa deixa de ser invariante. Vale como regra de lint equivalente, desde que reprove no CI
 
 ### Autenticidade
 
@@ -72,7 +73,9 @@ desta fase fechar.**
 ### Porta de entrada
 
 - [ ] T014 Implementar `app/api/v1/webhooks/gateway/[token]/route.ts`: resolve `channel_sessions` por `webhook_path_token` (tolerante a canal arquivado, como a rota WAHA), decifra o segredo via `fn_decrypt_oauth`, verifica assinatura, grava em `webhook_events_log` com `provider='gateway'` e `status='received'`, e **responde `202` antes de qualquer ingestão** (ACK-primeiro)
-- [ ] T015 Aplicar rate limit na rota nova, com `X-RateLimit-*` e `Retry-After` em 429 — a rota é pública e o Princípio VI exige; `docs/current-state.md` §4.3 mostra que webhooks hoje não têm, e esta rota **não** herda o buraco
+- [ ] T015 Aplicar rate limit na rota nova, com `X-RateLimit-*` e `Retry-After` em 429 — a rota é pública e o Princípio VI exige; `docs/current-state.md` §4.3 mostra que webhooks hoje não têm, e esta rota **não** herda o buraco. **O teto é por conexão e nasce acima do alvo de rajada do SC-010** (200 mensagens em 60s): limite apertado demais derruba o tráfego legítimo do corretor numa campanha respondida, e é indistinguível de estar fora do ar. Fixar o número como múltiplo declarado do alvo, nunca como palpite
+- [ ] T015a [TEST] `tests/unit/gateway-rate-limit.test.ts` — 200 entregas em 60s pela mesma conexão **passam**; tráfego acima do teto recebe `429` com `Retry-After`; o limite de uma conexão não consome a cota de outra. Sem este teste, T015 e SC-010 são requisitos que se contradizem no escuro
+- [ ] T014a [TEST] [P] Estender `tests/unit/gateway-envelope.test.ts` (ou arquivo irmão) com os tetos de tamanho: corpo acima de `GATEWAY_MAX_BODY_BYTES` é recusado com erro claro e **sem** carregar tudo em memória; envelope cuja mídia declara tamanho acima de `GATEWAY_MAX_MEDIA_BYTES` entra como mensagem com anexo indisponível, nunca derruba a ingestão — é o edge case "corpo gigante ou mídia enorme" da spec, que só existia como variável de ambiente
 - [ ] T016 [P] Auditar as recusas (`webhook.gateway_rejected`) com motivo, seguindo o padrão de `app/api/v1/webhooks/waha/[token]/route.ts`
 
 ### Vocabulário de canal no TypeScript
@@ -167,7 +170,7 @@ reavaliado antes de qualquer investimento adicional.
 - [ ] T036 [US2] Implementar `app/api/v1/cron/gateway-inbound-drain/route.ts` e agendá-la no `scheduler` do `docker-compose.prod.yml`, no padrão do `event-log-drain`
 - [ ] T037 [US2] Tornar o descarte visível: item na Central de avisos quando houver entrega `dead` (Princípio II — falta de funcionamento aparece na tela, não em `log.Warn`)
 - [ ] T038 [US2] Executar o roteiro do `quickstart.md` §2, incluindo o reinício do **gateway** no meio do intervalo
-- [ ] T038a [US2] Executar o roteiro de rajada do `quickstart.md` §7 (200 mensagens em 60s): 100% no inbox, zero duplicatas, e o ritmo de resposta do agente ainda obedecendo os limites anti-banimento existentes — é o SC-010, que não tinha tarefa
+- [ ] T038a [US2] Executar o roteiro de rajada do `quickstart.md` §7 (200 mensagens em 60s): 100% no inbox, zero duplicatas, e o ritmo de resposta do agente ainda obedecendo os limites anti-banimento existentes — é o SC-010, que não tinha tarefa. **Rodar com o rate limit de T015 ligado**, e não desligado para o teste passar: rajada provada sem o limite ativo não prova nada sobre produção
 - [ ] T039 [US2] **Sabotagem**: trocar a fila em disco por fila em memória e confirmar que T032 fica vermelho; restaurar
 
 **Checkpoint**: a promessa "nada se perde" deixa de ser promessa.
@@ -230,6 +233,8 @@ inbox identificada pelo canal.
 - [ ] T056 [TEST] [P] [US4] `tests/invariants/gateway-inbound-canal-novo.test.ts` — envelope de outro `platform` entra e é identificado; `type` desconhecido é preservado como `system` com `metadata.original_type`, nunca descartado
 - [ ] T057 [US4] Exibir o canal de origem no inbox (`components/inbox/**`), sem tela nova — a conversa já existe, ganha identificação de origem
 - [ ] T058 [US4] Acrescentar o gateway como serviço em `docker-compose.prod.yml` e fazê-lo subir pelo `hostgator-setup-kit/install.sh` e `update.sh`, **sem** nenhuma pergunta nova ao usuário
+- [ ] T058a [US4] Fazer **instalação nova nascer em `ingest_path='gateway'`**: `scripts/bootstrap-owner.ts` e o caminho de criação de conexão do `install.sh` gravam `'gateway'`; o `default 'legacy'` da coluna continua valendo **só** para as linhas que já existiam quando a `0116` foi aplicada. Sem isto o self-hoster novo sobe um serviço que nunca é usado — o gateway no compose e o CRM ingerindo pelo caminho legado
+- [ ] T058b [TEST] [US4] `tests/invariants/gateway-instalacao-nova.test.ts` — banco fresco do `baseline.sql` + `bootstrap-owner` produz conexão com `ingest_path='gateway'`; banco que já tinha conexões antes da `0116` mantém as antigas em `'legacy'`. É a diferença entre "clone novo funciona" e "clone novo parece funcionar"
 - [ ] T059 [US4] Tornar a ausência do gateway visível como problema de configuração na tela (Central de avisos / banner), nunca como silêncio (FR-027)
 - [ ] T060 [US4] Medir SC-008: contar as linhas de código de ingestão específicas do canal novo — o alvo é **zero**
 - [ ] T060a [US4] **Sabotagem**: fazer o ingest tratar `platform` desconhecido com descarte em vez de preservação e confirmar que T056 fica **vermelho**; restaurar. Era a única história sem sabotagem, e o Princípio XI a exige de todas
@@ -311,7 +316,19 @@ T032..T039 (durabilidade)  ‖  T040..T045 (autenticidade e isolamento)
 > T017c reescrita — cifrar dentro do `baseline.sql` **abortaria a instalação de uma VPS nova**,
 > porque a chave de cifra só é semeada depois de o baseline rodar; T017e (recusa com motivo
 > próprio em vez de silêncio quando o segredo não foi curado); T060a (a US4 era a única história
-> sem tarefa de sabotagem, que o Princípio XI exige de todas). Total: **77 tarefas**.
+> sem tarefa de sabotagem, que o Princípio XI exige de todas).
+>
+> **Correções da 3ª rodada** (`/speckit-analyze`, achados E1–E3, C1, F1 e D1):
+> T015 + T015a + T038a — o rate limit e o alvo de rajada do SC-010 se contradiziam no escuro:
+> o teto agora nasce **acima** do alvo, é por conexão, e a rajada é provada com ele **ligado**;
+> T011a — FR-005 ("código novo não lê payload cru") estava escrito como invariante e não tinha
+> vigia nenhuma, contra o Princípio XI; T058a + T058b — instalação nova herdava
+> `ingest_path='legacy'` e subiria o gateway sem nunca usá-lo; T001 + T014a — os tetos de
+> tamanho de corpo e mídia existiam só como variável de ambiente sem valor e sem teste, deixando
+> o edge case "corpo gigante" sem prova. Fora de `tasks.md`: FR-017 foi dividido em FR-017/FR-017a
+> na `spec.md` (era insatisfazível — exigia registrar entrega sem conexão resolvida num log
+> isolado por organização), e o gate VI do `plan.md` ganhou a justificativa de o segredo ser
+> cifrado em vez de hasheado. Total: **82 tarefas**.
 
 **MVP = Fase 1 + Fase 2 + Fase 3.** Entrega o resultado observável inteiro do plano: mensagem real
 atravessando a costura nova. É a **fatia 1**, e é um spike deliberado — se ela não fechar, o
