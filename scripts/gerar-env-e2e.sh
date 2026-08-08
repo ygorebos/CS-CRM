@@ -35,6 +35,27 @@ cd "$(dirname "$0")/.."
 SUPABASE="supabase"
 command -v supabase >/dev/null 2>&1 || SUPABASE="npx supabase"
 
+# ── A porta do app sob teste, em UM lugar só ────────────────────────────────
+#
+# Mesma regra do `playwright.config.ts` (`E2E_PORT ?? "3001"`), e é ele quem sobe
+# o `next start`. Duas redações da mesma porta é o defeito que este bloco fecha.
+#
+# ⚠️ MEDIDO no CI (2026-08-08): `NEXT_PUBLIC_APP_URL` NÃO era escrita aqui, então
+# valia o default de `lib/env.ts` — `http://localhost:3000`. E `/auth/confirm`
+# monta o redirect com essa var DE PROPÓSITO (nunca com `Host`/`X-Forwarded-Host`,
+# que seria open redirect dentro do fluxo de recuperação de senha). Resultado: o
+# link do e-mail estabelecia a sessão e mandava o browser para a porta 3000, onde
+# não havia nada — `ERR_CONNECTION_REFUSED`, com o Playwright reportando a URL do
+# `goto` original e a falha parecendo "servidor fora do ar". Só as 3 specs que
+# passam por `/auth/confirm` quebravam (password-recovery, reset-password-mfa e
+# signup-journey — esta última é P0 da doutrina de QA Visual), enquanto as outras
+# 37 do shard passavam, o que fazia o sintoma parecer instabilidade.
+#
+# `localhost` e não `127.0.0.1`: cookie é por HOST, e o baseURL do Playwright é
+# `localhost`. Redirecionar para `127.0.0.1` entregaria a sessão a outro host e a
+# tela seguinte veria um usuário deslogado.
+PORTA_APP="${E2E_PORT:-3001}"
+
 if ! $SUPABASE status >/dev/null 2>&1; then
   echo "==> O Supabase local não está de pé. Rode 'npx supabase start' antes." >&2
   exit 1
@@ -103,10 +124,17 @@ WAHA_BYO_ENCRYPTION_KEY=$CHAVE_WAHA
 AI_CRED_AES_KEY=$CHAVE_AI
 WAHA_API_BASE_URL=http://127.0.0.1:3999
 WAHA_API_KEY=e2e-placeholder-nao-e-segredo
-WAHA_WEBHOOK_BASE_URL=http://127.0.0.1:3001
+WAHA_WEBHOOK_BASE_URL=http://127.0.0.1:$PORTA_APP
 UPSTASH_REDIS_REST_URL=http://127.0.0.1:3998
 UPSTASH_REDIS_REST_TOKEN=e2e-placeholder-nao-e-segredo
 NEXT_TELEMETRY_DISABLED=1
+
+# A porta em que o Playwright sobe o app. NÃO é decoração: `/auth/confirm` monta
+# o redirect do link de e-mail a partir DELA, por recusar ler o `Host` da
+# requisição (open redirect). Errada aqui, todo fluxo que chega por e-mail —
+# confirmar cadastro, redefinir senha — cai numa porta vazia.
+# Vigiado por tests/unit/e2e-env-porta-do-app.test.ts.
+NEXT_PUBLIC_APP_URL=http://localhost:$PORTA_APP
 EOF
 
 echo "==> .env.e2e gerado, apontando para $API_URL"
