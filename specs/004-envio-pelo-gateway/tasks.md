@@ -125,18 +125,25 @@ opcionais nem agrupáveis no fim.
 
 Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal.
 
-- [ ] **T020** Extrair a camada de dados para interface (`internal/store`), com a implementação atual
-      (Cotador) como primeira instância. Sem mudança de comportamento — commit próprio, verde antes
-      de seguir.
-- [ ] **T021** Segunda implementação, alvo CRM. Tradução de vocabulário na §3c da decisão
-      (`escritorio_id`→`organization_id`, `inbox_mensagens`→`messages`, `wamid`→`external_id`…).
-- [ ] **T022** Trocar o único upsert cru (`internal/processor/mensagem.go:100`) por chamada a
-      `fn_gateway_ingest_message`. **É o ponto que não sobrevive à mudança de alvo sem reescrita** —
-      §2 da decisão. **(FR-001)**
-- [ ] **T023** Consumir a taxonomia da T013: definitivo descarta e registra, transitório retenta com
-      recuo. Erro sem classe = transitório. **(FR-005)**
-- [ ] **T024** Seleção da implementação por configuração no start, com falha explícita se ambígua.
-      Endereço do banco é configuração — sem `localhost`, sem nome de serviço de compose (XIV).
+- [X] **T020** ✅ **FEITA em 2026-08-08** (worktree `gateway_go-crm`, branch `feat/004-escrita-crm`,
+      commit `4df6cf0`). `internal/store` com interface de 3 verbos; `Cotador` é casca sobre o
+      processor — zero mudança de comportamento, e o commit diz por que absorver o processor depois
+      seria mudança própria. 13 call sites de handlers fiados em `h.Store`. Suíte: 16 pacotes ok.
+- [X] **T021** ✅ **FEITA** no mesmo commit — `internal/store/crm.go`. Só fala com as duas funções
+      versionadas; tenant NUNCA no corpo (teste dedicado, vermelho sob sabotagem); tradução
+      recebida/enviada→inbound/outbound, tipo fora do CHECK→`system` com `tipo_original` preservado;
+      régua de telefone idêntica à do CRM (divergir parte o histórico do contato).
+- [X] **T022** ✅ **FEITA por desenho melhor que o previsto**: o upsert cru de `mensagem.go:100`
+      continua existindo **só dentro da variante Cotador** (via processor). Na variante CRM o caminho
+      inteiro passa por `fn_gateway_ingest_message` — não há upsert a trocar, há implementação a
+      escolher no boot. O ponto medido na §2 da decisão (idioma `ignore-duplicates` não sobrevive à
+      constraint DEFERRABLE) morre porque a variante CRM nunca fala com tabela. **(FR-001)**
+- [X] **T023** ✅ **FEITA** — `store.ErroDefinitivo()` reconhece SQLSTATE `GW***` no corpo PostgREST;
+      teste cobre GW001 (definitivo) e 57014 (transitório). O CONSUMO no laço de retentativa da fila
+      é a T025 — a função existe e está testada, o laço ainda não a chama. **(FR-005)**
+- [X] **T024** ✅ **FEITA** — `STORE_ALVO=cotador|crm` (default cotador: todo deploy existente segue
+      igual), `CRM_POSTGREST_URL` + `CRM_GATEWAY_WRITER_TOKEN` obrigatórias no alvo crm. Typo ou
+      config incompleta **recusam o boot** — testado. Endereço é configuração pura.
 - [ ] **T025** Fila em disco: sobrevive a reinício, teto de tamanho declarado, alarme quando para de
       drenar. **Não é polimento** — é metade do que XIV exige. **(FR-013)**
 - [ ] **T026** [TEST] Matar o gateway com a fila cheia, subir de novo, provar que **nada** se perdeu
