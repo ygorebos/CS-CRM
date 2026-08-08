@@ -131,8 +131,8 @@ e a contagem não muda.
 
 ### Testes primeiro (têm de ficar vermelhos)
 
-- [ ] T020 [TEST] [P] [US1] `tests/invariants/gateway-inbound-idempotencia.test.ts` — mesma entrega duas vezes produz **uma** mensagem, e a segunda responde `202` com `duplicate: true`
-- [ ] T021 [TEST] [P] [US1] `tests/invariants/gateway-inbound-posse-nome.test.ts` — nome definido por humano em `contacts.name`/`display_name` **não** é sobrescrito pelo nome vindo do canal (vigia o `coalesce` de `fn_upsert_wa_contact`, hoje sem teste nenhum)
+- [x] T020 [TEST] [P] [US1] `tests/invariants/gateway-inbound-idempotencia.test.ts` — mesma entrega duas vezes produz **uma** mensagem, e a segunda responde `202` com `duplicate: true`
+- [x] T021 [TEST] [P] [US1] `tests/invariants/gateway-inbound-posse-nome.test.ts` — nome definido por humano em `contacts.name`/`display_name` **não** é sobrescrito pelo nome vindo do canal (vigia o `coalesce` de `fn_upsert_wa_contact`, hoje sem teste nenhum)
 - [ ] T022 [TEST] [P] [US1] `tests/e2e/gateway-inbound.spec.ts` — pela tela, em ambiente fresco: envelope assinado entra e a mensagem aparece no inbox com contato e corpo corretos
 
 ### Implementação
@@ -150,7 +150,7 @@ e a contagem não muda.
 ### Prova
 
 - [ ] T030 [US1] Executar o roteiro do `quickstart.md` §1 (20 envios reais, medir p95 ≤5s, reentregar tudo e conferir contagem estável)
-- [ ] T031 [US1] **Sabotagem**: remover a captura de `23505` no ingest e confirmar que T020 fica **vermelho**; restaurar. Repetir trocando o `coalesce` de nome e confirmar T021 vermelho
+- [x] T031 [US1] **Sabotagem**: remover a captura de `23505` no ingest e confirmar que T020 fica **vermelho**; restaurar. Repetir trocando o `coalesce` de nome e confirmar T021 vermelho
 
 **Checkpoint**: US1 entregue e provada. É a fatia 1 do plano — se ela não fechar, o plano é
 reavaliado antes de qualquer investimento adicional.
