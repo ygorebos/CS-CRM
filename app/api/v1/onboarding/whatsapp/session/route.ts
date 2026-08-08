@@ -5,13 +5,13 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { criarConexaoDeCanal } from "@/lib/channels/criar-conexao";
 import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
 import {
   reactivateChannelSession,
   type ChannelReactivationActor,
 } from "@/lib/channels/reactivate";
 import { getWahaClient } from "@/lib/waha/client";
-import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -94,34 +94,31 @@ async function ensureChannelSession(
     if (reErr) throw new Error(`channel_session_reactivate_failed: ${reErr.message}`);
     return existing.id;
   }
-  // Segredo REAL por conexão (ver lib/webhooks/provisionar-segredo.ts). Este é
-  // o caminho do onboarding — o do corretor —, e era ele que gravava o
-  // placeholder de um byte que faria a entrega do gateway recusar tudo.
-  const segredoCifrado = await provisionarSegredoDeWebhook(supabase);
-  if (!segredoCifrado) {
+  // CAMINHO ÚNICO com a Central de Conexões (T044 / FR-034). Antes daqui havia
+  // um insert próprio, e ele divergia em duas coisas que doíam:
+  //
+  //   - `ingest_path` não era definido, então a linha nascia com o default
+  //     `legacy`. Esta é A porta do usuário novo — quem se cadastra passa por
+  //     aqui e só por aqui —, então o corretor recém-chegado ficava fora do
+  //     gateway mesmo numa instalação que já virou a chave, sem nada na tela
+  //     dizendo isso;
+  //   - nenhuma auditoria `channel.connected`: um número entrava no ar sem
+  //     registrar quem o ligou, justamente na porta usada por 100% deles.
+  const criacao = await criarConexaoDeCanal(supabase, {
+    organizationId: orgId,
+    sessionName,
+    actorUserId: actor.userId,
+    requestId: actor.requestId ?? "",
+    origem: "onboarding",
+  });
+  if (!criacao.ok) {
     throw new Error(
-      "channel_session_secret_unavailable: cifra indisponível (GUC app.nuvemshop_oauth_key ausente)",
+      criacao.motivo === "sem_cifra"
+        ? "channel_session_secret_unavailable: cifra indisponível (GUC app.nuvemshop_oauth_key ausente)"
+        : `channel_session_insert_failed: ${criacao.detalhe}`,
     );
   }
-
-  const { data: created, error } = await supabase
-    .from("channel_sessions")
-    .insert({
-      organization_id: orgId,
-      waha_session_name: sessionName,
-      engine: "NOWEB",
-      webhook_path_token: crypto.randomUUID().replace(/-/g, ""),
-      webhook_secret_encrypted: segredoCifrado,
-      status: "STARTING",
-      last_status_change_at: new Date().toISOString(),
-      consecutive_health_fails: 0,
-      daily_message_limit: 250,
-      metadata: {},
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(`channel_session_insert_failed: ${error.message}`);
-  return created.id as string;
+  return criacao.conexao.id as string;
 }
 
 export async function GET() {

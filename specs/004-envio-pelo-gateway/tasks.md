@@ -303,8 +303,24 @@ envio bem-sucedido. Corrigido com teste próprio; sabotagem (descartar a legenda
       estado seguro e legível — **nunca tela vazia**. **(FR-032)**
 - [ ] **T043** Criar canal tudo-ou-nada: provisionamento falhando não deixa linha órfã no CRM nem
       instância órfã no provedor. **O CRM é o dono da compensação** (T003): recebe o `connection_id` do gateway, grava sua linha, e se a gravação falhar chama `DELETE` no gateway. Prova compartilhada com T029. **(FR-033, FR-012)**
-- [ ] **T044** Convergir as duas portas (onboarding e Central de Conexões) para o mesmo caminho de
-      criação — hoje divergem em rota e em formato de nome de sessão. **(FR-034)**
+- [X] **T044** ✅ Convergir as duas portas (onboarding e Central de Conexões) para o mesmo caminho de
+      criação. **(FR-034)**
+  - **A divergência que doía não era a rota, era a COLUNA.** Medido: o onboarding não definia
+    `ingest_path`, então a linha nascia com o default `legacy` — e o onboarding é **A** porta do
+    usuário novo, a única por onde quem se cadastra passa. O corretor recém-chegado ficava fora do
+    gateway mesmo numa instalação que já tinha virado a chave, sem nada na tela dizendo isso: o
+    "gateway de pé e sem uso" acontecendo justamente com quem mais importa. E não emitia
+    `channel.connected` — número entrando no ar sem registrar quem ligou, na porta de 100% deles.
+  - **Conserto:** `lib/channels/criar-conexao.ts`, caminho único das duas. Consertar as colunas num
+    dos dois inserts deixaria o outro livre para divergir de novo amanhã.
+  - **O que NÃO converge, de propósito:** o formato do nome. `org_<8>` fixo no onboarding é o que faz
+    quem fechou a aba e voltou cair na conexão que já começou (nome aleatório criaria uma órfã por
+    tentativa); aleatório na Central é o que permite ter mais de um número. Intenções diferentes,
+    identidades diferentes — o nome é **parâmetro**, e o teste afirma a diferença em vez de fingir
+    que não existe.
+  - **Prova:** `tests/unit/portas-de-conexao-convergem.test.ts` (4) — compara as DUAS linhas em vez
+    de conferir lista de campos, que é o que sobreviveria a alguém acrescentar coluna numa porta só.
+    Sabotagem (remover `ingest_path`): reprova.
 - [X] **T045** ✅ Exigir papel `admin` nas **duas** portas. A do onboarding não exigia papel nenhum
       — furo pré-existente que migrar sem corrigir carregaria para o caminho novo. **(FR-035)**
   - **O furo, medido:** `/api/v1/onboarding/whatsapp/session` só checava `loadAuthUser` +
