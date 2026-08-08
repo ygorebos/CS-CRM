@@ -103,6 +103,39 @@ do trabalho. Esta versão reúne as duas e foi commitada justamente para não se
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
+
+==================================================================================
+EMENDA — 2026-08-08
+
+Version change: 1.2.0 → 1.3.0
+Bump rationale: MINOR — expansão material de orientação na seção "Fluxo de Desenvolvimento e
+Portões" (subseção nova "Cadência de commit"). Nenhum princípio foi adicionado, removido ou
+redefinido; I–XII seguem íntegros, palavra por palavra.
+
+Seção alterada:
+  - Fluxo de Desenvolvimento e Portões — subseção "Cadência de commit" ADICIONADA
+
+Origem: pedido explícito do dono do produto — "Não precisa ficar fazendo um Commit a cada task
+executada. Quando executar uma fase inteira de uma spec, aí você faz um Commit."
+
+O que muda na prática: a unidade de commit deixa de ser a task e passa a ser a FASE da spec. O
+histórico passa a ter um commit por fase concluída, e não uma dezena de commits parciais que só
+fazem sentido lidos em bloco. Os portões não afrouxam: eles passam a rodar uma vez por fase, no
+fecho, em vez de uma vez por task.
+
+Escape declarado (não é exceção informal — é regra): árvore de trabalho compartilhada. Este
+repositório é editado por sessões concorrentes, e este mesmo arquivo já foi perdido duas vezes
+por `git restore` de outra sessão (ver nota de procedência da v1.2.0). Segurar trabalho pronto
+fora do índice por uma fase inteira é o que torna essa perda possível. Por isso a subseção
+autoriza — e obriga — o commit antecipado quando a fase é longa ou a árvore é compartilhada.
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/tasks-template.md — a nota "Commit after each task or logical group"
+                                            contradizia a emenda; reescrita para commit por fase
+  ✅ .specify/templates/plan-template.md  — fonte do Constitution Check atualizada para v1.3.0
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
+TODO(CLAUDE_MD_TESTES).
 -->
 
 # DeskcommCRM Constitution
@@ -440,6 +473,22 @@ worktree com working tree sujo que não é seu MUST NOT ser tocada — cheque `g
 `git worktree list`, e avise. Conflito ao atualizar interrompe e é resolvido com cabeça, nunca
 escolhendo um lado no automático.
 
+**Cadência de commit**: a unidade de commit é a **fase da spec**, não a task. Concluída uma fase
+inteira — todas as suas tasks feitas e provadas —, faz-se **um** commit que a fecha. Commit por
+task individual MUST NOT ser a prática padrão: gera histórico que só se entende lido em bloco, e
+faz cada task pagar o custo dos portões que a fase inteira pagaria uma vez.
+
+Fechar a fase MUST incluir, no mesmo commit: as tasks marcadas em `tasks.md`, o andamento
+atualizado em `plan.md`, e os portões da seção abaixo verdes para o conjunto — o commit de fase é
+o ponto em que a suíte roda, não um marco cosmético.
+
+**Escape obrigatório — árvore compartilhada e fase longa**: este repositório é editado por sessões
+concorrentes, e trabalho pronto fora do índice já foi perdido por `git restore` de outra sessão.
+Quando a fase é longa, ou a árvore é compartilhada, ou a mudança é doutrina (constituição,
+`CLAUDE.md`, `AGENTS.md`), o commit antecipado MUST acontecer assim que o trecho está coerente e
+verde — segurar por disciplina de cadência aqui troca ruído de histórico por perda de trabalho, o
+que é pior. Nesse caso o commit de fecho da fase continua existindo, e reúne o resto.
+
 **Portões obrigatórios na branch protection da `main`**:
 
 - `verify` — typecheck + lint + lint:channels + test:unit + test:shell
@@ -491,4 +540,4 @@ com gatilhos de releitura e aprofundamento por tipo de task, no **Princípio XII
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 1.2.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-07
+**Version**: 1.3.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08

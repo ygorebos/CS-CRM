@@ -40,7 +40,7 @@
 
 *GATE: Must pass before Phase 0 research. Re-check after Phase 1 design.*
 
-Fonte: `.specify/memory/constitution.md` v1.2.0. Marque PASS/FAIL/N/A por gate; todo FAIL
+Fonte: `.specify/memory/constitution.md` v1.3.0. Marque PASS/FAIL/N/A por gate; todo FAIL
 precisa de linha na Complexity Tracking com a alternativa mais simples que foi rejeitada.
 
 | # | Gate | Pergunta que o plano responde | Status |
