@@ -582,14 +582,40 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
       **(SC-001, SC-002)**
 - [ ] **T061** Estado de entrega alcança o valor final em **≥ 99%** de 20 mensagens, com **zero**
       regressões observadas na tela. **(SC-003)**
-- [ ] **T062** Rajada de 50: espaçamento configurado respeitado em **100%** das amostras, **zero**
-      envios fora da janela de horário. E varredura **mecânica** provando **zero** envios por
-      caminho que escapa das travas. **(SC-004, SC-005)**
+- [~] **T062** **Metade feita.** A varredura mecânica (SC-005) está pronta e verde; a rajada de 50
+      medida ao vivo (SC-004) depende do ambiente — ver o bloco de bloqueio no fim desta fase.
+  - **A metade mecânica é a que sobrevive ao tempo.** Uma rajada medida hoje prova o código de hoje;
+    a varredura reprova o atalho de amanhã. O risco real não é a trava estar errada — é alguém
+    acrescentar um caminho de envio que não passa por ela, e a trava continuar perfeita e
+    irrelevante.
+  - Regra verificável: fora de `lib/channels/`, ninguém chama `adapter.send` a não ser o handler.
+    **Duas exceções declaradas com motivo escrito** (o handler, que É o que a trava protege; e o
+    redrive do watchdog, que reenvia mensagem já contada — aplicar o limite diário de novo a contaria
+    duas vezes contra o teto do número).
+  - A lista de exceções **só encolhe**: declarado que ficou limpo reprova, e exceção sem motivo de
+    60+ caracteres reprova. Mesmo mecanismo da catraca do `lint-channels`.
+  - **Prova:** `tests/unit/nenhum-envio-escapa-das-travas.test.ts` (3). Sabotagem (arquivo novo
+    chamando `adapter.send` fora da cadeia): reprova nomeando o arquivo.
 - [ ] **T063** Conta **nova**, estado **vazio**: QR na tela em **≤ 15 s**, jornada login → primeira
       conversa atendida **≤ 10 min**, contagem de passos **idêntica** à de antes. Evidência visual em
       `.superpowers/evidence/`. `curl` não conta. **(SC-006, Princípio IV)**
-- [ ] **T064** Varredura por nome de provedor em texto visível nas telas de conexão e onboarding:
-      **zero** ocorrências. **(SC-007)**
+- [X] **T064** ✅ Varredura executada — e ela achou **4**, não zero. Consertadas; agora zero, com o
+      resultado congelado em teste. **(SC-007)**
+  - **Duas famílias de defeito, e a segunda era pior:**
+    1. nome do provedor na cópia ("WAHA não está configurado", "Aguardando WAHA gerar o QR Code").
+       Para quem lê não significa nada — e depois da migração significa menos ainda, porque o número
+       dele pode estar num provedor cujo nome a tela nem cita;
+    2. **"Suba o Docker (`docker compose up -d waha`)"** — doutrina de self-host viva numa tela de um
+       produto que hoje é **SaaS operado por nós**. Quem lê não tem container para subir: a instrução
+       transfere ao usuário uma tarefa que é nossa e o deixa parado esperando executar algo que ele
+       não pode executar. O `lint-channels` **nunca** pegaria isto, porque não é sobre canal.
+  - A cópia nova diz o **efeito** ("o serviço de conexão está indisponível"), diz que já estamos
+    cuidando, e oferece o que ele PODE fazer — responder pelo aparelho, ou pular o passo e conectar
+    depois.
+  - **Prova:** `tests/unit/tela-nao-nomeia-provedor.test.ts` (2). Varre **texto visível** (literal de
+    JSX, prop de cópia, toast) e não o arquivo inteiro — os dois arquivos legitimamente leem
+    `WAHA_API_BASE_URL` do env para decidir se mostram o aviso, e já estão na `KNOWN_DEBT` do
+    `lint-channels`. Sabotagem (devolver o nome à cópia): reprova.
 - [ ] **T065** Falha de provisionamento forçada **10 de 10**: nenhum canal órfão no CRM, nenhuma
       instância órfã no provedor. **(SC-008)**
 - [ ] **T066** Reverter canal no meio de tráfego: **100%** das mensagens em voo preservadas, **zero**

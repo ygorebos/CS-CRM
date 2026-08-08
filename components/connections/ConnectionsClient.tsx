@@ -232,18 +232,21 @@ export function ConnectionsClient({ wahaConfigured }: { wahaConfigured: boolean 
 
       {!wahaConfigured && (
         <div className="rounded-md border border-warning bg-warning-bg p-4 text-sm text-warning-fg">
-          <p className="font-medium">O serviço do WhatsApp não está configurado.</p>
+          {/* SC-007 / T064: a tela não nomeia provedor, e não manda o usuário
+              rodar comando. O produto é SaaS operado por nós — quem lê esta
+              tela não tem container nenhum para subir, e a instrução antiga
+              ("docker compose up -d waha") transferia a ele uma tarefa que é
+              nossa. O que ele PODE fazer é continuar atendendo pelo aparelho
+              enquanto consertamos. */}
+          <p className="font-medium">O serviço de conexão está indisponível.</p>
           <p className="mt-1">
-            Faltam o endereço e a chave do serviço (<code>WAHA_API_BASE_URL</code> e{" "}
-            <code>WAHA_API_KEY</code>) nas variáveis de ambiente desta instalação. Enquanto isso,
-            não dá para conectar, reconectar nem excluir os números pareados por QR — excluir um
-            número também o desconecta do aparelho, e sem o serviço isso não acontece.
+            Enquanto isso, não dá para conectar, reconectar nem excluir números pareados por QR —
+            excluir um número também o desconecta do aparelho, e sem o serviço isso não acontece.
+            As conversas que já existem continuam aqui.
           </p>
           <p className="mt-1">
-            Se você roda tudo na mesma máquina, o container sobe com{" "}
-            <code>docker compose up -d waha</code>. Já apareceu aqui o caso oposto: o container
-            no ar e o endereço configurado apontando para um lugar que não existe — subir o
-            container de novo não conserta isso.
+            Já fomos avisados e estamos cuidando disso. Se precisar falar com alguém agora,
+            responda pelo aparelho — nada se perde.
           </p>
         </div>
       )}
