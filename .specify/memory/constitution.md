@@ -136,11 +136,68 @@ Artefatos dependentes propagados:
 
 TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(VISION_PRD_ALIGNMENT),
 TODO(CLAUDE_MD_TESTES).
+
+==================================================================================
+EMENDA — 2026-08-08 (segunda do dia)
+
+Version change: 1.3.0 → 2.0.0
+Bump rationale: MAJOR — o modelo de distribuição do produto mudou. O CRM DEIXA de ser
+distribuído para instalação em máquina de terceiro e passa a ser **SaaS de instância única**
+operada por nós. Isso redefine dois princípios NÃO NEGOCIÁVEIS (III e IV), cuja justificativa
+inteira era o self-host, e reescreve a Missão e Escopo. Redefinição incompatível = MAJOR.
+
+Origem: decisão do dono do produto — "o gateway não tem réplica e não é instalado junto com o
+CRM; nem o CRM ficará sendo instalado em diversas máquinas. Estamos trabalhando ele no modelo
+SaaS, onde os usuários se cadastram, usam, testam e depois realizam a assinatura. Mas a
+assinatura é gerenciada lá pelo Cotador Simplificado, não por aqui."
+
+Princípios REDEFINIDOS (mesmo número, regra e justificativa diferentes):
+  - III. "Schema Viaja com o Clone"          → "Schema Muda por Migration, Nunca à Mão"
+  - IV.  "Prova pela Tela em Ambiente Fresco" → mesmo nome, "fresco" redefinido: conta nova em
+                                                banco novo, não instalação nova numa VPS
+
+Princípios ADICIONADOS:
+  - XIII. Cobrança Mora no Cotador, e Só Lá (NÃO NEGOCIÁVEL)
+  - XIV.  O Gateway é Serviço Único, Compartilhado e Sem Réplica (NÃO NEGOCIÁVEL)
+
+Princípios com AJUSTE de justificativa, regra intacta: VII (o gateway ganha estatuto próprio no
+XIV; a fronteira "não escreve no banco do CRM" segue idêntica), VIII (o teto de 10 minutos
+continua, o relógio agora começa no CADASTRO e não na instalação).
+
+Seções reescritas: "Missão e Escopo"; "Restrições de Stack e Configuração" (bloco de Deploy).
+
+Plano de migração — o que esta emenda invalida, e o que fica como dívida DECLARADA
+(nenhum item foi executado nesta emenda; o Scope Guard do /speckit-constitution proíbe):
+
+  (a) `install.sh`, `update.sh` e o kit HostGator deixam de ser produto. Não são apagados nesta
+      emenda: `scripts/test-db.sh` — que roda no job `invariants`, obrigatório na branch
+      protection — aplica `baseline.sql` em modo install E update, e é HOJE a única prova
+      mecânica de que o schema sobe do zero. Enquanto essa prova não tiver outro dono, remover
+      o kit remove o gate. TODO(SELFHOST_KIT_RETIREMENT).
+  (b) `docker-compose.prod.yml` deixa de descrever "a VPS do cliente" e passa a descrever a
+      NOSSA instância. O gateway sai dele: não é instalado junto (Princípio XIV).
+  (c) A spec 001 foi escrita sob a doutrina antiga. As decisões dela seguem CERTAS — o gateway
+      já era serviço externo e o envelope já era contrato HTTP —, mas a justificativa
+      "self-hoster" que aparece em vários comentários e nos docs da spec está desatualizada.
+      Isso é dívida de TEXTO, não de código. TODO(SPEC001_RATIONALE_REWRITE).
+  (d) `VISION.md`, `README.md`, `CLAUDE.md` e `docs/prd/*` descrevem monetização por self-host
+      em VPS (parceria HostGator). Contradizem esta emenda e MUST ser alinhados.
+      TODO(SELFHOST_DOCS_ALIGNMENT) — absorve o TODO(VISION_PRD_ALIGNMENT) da v1.1.0.
+  (e) O Princípio IV mandava testar "com os envs opcionais AUSENTES", porque era o estado real
+      de um primeiro deploy alheio. Em SaaS os envs são nossos e conhecidos. A regra não é
+      apagada, é REDIRECIONADA: o que se testa ausente agora é o que o USUÁRIO ainda não
+      configurou (canal não conectado, base de conhecimento vazia, agente sem capacidade).
+
+Artefatos dependentes propagados:
+  ✅ .specify/templates/plan-template.md — fonte do Constitution Check atualizada para v2.0.0
+  ⬜ CLAUDE.md / README.md / VISION.md   — fora do escopo deste comando; ver TODO acima
+
+TODOs herdados, ainda abertos: TODO(PACKAGE_ALIGNMENT), TODO(CLAUDE_MD_TESTES).
 -->
 
 # DeskcommCRM Constitution
 
-Sistema operacional de vendas open source, multi-tenant, self-hosted, com agentes de IA
+Sistema operacional de vendas multi-tenant entregue como **SaaS de instância única**, com agentes de IA
 nativos e WhatsApp como canal primário. Esta constituição é a lei de arquitetura do repositório.
 `CLAUDE.md`, `docs/doctrine/sistema-vivo.md` e `README.md` a detalham; onde divergirem, esta
 constituição prevalece.
@@ -158,8 +215,21 @@ não é administrador de TI e não vai ler documentação. Multi-nicho continua 
 arquitetural** (`vocabulary` configurável por pipeline), não prioridade de validação: o que prova
 que o produto está pronto é um corretor operando sozinho.
 
-**Multi-tenant desde já.** N instâncias e números conectados, pertencentes a empresas vindas do
-Cotador Simplificado ou a clientes diretos, isolados por `organization_id` com RLS (Princípio I).
+**Como o produto chega ao usuário: SaaS de instância única.** O CRM roda em **uma** instalação,
+operada por nós. O usuário **se cadastra, usa e testa**; a assinatura vem depois, e é gerenciada
+**no Cotador Simplificado** (Princípio XIII). Ninguém instala nada: não há VPS do cliente, não há
+`install.sh` do usuário, não há "clone" com banco próprio.
+
+A consequência que mais muda o dia a dia: **um bug em produção é bug de todo mundo ao mesmo
+tempo**, e a correção também alcança todo mundo ao mesmo tempo. Isso remove a pior restrição da
+doutrina antiga — não existe mais instalação velha em máquina que não podemos alcançar — e cria
+outra, mais dura: **não há versão de escape**. Migration destrutiva não tem clone antigo para
+servir de rede; ela roda no único banco que existe.
+
+**Multi-tenant desde já — e agora com peso maior.** Todas as organizações dividem a MESMA
+instância e o MESMO banco. Antes, isolamento furado vazava dados entre tenants de um mesmo
+self-hoster; agora vaza entre clientes distintos que nunca ouviram falar um do outro. O
+Princípio I não muda de texto, muda de consequência.
 
 **Por onde as mensagens entram.** O `gateway_go` é o **receptor geral de todo o tráfego de entrada
 do CRM**: mensagens de todos os canais (WhatsApp oficial e não-oficial, Instagram Direct e o que
@@ -167,18 +237,28 @@ vier depois) e **demais webhooks**. Ele recebe, autentica a origem, **normaliza 
 único** e entrega ao CRM; o CRM **persiste no banco dele**. Código novo do CRM MUST NOT ler
 payload cru de provedor — nem de WAHA, nem de uazapi, nem da Meta.
 
+Ele é **serviço único, compartilhado e sem réplica**, e **não** é instalado junto com o CRM —
+regime completo no Princípio XIV.
+
 A fronteira que não se cruza: **o gateway MUST NOT escrever no banco do CRM**. Receber uma
 mensagem aqui não é um `INSERT` — dispara agente, follow-up, guardrails, auditoria, `event_log` e
 Realtime. Quem persiste é o CRM, pelo caminho dele, com o `organization_id` resolvido de fonte
 confiável e nunca do corpo da requisição (Princípios I e VII).
+
+**O que entregamos, em uma frase.** Automação e integração do WhatsApp com o CRM de forma
+**inteligente e autônoma** — o agente atende, qualifica e move o funil junto com o humano, com as
+estruturas já montadas (Princípio VIII). É isso que o usuário assina; o resto é meio.
 
 **Onde isso vai dar.** O CRM evolui **independente** por enquanto. Quando estiver robusto, o
 Cotador Simplificado migra para ele e aposenta o CRM interno que tem hoje. Toda decisão de
 modelagem **considera** que um dia haverá importação de dados vindos de lá, mas nenhuma decisão é
 **adiada** por causa disso.
 
-**O que fica fora por enquanto.** Acoplamento ao Cotador em nível de schema, banco ou FK cruzada.
-A ponte é o gateway e contratos HTTP explícitos, nada além disso.
+**O que fica fora, e não é "por enquanto".** (a) Acoplamento ao Cotador em nível de schema, banco
+ou FK cruzada — a ponte é contrato HTTP explícito, nada além. (b) **Cobrança**: assinatura,
+plano, pagamento, cartão, nota fiscal e inadimplência não existem neste repositório
+(Princípio XIII). (c) Distribuição para instalação alheia: kit de self-host, `install.sh` do
+usuário e documentação de VPS deixam de ser produto.
 
 ## Core Principles
 
@@ -214,7 +294,7 @@ até resolução ou encerramento declarado pelo lead. Feature que só recebe, ou
 sem porta de acesso, é vazamento da missão. Gate mecânico:
 `tests/unit/navegacao-completude.test.ts` — tela sem porta reprova o build.
 
-### III. Schema Viaja com o Clone (NÃO NEGOCIÁVEL)
+### III. Schema Muda por Migration, Nunca à Mão (NÃO NEGOCIÁVEL)
 
 Toda mudança de schema MUST sair como três artefatos juntos: (a) migration versionada em
 `supabase/migrations/` no padrão `<timestamp>_<NNNN>_<slug>.sql`, idempotente e portável em
@@ -224,26 +304,44 @@ idempotente e auto-curativo em `supabase/baseline.sql`; (c) linha em
 os dados **antes** de criá-la. Migration já aplicada MUST NOT ser editada — corrige-se com
 forward-fix. `ALTER`/`CREATE` solto em banco, sem arquivo correspondente, é proibido.
 
-**Rationale**: o produto é distribuído open-source e o self-hoster aplica **só o
-`baseline.sql`**, tanto no `install.sh` (banco novo) quanto no `update.sh` (banco existente).
-Mudança que entra só em `migrations/` não chega a ninguém; mudança não-idempotente quebra o
-`update.sh` de todo clone.
+**Rationale (v2.0.0 — a regra ficou, o motivo mudou).** Até a v1.3.0 o motivo era o clone: o
+self-hoster aplicava só o `baseline.sql`, e mudança fora dele não chegava a ninguém. Não há mais
+clone. Os três artefatos continuam obrigatórios por três motivos que o SaaS **agrava**:
+
+1. **Não há versão de escape.** Existe UM banco de produção. `ALTER` solto não tem clone antigo
+   para servir de rede nem histórico para reconstruir o caminho — e "o que exatamente rodou
+   naquele dia" vira arqueologia de log.
+2. **O `baseline.sql` é o que sobe ambiente do zero**, e é o que `scripts/test-db.sh` aplica no
+   job `invariants` (obrigatório na branch protection). Mudança ausente dele quebra o gate que
+   prova o schema — e continua obrigatória a idempotência, porque o script aplica em modo
+   install E update.
+3. **Migration idempotente é o que torna o re-deploy seguro.** Numa instância única, o custo de
+   uma migration que só roda uma vez é uma janela em que produção está pela metade.
+
+O que MUDA: a exigência não é mais "o clone consegue atualizar", é "**a nossa** instância
+consegue avançar sem perder dado nem exigir intervenção manual".
 
 ### IV. Prova pela Tela em Ambiente Fresco (NÃO NEGOCIÁVEL)
 
 Feature nova ou fix de comportamento visível MUST ser provada dirigindo o browser (Playwright),
-como um usuário leigo faria, num ambiente que imita instalação fresca: Postgres limpo aplicado
-do `baseline.sql` + `bootstrap-owner.ts`, dependências como na VPS (WAHA, Redis, cron via
-endpoint), e **com os envs opcionais ausentes**. `curl` e chamada de API MUST NOT ser aceitos
+como um usuário leigo faria, num ambiente **fresco**. `curl` e chamada de API MUST NOT ser aceitos
 como prova de UX — servem só como diagnóstico. Efeito colateral externo MUST ser provado com
 receiver real, não mock. Medida de front-end MUST vir de ferramenta
 (`getBoundingClientRect`/`getComputedStyle`), nunca a olho. Jornadas de primeira impressão
 (criar conta, conectar canal, primeiro lead, primeiro convite) têm prioridade máxima e são `[P0]`
 em `docs/testing/user-journey-map.md`.
 
-**Rationale**: num produto self-host, a experiência de quem instala **é** o produto. Bug de
-primeira impressão é abandono, e é exatamente onde os envs opcionais ausentes escondem os
-piores defeitos.
+**"Fresco" a partir da v2.0.0 = CONTA nova, não INSTALAÇÃO nova.** O ambiente do teste continua
+sendo Postgres limpo do `baseline.sql` + `bootstrap-owner.ts` — o que muda é o que se simula
+faltando. Antes era o env opcional que o self-hoster não preencheu; agora os envs são nossos e
+conhecidos, e o que falta é o que o **usuário** ainda não fez: canal não conectado, base de
+conhecimento vazia, agente sem capacidade marcada, nenhum lead, nenhum convite aceito. A tela MUST
+ser provada nesse estado, e não só com dados de exemplo já semeados.
+
+**Rationale**: a promessa mudou de dono, não de natureza. Em SaaS ninguém instala, mas todo mundo
+**cadastra** — e a conta recém-criada, vazia, é a primeira coisa que o usuário vê. Testar só com
+banco povoado esconde exatamente os defeitos dessa tela, que é a que decide se ele volta. Estado
+vazio não é caso de borda: é o estado inicial de 100% dos usuários.
 
 ### V. Evento na Fila, Nunca HTTP no Trigger (NÃO NEGOCIÁVEL)
 
@@ -302,8 +400,10 @@ não "avançada": o template padrão faz parte da entrega, não de uma fase segu
 a prova pela tela do Princípio IV, **cronometrada** — a contagem começa no login e termina na
 primeira resposta do agente a uma mensagem real.
 
-**Rationale**: num produto self-host distribuído para quem não é técnico, o tempo até o primeiro
-valor **é** a taxa de adoção. Configuração longa não é barreira de entrada, é o abandono.
+**Rationale (ajustado na v2.0.0)**: o teto não mudou; o relógio começa mais cedo. Antes contava do
+login numa instalação já feita por alguém; agora conta do **cadastro**, e o usuário está em
+período de teste decidindo se assina. O tempo até o primeiro valor **é** a taxa de conversão.
+Configuração longa não é barreira de entrada — é o abandono antes da assinatura.
 
 ### IX. Todo Agente Serve Vender ou Assistir
 
@@ -389,11 +489,56 @@ detalha em convenção, e o `README.md` mostra o produto que o usuário final in
   é chute sobre o que está pronto, incompleto ou quebrado.
 
 **Rationale**: este repositório tem doutrina densa e não-óbvia — a tripla de artefatos de
-migration, o `baseline.sql` como único caminho até o self-hoster, `curl` que não prova UX,
-`test:unit` que não roda os invariantes. Nada disso é dedutível olhando o código: quem começa a
-mexer sem ler produz trabalho que parece certo, passa nos gates errados e quebra o clone de
-alguém. A leitura de entrada custa minutos; a sessão que a pula custa retrabalho e regressão em
-produção — e o usuário não deve ter de lembrar a cada pedido que ela é obrigatória.
+migration, o `baseline.sql` que é o que sobe ambiente do zero e o que o gate `invariants` aplica,
+`curl` que não prova UX, `test:unit` que não roda os invariantes. Nada disso é dedutível olhando o
+código: quem começa a mexer sem ler produz trabalho que parece certo, passa nos gates errados e
+quebra produção — que agora é a instância de **todos** os clientes. A leitura de entrada custa
+minutos; a sessão que a pula custa retrabalho e regressão — e o usuário não deve ter de lembrar a
+cada pedido que ela é obrigatória.
+
+### XIII. Cobrança Mora no Cotador, e Só Lá (NÃO NEGOCIÁVEL)
+
+Este repositório MUST NOT implementar assinatura, plano, preço, checkout, pagamento, cartão,
+nota fiscal, cupom, dunning ou régua de inadimplência. MUST NOT armazenar dado de meio de
+pagamento, em nenhuma forma, nem cifrado. A fonte da verdade sobre "esta organização está
+paga?" é o **Cotador Simplificado**, e o CRM a consulta ou recebe **por contrato explícito**
+(Princípio VII), tratando-a como dado externo com prazo de validade — nunca como coluna que
+alguém daqui edita.
+
+Quando o estado de assinatura não estiver disponível, o CRM MUST **degradar de forma legível ao
+usuário** e MUST NOT bloquear atendimento em andamento por dúvida: mensagem de cliente que já
+está em conversa não deixa de ser respondida porque uma consulta de cobrança falhou. Corte de
+acesso é decisão do Cotador, comunicada, nunca inferida aqui.
+
+**Rationale**: cobrança duplicada em dois sistemas é a receita conhecida para o cliente ser
+cobrado duas vezes, ou ser cortado estando em dia — e o erro cai sobre uma pessoa real, não
+sobre uma linha de log. Um dono só para essa verdade elimina a classe inteira de defeito. E
+manter dado de pagamento fora deste repositório retira dele um alvo que ele não precisa carregar.
+
+### XIV. O Gateway é Serviço Único, Compartilhado e Sem Réplica (NÃO NEGOCIÁVEL)
+
+O `gateway_go` roda como **uma instância**, operada por nós, **compartilhada por todos os
+tenants**, e **não** é instalado junto com o CRM. Consequências que são regra, não observação:
+
+- O CRM MUST NOT supor que o gateway está na mesma máquina, rede ou ciclo de deploy. Sem
+  `localhost`, sem nome de serviço de compose, sem "ele sobe junto". O endereço é configuração.
+- O gateway MUST NOT entrar no compose de produção do CRM, e o deploy de um MUST NOT exigir o
+  deploy do outro. Os dois versionam separado — daí a compatibilidade para frente do envelope
+  (versão maior é aceita, campo desconhecido é preservado) ser obrigatória, e não zelo.
+- **Sem réplica = ponto único de falha declarado.** Toda mensagem que passa por ele MUST
+  sobreviver a ele estar fora do ar: entrega com retentativa durável e fila persistida em disco
+  do lado do gateway, e dreno periódico do lado do CRM. Caminho que perde mensagem quando um
+  dos dois lados reinicia MUST NOT ser aceito como pronto, ainda que passe nos testes.
+- A queda do gateway MUST ser **visível** — para nós, em alerta; e para o usuário afetado, na
+  Central, dizendo que o canal parou de receber (Princípio II). Silêncio é proibido: o sintoma
+  natural é "as mensagens pararam", sem lugar nenhum para olhar.
+- Sendo compartilhado, um tenant MUST NOT conseguir degradar outro: teto por conexão, e não
+  global nem por IP — todas as entregas vêm do mesmo endereço.
+
+**Rationale**: um serviço único sem réplica é uma escolha legítima de custo no estágio atual,
+mas só é honesta se a durabilidade estiver do lado de fora dele. Sem isso, "sem réplica" vira
+"toda mensagem recebida durante o reinício foi perdida", e mensagem perdida é cliente sem
+resposta — o defeito mais caro deste produto e o único que o usuário não tem como detectar.
 
 ## Restrições de Stack e Configuração
 
@@ -419,9 +564,23 @@ Zod para validação; Sentry com `beforeSend` sanitizado.
 - Env var nova MUST entrar em `.env.example` **e** em `lib/env.ts` (validação Zod que lança no
   startup se faltar crítica).
 
-**Deploy**: em VPS com proxy reverso próprio, todo `up -d` MUST levar os dois arquivos de compose
-(`docker-compose.prod.yml` + `docker-compose.traefik.yml`). Após deploy, o domínio MUST responder
-307, não 404. Build na VPS é exceção de emergência e é dívida declarada.
+**Deploy (v2.0.0 — instância única, nossa)**: o alvo do deploy é a **nossa** instalação, não a
+VPS de um cliente. Na máquina com proxy reverso próprio, todo `up -d` MUST levar os dois arquivos
+de compose (`docker-compose.prod.yml` + `docker-compose.traefik.yml`) — omitir o segundo recria o
+contêiner sem as labels de roteamento e o domínio inteiro responde 404 com o contêiner `healthy`,
+porque o healthcheck é probe TCP e não sabe nada de roteamento. Após deploy, o domínio MUST
+responder 307, não 404. O caminho normal MUST NOT construir imagem na máquina de produção
+(commit → CI → GHCR → pull); build local é exceção de emergência e é dívida declarada, porque
+existe só naquele disco.
+
+O **gateway não entra nesse deploy** (Princípio XIV): ele tem ciclo próprio, e exigir os dois
+juntos recria o acoplamento que a separação existe para desfazer.
+
+**Deploy agora é irreversível na prática.** Não há instalação antiga em máquina alheia para servir
+de comparação, e não há usuário rodando versão anterior. Mudança de schema destrutiva MUST ter
+caminho de volta pensado ANTES (coluna nova em vez de renomeada, leitura tolerante aos dois
+formatos, remoção só depois de a escrita nova estar em produção) — o padrão expand/contract, e não
+o `ALTER` direto que "já está testado".
 
 **Anti-patterns proibidos** (lista completa em `CLAUDE.md`): string que deveria ser FK; duplicação
 sem source of truth; evento sem consumer; campo sincronizado por cron quando devia ser trigger;
@@ -510,6 +669,10 @@ um item ao fecho: **teste que prova a feature nova e suíte inteira verde**, com
 pelo tipo da mudança e o teste confirmado por sabotagem (Princípio XI). Entrega sem esse item
 MUST NOT ser declarada pronta, ainda que os 14 itens anteriores estejam respondidos.
 
+A partir da v2.0.0 somam-se dois: **estado vazio provado** quando a mudança tem tela (IV — a conta
+recém-criada é o estado inicial de 100% dos usuários), e **caminho de volta declarado** quando a
+mudança altera schema (III — instância única não tem versão de escape).
+
 ## Governance
 
 Esta constituição **supersede** qualquer outra prática do repositório. Onde `CLAUDE.md`,
@@ -540,4 +703,4 @@ com gatilhos de releitura e aprofundamento por tipo de task, no **Princípio XII
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 1.3.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.0.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
