@@ -1795,7 +1795,9 @@ export type Database = {
           daily_message_limit: number
           display_name: string | null
           engine: string
+          gateway_connection_id: string | null
           id: string
+          ingest_path: string
           is_warmup_complete: boolean | null
           last_health_check_at: string | null
           last_status_change_at: string
@@ -1823,7 +1825,9 @@ export type Database = {
           daily_message_limit?: number
           display_name?: string | null
           engine?: string
+          gateway_connection_id?: string | null
           id?: string
+          ingest_path?: string
           is_warmup_complete?: boolean | null
           last_health_check_at?: string | null
           last_status_change_at?: string
@@ -1851,7 +1855,9 @@ export type Database = {
           daily_message_limit?: number
           display_name?: string | null
           engine?: string
+          gateway_connection_id?: string | null
           id?: string
+          ingest_path?: string
           is_warmup_complete?: boolean | null
           last_health_check_at?: string | null
           last_status_change_at?: string

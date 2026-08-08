@@ -31,6 +31,62 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     groups: "limited",
     costPerMessage: true,
   },
+
+  // ── Canais que chegam pelo gateway (spec 001) ────────────────────────────
+  //
+  // A física é a do CANAL, não a de quem transporta. O gateway muda por onde a
+  // mensagem entra; não muda quem pode banir o número nem quem cobra por
+  // mensagem. Por isso os dois de WhatsApp repetem exatamente a matriz dos seus
+  // equivalentes diretos — divergir aqui inventaria uma regra que a plataforma
+  // não tem.
+
+  // WhatsApp não-oficial (uazapi). Mesma física do WAHA: auto-restrição.
+  whatsapp_uazapi: {
+    freeformOutsideWindow: true,
+    requiresTemplates: false,
+    banRisk: true,
+    minIntervalMs: null,
+    voiceNote: "server-convert",
+    groups: "full",
+    costPerMessage: true,
+  },
+  // WhatsApp oficial pela Cloud API, entregue pelo gateway. Mesma física do
+  // meta_cloud: hetero-restrição.
+  whatsapp_cloud: {
+    freeformOutsideWindow: false,
+    requiresTemplates: true,
+    banRisk: false,
+    minIntervalMs: 6000,
+    voiceNote: "opus-only",
+    groups: "limited",
+    costPerMessage: true,
+  },
+  // Instagram Direct. Hetero-restrição sem cobrança por mensagem: a Meta fecha a
+  // janela de 24h e não existe template como no WhatsApp — fora da janela só se
+  // fala com etiqueta de atendimento humano, que NÃO é template aprovado. Por
+  // isso `requiresTemplates: false` com `freeformOutsideWindow: false`: a
+  // combinação é o que descreve a realidade, e é o que faz o guardrail escalar
+  // ao humano em vez de tentar um template que não existe.
+  instagram: {
+    freeformOutsideWindow: false,
+    requiresTemplates: false,
+    banRisk: false,
+    minIntervalMs: null,
+    voiceNote: "opus-only",
+    groups: "none",
+    costPerMessage: false,
+  },
+  // Messenger. Mesma família do Instagram: janela de 24h, etiquetas em vez de
+  // template, sem custo por mensagem e sem grupo.
+  messenger: {
+    freeformOutsideWindow: false,
+    requiresTemplates: false,
+    banRisk: false,
+    minIntervalMs: null,
+    voiceNote: "opus-only",
+    groups: "none",
+    costPerMessage: false,
+  },
 };
 
 /**
