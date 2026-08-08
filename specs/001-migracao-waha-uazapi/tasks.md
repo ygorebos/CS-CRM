@@ -427,6 +427,28 @@ inbox identificada pelo canal.
 - [x] T067 Rodar a bateria completa na ordem do `quickstart.md` §8 (`typecheck`, `lint`, `lint:channels`, `test:unit`, `test:shell`, `test:db`, `build`, `test:e2e`) e reportar **qual suíte rodou e qual não rodou**
 - [x] T068 Conferir o Definition of Done de 14 itens do `CLAUDE.md` mais o item novo do Princípio XI (teste que prova + suíte verde + sabotagem confirmada)
 
+  > **Conferido item a item.** O que passou, e o que é N/A com motivo:
+  >
+  > | # | Item | Estado |
+  > |---|---|---|
+  > | 1 | `typecheck` zerado | ✅ |
+  > | 2 | `lint` zerado | ✅ 0 erros (187 avisos pré-existentes) |
+  > | 3 | testes relevantes existem e passam | ✅ 3038 unit + 530 invariantes + 14 pacotes Go |
+  > | 4 | RLS testada se toca tabela tenant-aware | ✅ `gateway-inbound-isolamento.test.ts`; o T052 acrescentou o caso de confirmação de estado cruzando organização |
+  > | 5 | audit log em mutação relevante | ✅ recusas auditadas (`webhook.gateway_rejected`) e recusa gravando linha com motivo (SC-012). Os avisos novos não são mutação de API |
+  > | 6 | rate limit em rota pública | ✅ a rota já nasceu com teto **por conexão** |
+  > | 7 | Zod em todo input externo | ✅ `parseEnvelope` |
+  > | 8 | sem `console.log` | ✅ `lint` cobre; o seed de e2e usa `console.info`/`error`, permitidos |
+  > | 9 | env nova em `.env.example` + `lib/env.ts` | ✅ `GATEWAY_INTERNAL_TOKEN` nos dois + runbook; as três da fila no `.env.example` do `gateway_go` |
+  > | 10 | doc atualizada se mudou contrato | ✅ runbook, mapa de arquitetura, mapa de jornadas, MANIFEST |
+  > | 11 | schema saiu como migration + baseline + MANIFEST, com caminho de volta | ✅ `0118` e `0119`, ambas aditivas (vocabulário só cresce) — o caminho de volta é trivial e está declarado: nenhuma linha existente viola as constraints novas |
+  > | 12 | provado pela tela em conta nova | ⬜ **NÃO** — é o buraco declarado (T022/T047). A spec existe e roda no job `e2e`; falta a execução |
+  > | 13 | Living System Checklist | ✅ mapa em `docs/architecture/` com 19 peças, 24 arestas e 4 não-ligações declaradas |
+  > | 14 | tela nova tem porta | N/A — nenhuma tela nova. O selo de canal entra em tela que já existe |
+  > | XI | teste que prova + suíte verde + sabotagem confirmada | ✅ quatro sabotagens nesta rodada (host do payload: 2 vermelhos; não-regressão: 1; descarte de tipo desconhecido: 1; e a de fila em memória da fase 4: 3) |
+  >
+  > **O item 12 é o único vermelho, e ele não se resolve com mais código.** Está declarado no mapa de jornadas e é o mesmo bloqueio de T030/T038/T038a/T064/T065.
+
 ## Dependencies
 
 ```
