@@ -180,9 +180,9 @@ nada, e a resposta continua vindo da **versão local**.
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T034 [P] [US7] Invariante da **trava 1** em `tests/invariants/catalogo-escrita-so-plataforma.test.ts` — escrita no catálogo a partir de qualquer papel de tenant, inclusive `admin`, é barrada por todos os caminhos (SC-021)
-- [ ] T035 [P] [US7] Invariante da **trava 2** em `tests/invariants/catalogo-sem-dado-de-ninguem.test.ts` — varredura da partição devolve zero dado pessoal e zero identificador de organização (SC-020)
-- [ ] T036 [P] [US7] Invariante da **trava 3** em `tests/invariants/isolamento-com-catalogo.test.ts` — consulta que cruza as duas camadas devolve zero linhas de outra organização, com caso de controle provando que as linhas da org B existem (SC-007)
+- [X] T034 [P] [US7] Invariante da **trava 1** em `tests/invariants/catalogo-escrita-so-plataforma.test.ts` — escrita no catálogo a partir de qualquer papel de tenant, inclusive `admin`, é barrada por todos os caminhos (SC-021)
+- [X] T035 [P] [US7] Invariante da **trava 2** em `tests/invariants/catalogo-sem-dado-de-ninguem.test.ts` — varredura da partição devolve zero dado pessoal e zero identificador de organização (SC-020)
+- [X] T036 [P] [US7] Invariante da **trava 3** em `tests/invariants/isolamento-com-catalogo.test.ts` — consulta que cruza as duas camadas devolve zero linhas de outra organização, com caso de controle provando que as linhas da org B existem (SC-007)
 - [X] T037 [P] [US7] Invariante de não-vazamento entre escopos em `tests/invariants/busca-escopo-nao-vaza.test.ts` — trecho de outro escopo nunca ancora, e `p_scope_id IS NULL` devolve só "vale para todos" (SC-005, FR-016, FR-017)
 - [X] T038 [P] [US7] Invariante de **não-destrutividade** da semeadura em `tests/invariants/semeadura-nao-sobrescreve.test.ts` — install, editar `seed`, criar `local`, update, update de novo: zero perdas, zero sobrescritas, zero duplicatas, e o estado após duas reaplicações idêntico ao de uma (SC-018). **Medir também a resposta, não só as linhas**: com material adotado localmente e versão semeada mais nova presente, a busca ancora na **versão local** (FR-037) — é aqui que a versão anterior de SC-018 passava e o requisito falhava
 - [X] T039 [P] [US7] Invariante em `tests/invariants/indice-unico-de-fontes-removido.test.ts` de que `ai_knowledge_sources_unique_per_agent` **não existe** nem no banco instalado do zero nem no atualizado (brecha 10)
@@ -208,13 +208,13 @@ nada, e a resposta continua vindo da **versão local**.
 
 ### Implementation — semeadura (F2)
 
-- [ ] T053 [US7] Escrever o bloco de semeadura no apêndice de `supabase/baseline.sql` com `insert … on conflict (slug, version) do nothing` — **nunca `do update`**, conforme `contracts/semeadura-do-catalogo.md`. **Conteúdo é catálogo de exemplo** (A-19): poucos escopos, procedimentos genéricos, cada material dizendo no próprio corpo que é exemplo. Conteúdo real de operadora entra depois, por release, sem tocar em estrutura
-- [ ] T054 [US7] Embutir em `supabase/baseline.sql` os embeddings pré-computados como literal `vector(1536)`, com `embedding_model` registrado ao lado (research D6) e o custo de tamanho declarado no comentário do bloco
-- [ ] T055 [US7] Fechar o bloco de `supabase/baseline.sql` chamando `fn_sincronizar_escopos_do_catalogo` para **toda organização existente** — é o que faz escopo curado novo alcançar clone antigo no `update.sh`
+- [X] T053 [US7] Escrever o bloco de semeadura no apêndice de `supabase/baseline.sql` com `insert … on conflict (slug, version) do nothing` — **nunca `do update`**, conforme `contracts/semeadura-do-catalogo.md`. **Conteúdo é catálogo de exemplo** (A-19): poucos escopos, procedimentos genéricos, cada material dizendo no próprio corpo que é exemplo. Conteúdo real de operadora entra depois, por release, sem tocar em estrutura
+- [X] T054 [US7] Embutir em `supabase/baseline.sql` os embeddings pré-computados como literal `vector(1536)`, com `embedding_model` registrado ao lado (research D6) e o custo de tamanho declarado no comentário do bloco
+- [X] T055 [US7] Fechar o bloco de `supabase/baseline.sql` chamando `fn_sincronizar_escopos_do_catalogo` para **toda organização existente** — é o que faz escopo curado novo alcançar clone antigo no `update.sh`
 - [ ] T056 [US7] Chamar a mesma função na criação de organização (`scripts/bootstrap-owner.ts` e o fluxo de onboarding), para que tenant novo em instalação antiga também nasça enxergando o catálogo
 - [ ] T057 [P] [US7] Criar `workers/catalog-reindexer.ts`, que re-embeda **apenas** quando o modelo configurado difere do `embedding_model` registrado, com dono declarado na Central quando travar
 - [ ] T135 [US7] Dar gatilho ao worker de T057: rota `app/api/v1/cron/catalog-reindexer/route.ts` e a linha correspondente no `crond` do serviço `scheduler` em `docker-compose.prod.yml` — neste repositório cron é rota HTTP batida por `curl`, e worker sem rota nem linha no crontab é evento sem consumidor (Princípio II, anti-pattern 3)
-- [ ] T058 [P] [US7] Escrever `scripts/exportar-catalogo-para-baseline.ts`, que exporta as linhas `origin='seed'` da instalação de curadoria para o bloco do apêndice de `supabase/baseline.sql`, com os embeddings já calculados
+- [X] T058 [P] [US7] Escrever `scripts/exportar-catalogo-para-baseline.ts`, que exporta as linhas `origin='seed'` da instalação de curadoria para o bloco do apêndice de `supabase/baseline.sql`, com os embeddings já calculados
 
 ### Implementation — busca e runtime (F2)
 
@@ -225,11 +225,11 @@ nada, e a resposta continua vindo da **versão local**.
 
 ### Implementation — superfícies (F2 + F3)
 
-- [ ] T063 [P] [US7] Criar as rotas de plataforma `app/api/v1/catalog/scopes/…` e `app/api/v1/catalog/materials/…` conforme `contracts/rotas-http.md`, com Zod, `ok()`/`fail()`, audit log, guarda de `is_platform_admin` **e `checkRateLimit` de `lib/ai/dispatcher/rate-limit.ts` aplicado aqui mesmo** — ele existe hoje em 2 pontos do sistema inteiro e não se herda pronto
-- [ ] T064 [P] [US7] Criar a rota `app/api/v1/catalog/gaps/route.ts`, restrita à própria instalação, com rate limit — nenhuma lacuna atravessa a fronteira de volta ao fabricante (trava 7, A-18)
-- [ ] T065 [US7] Fazer a edição de material curado criar **versão nova** (`version + 1`) em `app/api/v1/catalog/materials/[id]/route.ts`, em vez de reescrever a existente (trava 6, FR-037)
+- [X] T063 [P] [US7] Criar as rotas de plataforma `app/api/v1/catalog/scopes/…` e `app/api/v1/catalog/materials/…` conforme `contracts/rotas-http.md`, com Zod, `ok()`/`fail()`, audit log, guarda de `is_platform_admin` **e `checkRateLimit` de `lib/ai/dispatcher/rate-limit.ts` aplicado aqui mesmo** — ele existe hoje em 2 pontos do sistema inteiro e não se herda pronto
+- [X] T064 [P] [US7] Criar a rota `app/api/v1/catalog/gaps/route.ts`, restrita à própria instalação, com rate limit — nenhuma lacuna atravessa a fronteira de volta ao fabricante (trava 7, A-18)
+- [X] T065 [US7] Fazer a edição de material curado criar **versão nova** (`version + 1`) em `app/api/v1/catalog/materials/[id]/route.ts`, em vez de reescrever a existente (trava 6, FR-037)
 - [ ] T066 [P] [US7] Criar a tela de curadoria em `app/admin/(protected)/catalogo/page.tsx` e `_client.tsx`, com a porta declarada na navegação do `app/admin/(protected)`
-- [ ] T067 [P] [US7] Criar a rota de leitura do tenant `app/api/v1/knowledge-scopes/route.ts`, devolvendo espelhos do catálogo e escopos próprios juntos, com `origin` visível
+- [X] T067 [P] [US7] Criar a rota de leitura do tenant `app/api/v1/knowledge-scopes/route.ts`, devolvendo espelhos do catálogo e escopos próprios juntos, com `origin` visível
 - [ ] T068 [P] [US7] Criar a tela do tenant em `app/app/ai/knowledge/scopes/page.tsx` e `_client.tsx`, com o rótulo vindo do vocabulário de T007 e **o interruptor de ligar/desligar cada escopo** — escopo do catálogo nasce desligado (A-20) e ligar custa **um** passo, que é o que SC-011 cronometra. Caminho em inglês e neutro de nicho, ao lado de `app/app/ai/knowledge/sources/`: cravar "operadoras" na URL é o mesmo erro que a brecha 11 tirou do schema (FR-033, FR-041)
 - [ ] T137 [US7] Implementar FR-042 em `lib/agent-engine/agent/inbound-turn.ts` e no item da Central: quando a recusa acontece **e existe** escopo no catálogo que cobriria o assunto mas está desligado para aquele tenant, o aviso diz isso e oferece ligar dali. Sem isto, a decisão de A-20 produz uma instalação que parece burra por configuração que ninguém mostrou
 - [ ] T069 [US7] Declarar a tela nova em `lib/navigation/registry.ts` com grupo, `minRole` e descrição buscável — tela sem porta reprova o build
@@ -238,7 +238,7 @@ nada, e a resposta continua vindo da **versão local**.
 ### Verificação da fatia
 
 - [ ] T071 [US7] **Registrar a linha de base de SC-006 ANTES da semeadura** (rodar entre T052 e T053), com **1 escopo** carregado à mão: bateria de perguntas, p95 do tempo até a resposta, em `.superpowers/evidence/`. Depois de T053–T055 o catálogo já traz vários escopos e esse número deixa de existir — medir "com 1 escopo" no fim da fase seria inventá-lo
-- [ ] T072 [US7] Provar install + update + update-de-novo num Postgres descartável (`pgvector/pgvector:pg17`), conforme `contracts/semeadura-do-catalogo.md`
+- [X] T072 [US7] Provar install + update + update-de-novo num Postgres descartável (`pgvector/pgvector:pg17`), conforme `contracts/semeadura-do-catalogo.md`
 - [ ] T073 [US7] **Sabotar e confirmar**: quebrar o filtro de escopo em `supabase/migrations/<ts>_0119_busca_de_lastro.sql` e verificar que `tests/invariants/busca-escopo-nao-vaza.test.ts` fica vermelho; reverter
 - [ ] T074 [US7] Rodar a sequência completa de gates e registrar evidência visual da jornada de instalação fresca em `.superpowers/evidence/` — **a regressão dela não é protegida por nenhum job**
 

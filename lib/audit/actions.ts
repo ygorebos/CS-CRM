@@ -217,4 +217,28 @@ export type AuditAction =
   // de código próprio para não somar duas grandezas no mesmo relatório.
   | "followup.scheduled"
   | "followup.cancelled"
-  | "lead.reactivation_proposed";
+  | "lead.reactivation_proposed"
+  // Spec 002 (RAG por operadora) — CURADORIA, feita por administrador de plataforma sobre
+  // a partição `catalog_*`, que não tem `organization_id`. A linha de audit tem, porque
+  // quem agiu pertence a uma organização; o objeto agido, não. É a única família de ações
+  // deste arquivo em que `resource_id` aponta para fora do tenant.
+  | "catalog.scope_created"
+  | "catalog.scope_updated"
+  | "catalog.material_created"
+  // Editar material curado NÃO reescreve: cria `version + 1` (trava 6, FR-037). O código
+  // diz "version_created" e não "material_updated" de propósito — o segundo nome faria o
+  // relatório de auditoria descrever uma sobrescrita que não aconteceu.
+  | "catalog.material_version_created"
+  // Re-embedding do catálogo quando o modelo de embedding configurado muda. Auditado
+  // porque reescreve o vetor de conteúdo curado — a operação não altera texto nenhum, mas
+  // altera o que a busca encontra, e uma mudança silenciosa nisso é indistinguível de
+  // regressão de qualidade quando alguém for investigar semanas depois.
+  | "catalog.reindex_run"
+  // Spec 002 — o lado do TENANT. `activated`/`deactivated` são separados de `updated`
+  // porque ligar e desligar um escopo é a trava 4 (FR-008): muda o que o agente pode
+  // afirmar ao cliente. Somar isso a "renomeou o escopo" no mesmo código apagaria a única
+  // ação desta família que tem consequência no atendimento.
+  | "knowledge_scope.created"
+  | "knowledge_scope.updated"
+  | "knowledge_scope.activated"
+  | "knowledge_scope.deactivated";

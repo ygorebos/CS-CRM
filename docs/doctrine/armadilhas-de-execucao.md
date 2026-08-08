@@ -241,7 +241,56 @@ ontem. `get_project_url` custa uma chamada; restaurar backup de produção alhei
 
 ---
 
-## 14. MCP de produto ≠ MCP de desenvolvimento
+## 14. Invariante que passa sozinho e falha no `test:db` inteiro
+
+**Sintoma** — `pnpm test:db <arquivo>` verde; `pnpm test:db` vermelho no mesmo arquivo. O par
+pior possível, porque o verde local vem antes do vermelho do CI e induz a procurar no lugar errado.
+
+**Causa** — os invariantes compartilham **um** Postgres, e o `vitest.db.config.ts` roda os arquivos
+em sequência **sem limpar entre eles**. Duas consequências:
+
+- **Contagem global mente.** `select count(*) from catalog_scopes` inclui o que outros arquivos
+  criaram. Aqui isso quebrou o teste da semeadura: `fn_sincronizar_escopos_do_catalogo` espelha
+  **todo** escopo ativo, então cada escopo esquecido por outro arquivo virava um espelho a mais.
+- **Arquivo sem `afterAll` estraga o vizinho.** O arquivo que vazou o escopo passava; quem falhava
+  era outro, por um motivo que não tinha nada a ver com ele.
+
+**Conserto** — dois, e os dois: toda asserção escopada às fixtures **do próprio arquivo** (`where
+slug like 'exemplo-%'`), e `afterAll` apagando o que o arquivo criou.
+
+**A regra** — em invariante de banco, contagem global é asserção sobre a suíte inteira, não sobre a
+sua feature. Escope sempre — mesmo quando o arquivo roda sozinho hoje, porque o vizinho que vai
+quebrá-lo ainda não foi escrito. E rode `pnpm test:db` **inteiro** antes de dar por pronto: o
+arquivo isolado não exercita a interferência, que é justamente o que o CI vai exercitar.
+
+---
+
+## 15. União fechada num arquivo compartilhado trava trabalho paralelo
+
+**Sintoma** — dois agentes trabalhando em rotas diferentes entregam, os dois, um
+`as AuditAction` e uma "dívida declarada" no comentário. Nenhum dos dois errou.
+
+**Causa** — `lib/audit/actions.ts` é uma união fechada de literais. Toda rota nova precisa
+acrescentar membro. Sob a regra de conjunto de escrita disjunto (constituição, "Trabalho em
+paralelo"), **nenhum** agente paralelo pode tocá-lo — e o cast é a saída honesta que sobra a eles.
+
+O detalhe que torna isso perigoso em vez de meramente feio: `api_audit_log.action` é `text`
+**sem CHECK**. A linha gravada fica certa, o teste passa, e a única coisa que se perdeu é a
+proteção contra o próximo desenvolvedor inventar um código que ninguém consegue consultar depois.
+Dívida que não dói é dívida que fica.
+
+**Conserto** — o orquestrador acrescenta os membros na integração e apaga os casts. Nas
+constantes, `as const satisfies Record<string, AuditAction>` (ou anotação direta) em vez de cast:
+assim inventar um código inexistente reprova o `typecheck` em vez de gravar trilha órfã.
+
+**A regra** — antes de fanear trabalho, **liste os arquivos-união** que as tarefas vão querer
+estender (`lib/audit/actions.ts`, vocabulários de `kind`, registries). Eles são do orquestrador
+por definição. Instrua os agentes a **declarar** o membro que precisariam, em vez de descobrir o
+impedimento no meio — e feche a lista na integração, no mesmo commit.
+
+---
+
+## 16. MCP de produto ≠ MCP de desenvolvimento
 
 **Sintoma** — confusão sobre "o MCP" ao discutir arquitetura.
 
