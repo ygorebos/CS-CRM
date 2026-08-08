@@ -6,6 +6,7 @@ import {
   type Grounding,
 } from './assistance-grounding';
 import type { GateContext } from './before-send';
+import { DEFAULT_CHANNEL_PROVIDER } from '@/lib/channels/capabilities';
 
 /**
  * A classificação determinística de "afirmação de assistência" (spec 002, FR-009/FR-010).
@@ -21,7 +22,7 @@ const ctxBase = (over: Partial<GateContext>): GateContext =>
     now: new Date('2026-08-08T12:00:00Z'),
     body: '',
     optedOut: false,
-    provider: 'waha',
+    provider: DEFAULT_CHANNEL_PROVIDER,
     pacing: { knobs: {}, state: {}, crmDailyLimit: null },
     spinning: { knobs: {}, window: [] },
     promise: { table: null },

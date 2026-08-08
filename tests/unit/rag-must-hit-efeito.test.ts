@@ -6,6 +6,7 @@ import {
 } from "@/lib/agent-engine/guardrails/assistance-grounding";
 import type { GateContext } from "@/lib/agent-engine/guardrails/before-send";
 import { guardrailsSchema } from "@/lib/ai/guardrails-schema";
+import { DEFAULT_CHANNEL_PROVIDER } from "@/lib/channels/capabilities";
 
 /**
  * Teste de **efeito** do guardrail `rag_must_hit` — spec 002, FR-015 e SC-012.
@@ -29,7 +30,7 @@ const ctx = (over: Partial<GateContext>): GateContext =>
     now: new Date("2026-08-08T12:00:00Z"),
     body: "A carência para internação é de 180 dias.",
     optedOut: false,
-    provider: "waha",
+    provider: DEFAULT_CHANNEL_PROVIDER,
     pacing: { knobs: {}, state: {}, crmDailyLimit: null },
     spinning: { knobs: {}, window: [] },
     promise: { table: null },

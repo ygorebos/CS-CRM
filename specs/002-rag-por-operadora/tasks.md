@@ -56,7 +56,7 @@ produto.
 - [ ] T001 Abrir o PR da emenda constitucional a partir da branch `docs/constituicao-principio-x-catalogo-curado` (commit `3c2a06b4`) e mergeá-la na `main` — **bloqueia toda a fatia F2 em diante**; sem ela o Constitution Check do plano reprova no gate X
 - [ ] T002 Atualizar `feat/002-rag-por-operadora` com a `main` após o merge da emenda (`git fetch origin && git merge origin/main`), conforme a higiene de branches
 - [ ] T003 [P] Montar o ambiente fresco descrito em `quickstart.md` — Supabase local pg17, `baseline.sql` aplicado, `scripts/bootstrap-owner.ts`, WAHA + Redis via `docker compose`, `pnpm build && pnpm start`, e **`RESEND_API_KEY` ausente**
-- [ ] T004 [P] Registrar a linha de jornada `[P0]` "a instalação já responde assistência" em `docs/testing/user-journey-map.md`, com o aviso de que ela **não é vigiada por gate** (o check `e2e` não é obrigatório e a spec irmã `vps-fresh-onboarding` está fora do CI — issue #63)
+- [X] T004 [P] Registrar a linha de jornada `[P0]` "a instalação já responde assistência" em `docs/testing/user-journey-map.md`, com o aviso de que ela **não é vigiada por gate** (o check `e2e` não é obrigatório e a spec irmã `vps-fresh-onboarding` está fora do CI — issue #63)
 - [ ] T005 [P] Abrir issue de alinhamento para a divergência já reportada: `docs/current-state.md` afirma "81 migrations até 0092" e o repositório tem até **0115**
 
 ---
@@ -68,11 +68,11 @@ inchada desfaria o fatiamento que o plano existe para garantir.
 
 **⚠️ Nenhuma história começa antes desta fase fechar.**
 
-- [ ] T006 Acrescentar os códigos de erro canônicos da feature em `lib/api/errors.ts` — `assistencia_sem_lastro`, `escopo_ja_existe`, `escopo_do_catalogo_nao_editavel`, `material_sem_texto_extraivel`, `formato_nao_suportado`, `material_muito_grande` (nunca string literal na rota)
-- [ ] T007 [P] Criar o módulo de vocabulário do escopo de conhecimento em `lib/vocabulary/knowledge-scope.ts`, resolvendo o rótulo exibido ("Operadora" no nicho de validação) a partir da configuração — **schema e API são neutros de nicho, tela e rótulo carregam o vocabulário** (research D11, FR-033)
-- [ ] T008 [P] Criar o léxico determinístico de "afirmação de assistência" como constante compartilhada em `lib/agent-engine/guardrails/lexico-assistencia.ts` — nunca literal espalhado (research D4)
-- [ ] T009 [P] Registrar a peça nova no mapa vivo `docs/architecture/`, com ≥2 arestas de entrada e saída (Princípio II, item 13 do DoD)
-- [ ] T010 Registrar na allowlist de `tests/unit/navegacao-completude.test.ts`, **com justificativa escrita**, que as telas desta feature ainda não existem — a entrada sai em T069, quando a porta for declarada. O teste real de porta é da fase 4: escrevê-lo aqui deixaria `pnpm test:unit` vermelho durante toda a F1, e T033 exige a suíte verde no fim da fase 3
+- [X] T006 Acrescentar os códigos de erro canônicos da feature em `lib/api/errors.ts` — `assistencia_sem_lastro`, `escopo_ja_existe`, `escopo_do_catalogo_nao_editavel`, `material_sem_texto_extraivel`, `formato_nao_suportado`, `material_muito_grande` (nunca string literal na rota)
+- [X] T007 [P] Criar o módulo de vocabulário do escopo de conhecimento em `lib/vocabulary/knowledge-scope.ts`, resolvendo o rótulo exibido ("Operadora" no nicho de validação) a partir da configuração — **schema e API são neutros de nicho, tela e rótulo carregam o vocabulário** (research D11, FR-033)
+- [X] T008 [P] Criar o léxico determinístico de "afirmação de assistência" como constante compartilhada em `lib/agent-engine/guardrails/lexico-assistencia.ts` — nunca literal espalhado (research D4)
+- [X] T009 [P] Registrar a peça nova no mapa vivo `docs/architecture/`, com ≥2 arestas de entrada e saída (Princípio II, item 13 do DoD)
+- [X] T010 Registrar na allowlist de `tests/unit/navegacao-completude.test.ts`, **com justificativa escrita**, que as telas desta feature ainda não existem — a entrada sai em T069, quando a porta for declarada. O teste real de porta é da fase 4: escrevê-lo aqui deixaria `pnpm test:unit` vermelho durante toda a F1, e T033 exige a suíte verde no fim da fase 3
 
 **Checkpoint**: base pronta. A fatia F1 pode começar.
 
@@ -95,36 +95,55 @@ que se descobre, antes de qualquer partição.
 
 > Escrever primeiro e **confirmar que falham** antes de implementar.
 
-- [ ] T011 [P] [US2] Teste da cadeia de gates para `assistance_grounding` em `lib/agent-engine/guardrails/before-send.test.ts` — veto quando é afirmação de assistência e `groundings` está vazio, `pass` quando há âncora, `pass` quando não é assistência
-- [ ] T012 [P] [US2] Teste da classificação determinística em `lib/agent-engine/guardrails/assistance-grounding.test.ts` — inclusive o viés de A-03: na dúvida, classifica como assistência
-- [ ] T013 [P] [US2] Teste de que busca indisponível é tratada como ausência de lastro em `lib/agent-engine/agent/search-knowledge.test.ts` (FR-013)
-- [ ] T014 [P] [US2] Teste de **efeito** do guardrail `rag_must_hit` em `tests/unit/rag-must-hit-efeito.test.ts` — prova de que ligar a opção muda o comportamento, não de que o valor foi gravado (FR-015, SC-012)
+- [X] T011 [P] [US2] Teste da cadeia de gates para `assistance_grounding` em `lib/agent-engine/guardrails/before-send.test.ts` — veto quando é afirmação de assistência e `groundings` está vazio, `pass` quando há âncora, `pass` quando não é assistência
+- [X] T012 [P] [US2] Teste da classificação determinística em `lib/agent-engine/guardrails/assistance-grounding.test.ts` — inclusive o viés de A-03: na dúvida, classifica como assistência
+- [X] T013 [P] [US2] Teste de que busca indisponível é tratada como ausência de lastro em `lib/agent-engine/agent/search-knowledge.test.ts` (FR-013)
+- [X] T014 [P] [US2] Teste de **efeito** do guardrail `rag_must_hit` em `tests/unit/rag-must-hit-efeito.test.ts` — prova de que ligar a opção muda o comportamento, não de que o valor foi gravado (FR-015, SC-012)
 - [ ] T015 [P] [US2] Spec E2E da jornada de recusa e escalação em `tests/e2e/assistencia-sem-lastro.spec.ts`, dirigindo o frontend e conferindo o item na Central
 
 ### Implementation for User Story 2
 
-- [ ] T016 [US2] Criar migration `supabase/migrations/<ts>_0116_aviso_de_assistencia_sem_lastro.sql` acrescentando o `kind` `assistance_without_grounding`
-- [ ] T017 [US2] Acrescentar o mesmo `kind` **na lista existente** do apêndice de `supabase/baseline.sql` (bloco da constraint `agent_inbox_items_kind_check`, hoje na linha ~8999) — nunca em bloco novo, sob pena de quebrar o `update.sh` de clones com vocabulário posterior
-- [ ] T018 [US2] Registrar a migration 0116 em `supabase/migrations/MANIFEST.md` com o QUÊ e o PORQUÊ
-- [ ] T019 [P] [US2] Implementar a classificação de "afirmação de assistência" em `lib/agent-engine/guardrails/assistance-grounding.ts`, consumindo o léxico de T008 — **nasce em arquivo próprio**, fora de `inbound-turn.ts`, que já tem 1789 linhas e é o hot path
-- [ ] T020 [US2] Implementar o gate `assistanceGroundingGate` em `lib/agent-engine/guardrails/assistance-grounding.ts` conforme `contracts/busca-de-lastro.md`
-- [ ] T021 [US2] Inserir o gate em `BEFORE_SEND_GATES` na posição (2.5), entre `lgpd` e `pacing`, em `lib/agent-engine/guardrails/before-send.ts`, e subir `BEFORE_SEND_CHAIN_VERSION` de 6 para 7 com o comentário de racional no padrão das versões anteriores
-- [ ] T022 [US2] Fazer o gate nascer **desarmado por default** (`assistanceGroundingEnforced`) em `lib/agent-engine/guardrails/before-send.ts`, no mesmo padrão do `internalVocabularyGate` da v6
-- [ ] T023 [US2] Armar o gate no caminho do agente em `lib/agent-engine/agent/inbound-turn.ts`, passando `groundings` e `isAssistanceClaim` ao contexto
-- [ ] T024 [US2] Ligar `rag_must_hit` e `min_citations` de `lib/ai/guardrails-schema.ts` ao gate, para que a opção salva na tela passe a ter efeito em runtime (FR-015)
-- [ ] T025 [US2] Remover a instrução *"responda com o que você já sabe e não invente fatos"* de `lib/agent-engine/agent/search-knowledge.ts:108` e devolver `knowledge_unavailable` como ausência de lastro
-- [ ] T026 [US2] Mover a gravação das citações do `update` pós-envio para o **insert** da mensagem em `lib/agent-engine/agent/inbound-turn.ts` (hoje `:1484-1501`), eliminando o `catch` que "só loga" (FR-024, research D5). Gravar **já no formato que `message_groundings` vai ler na F5** (`chunk_id`, `material_id`, `layer`, `source_ref`) e declarar em comentário que `messages.metadata` é cópia de conveniência e a tabela é a fonte da verdade a partir de T104 — sem isso a mesma âncora nasce com dois formatos e a F5 vira migração de dados
-- [ ] T027 [US2] Implementar a frase de recusa ao cliente sem vocabulário interno do produto, em `lib/agent-engine/agent/inbound-turn.ts`, com a expectativa realista de atendimento quando o sistema a souber (FR-011)
-- [ ] T028 [US2] Disparar a escalação para humano no veto em `lib/agent-engine/agent/inbound-turn.ts`, reusando o mecanismo de handoff existente (A-09) — sem inventar fila nem canal
-- [ ] T029 [US2] Abrir o item na Central via `insertInboxItem` de `lib/agent-engine/db/repository.ts`, com pergunta original, escopo (ou "desconhecido") e motivo, usando o `kind` de T016 (FR-012)
-- [ ] T030 [US2] Registrar a entrada do gate no trace de auditoria em `lib/agent-engine/guardrails/before-send.ts` **inclusive quando desarmado** (`verdict: 'skipped'`), para que o ajuste do léxico seja feito sobre medição
-- [ ] T031 [US2] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que a exigência **não alcança** o discurso de conversão: `isAssistanceClaim = false` passa direto (FR-020, SC-011)
-- [ ] T130 [US2] **Fazer o agente padrão nascer com a exigência de lastro ligada** em `app/actions/onboarding/createDefaultAgent.ts` — hoje ele não grava guardrail nenhum, e T022 faz o gate nascer desarmado; sem esta tarefa a instalação fresca **não recusa**, e FR-030, SC-001, SC-011 e SC-017 são falsos. Teste em `app/actions/onboarding/createDefaultAgent.test.ts` conferindo que `rag_must_hit` sai gravado
-- [ ] T032 [US2] **Sabotar e confirmar**: desarmar o gate em `lib/agent-engine/guardrails/before-send.ts` e verificar que os testes de T011–T014 ficam **vermelhos**; reverter. Teste que passa com a implementação sabotada não é teste (Princípio XI)
+- [X] T016 [US2] Criar migration `supabase/migrations/<ts>_0116_aviso_de_assistencia_sem_lastro.sql` acrescentando o `kind` `assistance_without_grounding`
+- [X] T017 [US2] Acrescentar o mesmo `kind` **na lista existente** do apêndice de `supabase/baseline.sql` (bloco da constraint `agent_inbox_items_kind_check`, hoje na linha ~8999) — nunca em bloco novo, sob pena de quebrar o `update.sh` de clones com vocabulário posterior
+- [X] T018 [US2] Registrar a migration 0116 em `supabase/migrations/MANIFEST.md` com o QUÊ e o PORQUÊ
+- [X] T019 [P] [US2] Implementar a classificação de "afirmação de assistência" em `lib/agent-engine/guardrails/assistance-grounding.ts`, consumindo o léxico de T008 — **nasce em arquivo próprio**, fora de `inbound-turn.ts`, que já tem 1789 linhas e é o hot path
+- [X] T020 [US2] Implementar o gate `assistanceGroundingGate` em `lib/agent-engine/guardrails/assistance-grounding.ts` conforme `contracts/busca-de-lastro.md`
+- [X] T021 [US2] Inserir o gate em `BEFORE_SEND_GATES` na posição (2.5), entre `lgpd` e `pacing`, em `lib/agent-engine/guardrails/before-send.ts`, e subir `BEFORE_SEND_CHAIN_VERSION` de 6 para 7 com o comentário de racional no padrão das versões anteriores
+- [X] T022 [US2] Fazer o gate nascer **desarmado por default** (`assistanceGroundingEnforced`) em `lib/agent-engine/guardrails/before-send.ts`, no mesmo padrão do `internalVocabularyGate` da v6
+- [X] T023 [US2] Armar o gate no caminho do agente em `lib/agent-engine/agent/inbound-turn.ts`, passando `groundings` e `isAssistanceClaim` ao contexto
+- [X] T024 [US2] Ligar `rag_must_hit` e `min_citations` de `lib/ai/guardrails-schema.ts` ao gate, para que a opção salva na tela passe a ter efeito em runtime (FR-015)
+- [X] T025 [US2] Remover a instrução *"responda com o que você já sabe e não invente fatos"* de `lib/agent-engine/agent/search-knowledge.ts:108` e devolver `knowledge_unavailable` como ausência de lastro
+- [X] T026 [US2] Mover a gravação das citações do `update` pós-envio para o **insert** da mensagem em `lib/agent-engine/agent/inbound-turn.ts` (hoje `:1484-1501`), eliminando o `catch` que "só loga" (FR-024, research D5). Gravar **já no formato que `message_groundings` vai ler na F5** (`chunk_id`, `material_id`, `layer`, `source_ref`) e declarar em comentário que `messages.metadata` é cópia de conveniência e a tabela é a fonte da verdade a partir de T104 — sem isso a mesma âncora nasce com dois formatos e a F5 vira migração de dados
+- [X] T027 [US2] Implementar a frase de recusa ao cliente sem vocabulário interno do produto, em `lib/agent-engine/agent/inbound-turn.ts`, com a expectativa realista de atendimento quando o sistema a souber (FR-011)
+- [X] T028 [US2] Disparar a escalação para humano no veto em `lib/agent-engine/agent/inbound-turn.ts`, reusando o mecanismo de handoff existente (A-09) — sem inventar fila nem canal
+- [X] T029 [US2] Abrir o item na Central via `insertInboxItem` de `lib/agent-engine/db/repository.ts`, com pergunta original, escopo (ou "desconhecido") e motivo, usando o `kind` de T016 (FR-012)
+- [X] T030 [US2] Registrar a entrada do gate no trace de auditoria em `lib/agent-engine/guardrails/before-send.ts` **inclusive quando desarmado** (`verdict: 'skipped'`), para que o ajuste do léxico seja feito sobre medição
+- [X] T031 [US2] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que a exigência **não alcança** o discurso de conversão: `isAssistanceClaim = false` passa direto (FR-020, SC-011)
+- [X] T130 [US2] **Fazer o agente padrão nascer com a exigência de lastro ligada** em `app/actions/onboarding/createDefaultAgent.ts` — hoje ele não grava guardrail nenhum, e T022 faz o gate nascer desarmado; sem esta tarefa a instalação fresca **não recusa**, e FR-030, SC-001, SC-011 e SC-017 são falsos. Teste em `app/actions/onboarding/createDefaultAgent.test.ts` conferindo que `rag_must_hit` sai gravado
+- [X] T032 [US2] **Sabotar e confirmar**: desarmar o gate em `lib/agent-engine/guardrails/before-send.ts` e verificar que os testes de T011–T014 ficam **vermelhos**; reverter. Teste que passa com a implementação sabotada não é teste (Princípio XI)
 - [ ] T131 [US2] **Medir SC-001 e SC-002**: rodar a bateria de 20 perguntas de assistência sem lastro num tenant vazio, anotar recusas, escalações e afirmações factuais, repetir com a busca derrubada, e registrar os três números em `.superpowers/evidence/` — critério declarado sem execução que o produza é critério que ninguém verificou
 - [ ] T033 [US2] Rodar `pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm test:unit && pnpm test:shell && pnpm build` e `pnpm test:db`, e registrar evidência da jornada em `.superpowers/evidence/`
 
 **Checkpoint**: o agente para de inventar. Entregável e demonstrável sozinho, sem catálogo nenhum.
+
+### Estado desta fase — 2026-08-08
+
+**28 de 31 tarefas fechadas.** Portões rodados nesta árvore: `typecheck` limpo, `lint` com 0
+erros, `lint:channels` sem dívida nova, **`test:unit` 2981 verdes**, `test:shell` verde,
+**`test:db` 477 verdes** (Postgres descartável nascido do `baseline.sql`) e `build` de
+produção completo. Sabotagem confirmada em dois eixos (gate desarmado: 12 vermelhas;
+classificação cega: 14 vermelhas), revertida nos dois. Evidência em
+`.superpowers/evidence/002-f1-lastro/RELATORIO.md`.
+
+**As três que ficaram abertas dependem do ambiente fresco (T003), não de código:**
+
+- **T003** — o ambiente estilo VPS não foi montado nesta sessão.
+- **T015** — a spec E2E precisa dele para existir.
+- **T131** — SC-001 e SC-002 estão provados por unidade e por sabotagem, **não por bateria
+  em conversa real**. Continua sendo dívida declarada, não item concluído.
+
+**A fatia F1 não pode ser declarada "pronta" pela doutrina de QA Visual**: nada aqui foi
+provado pela tela. O que existe é prova de backend e de comportamento de cadeia.
 
 ---
 

@@ -21,6 +21,16 @@ import type pg from 'pg';
  * Esta lista já ficou 3 valores atrás do banco (`judge_unaligned`,
  * `followup_dead`, `next_action_ambiguous`) sem nada falhar. Quem adiciona um
  * kind numa migration adiciona aqui na mesma mudança.
+ *
+ * ⚠️ **Sem comentário DENTRO da união.** O invariante extrai os valores por leitura de
+ * texto, e uma linha de comentário no meio corta a lista: medido em 2026-08-08, um
+ * comentário entre dois membros escondeu `assistance_without_grounding` e `other` do
+ * extrator, e o teste acusou divergência que não existia. Explicação de kind novo vai
+ * aqui em cima, ou na migration.
+ *
+ * `assistance_without_grounding` (migration 0116, spec 002 FR-012): o agente recusou uma
+ * afirmação de assistência por não haver trecho do acervo que a sustentasse. A recusa é o
+ * comportamento correto; o aviso é o que a transforma em trabalho do corretor.
  */
 export type InboxKind =
   | 'qr_rescan'
@@ -38,6 +48,7 @@ export type InboxKind =
   | 'capabilities_missing'
   | 'message_send_stuck'
   | 'promise_unfulfilled'
+  | 'assistance_without_grounding'
   | 'other';
 
 export interface InboxItemRow {

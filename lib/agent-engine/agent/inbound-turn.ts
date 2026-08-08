@@ -35,6 +35,8 @@ import type { ChannelAdapter, ChannelSendResult } from '../channel-adapter';
 import { withFields, type Logger } from '../obs/logger';
 import { getLeadContext, type LeadContext, type LeadContextResult } from '../edge/crm/get-lead-context';
 import { citationsFromHits, searchKnowledge } from './search-knowledge';
+import { escalarAssistenciaSemLastro } from './escalar-sem-lastro';
+import type { Grounding } from '../guardrails/assistance-grounding';
 import type { CrmEdgeConfig } from '../edge/crm/mcp-client';
 import { WahaChannelAdapter } from '../edge/channel/waha-adapter';
 // applySendOutcome é disposição de FILA (cancel/reschedule + cache de opt-out), não
@@ -282,6 +284,26 @@ export const AGENT_TOOL_DEFS = {
  * que o modelo não fez não vale um cliente sem resposta.
  */
 export const MAX_VETOS_DE_VOCABULARIO_INTERNO = 2;
+
+/**
+ * O que o cliente ouve quando o agente recusa por falta de material (spec 002, FR-011).
+ *
+ * Regras que a frase obedece, e que são requisito e não estilo:
+ *  - **sem vocabulário interno do produto** — nada de "base de conhecimento", "acervo",
+ *    "similaridade", "guardrail" ou nome de papel. O cliente não sabe o que é nada disso,
+ *    e explicar a máquina para quem só quer resolver o boleto é o defeito que a doutrina
+ *    `separacao-fala-e-operacao.md` existe para matar;
+ *  - **sem prometer prazo que o sistema não conhece.** FR-011 pede a expectativa realista
+ *    "quando o sistema souber" — e nesta fatia ele não sabe. Inventar "em até 1 hora"
+ *    seria trocar uma informação errada sobre a operadora por uma promessa errada sobre
+ *    nós, que é o mesmo dano com outra roupa;
+ *  - **quem fala é o SISTEMA**, não o modelo: é o que garante que o cliente nunca fica
+ *    mudo quando o modelo insiste na afirmação que não pode sair.
+ */
+export const FRASE_DE_RECUSA_SEM_LASTRO =
+  'Sobre essa dúvida eu prefiro não responder de cabeça, para não te passar uma informação errada. ' +
+  'Já avisei uma pessoa da equipe para te confirmar isso com segurança. Se puder, me conte mais ' +
+  'algum detalhe enquanto isso — ajuda a agilizar.';
 
 /**
  * Job já saiu de 'running' por decisão do próprio run (ex.: cancelJob no veto
@@ -1095,6 +1117,15 @@ export async function runAgentTurn(
   // Citações acumuladas por buscas de conhecimento DESTE turno — anexadas à
   // próxima outbound enviada (shape de lib/ai/citations/types, que a UI já lê).
   let pendingCitations: ReturnType<typeof citationsFromHits> = [];
+  // As MESMAS buscas, na forma que o gate de lastro entende (spec 002, FR-009). Separado
+  // de `pendingCitations` de propósito: aquilo é o shape que a UI do inbox renderiza,
+  // isto é a prova de que a afirmação veio do acervo. Colapsar os dois faria uma mudança
+  // de layout de tela mexer num invariante de envio.
+  let pendingGroundings: Grounding[] = [];
+  // Quantas vezes o gate de lastro vetou NESTE turno. Diferente do fail-safe de
+  // vocabulário: aqui não existe liberação após N tentativas. Sem material, a afirmação
+  // não sai — nem na terceira tentativa. O contador serve para escalar UMA vez.
+  let assistenciaSemLastroEscalada = false;
   let runError: Error | null = null;
   const noteRunError = (err: Error): void => {
     runError ??= err;
@@ -1324,6 +1355,22 @@ export async function runAgentTurn(
           // cru — é por isso que os ids podem sair do que vai ao modelo sem
           // perder nada: quem precisa deles é esta linha, não o modelo.
           pendingCitations = citationsFromHits(out.results);
+          // A âncora do gate sai do MESMO resultado, e não de uma segunda leitura: o
+          // que o gate exige é exatamente o que a busca devolveu, sem espaço para os
+          // dois divergirem. `layer: 'tenant'` é o único valor possível na fatia F1 —
+          // o catálogo curado ainda não existe (ele chega na F2, e o campo já está aqui
+          // para não migrar âncora gravada depois).
+          pendingGroundings = out.results.map((r) => ({
+            chunk_id: r.chunk_id,
+            material_id: r.knowledge_source_id,
+            layer: 'tenant' as const,
+            similarity: r.similarity,
+          }));
+        } else if (out.ok) {
+          // Busca que não achou nada ZERA a âncora. Sem esta linha, o resultado de uma
+          // busca anterior no mesmo turno sustentaria uma afirmação sobre outro assunto
+          // — lastro emprestado, que é pior que lastro nenhum porque parece correto.
+          pendingGroundings = [];
         }
         // `chunk_id` e `knowledge_source_id` viajavam CRUS para o modelo em toda
         // busca com RAG — dois UUIDs por resultado, sem uso nenhum do lado dele
@@ -1384,6 +1431,14 @@ export async function runAgentTurn(
             // não é dele, e a única saída seria o silêncio. O follow-up determinístico
             // idem (ver GateContext.internalVocabularyEnforced).
             enforceInternalVocabulary: true,
+            // O veto de lastro arma AQUI e só aqui, pela mesma razão do gate acima: é o
+            // único corpo escrito pelo modelo e o único caminho em que o veto vira erro
+            // instrutivo. E só quando o corretor ligou a exigência na tela — é o
+            // guardrail `rag_must_hit`, que até esta fatia salvava e ninguém avaliava
+            // (FR-015). O agente que a instalação cria já nasce com ela ligada.
+            enforceAssistanceGrounding: agentConfig?.exigeLastro ?? false,
+            groundings: pendingGroundings,
+            minCitations: agentConfig?.minCitations ?? 1,
             ...(deps.knobs.disclosureMode !== undefined ? { disclosureMode: deps.knobs.disclosureMode } : {}),
             // Gate 5 (F4-02): classificador semântico roteado pelo MESMO seam agnóstico (budget
             // da org checado nele). Closure com tenant/lead/job da ROW fechados — nunca do payload.
@@ -1405,6 +1460,12 @@ export async function runAgentTurn(
                     seq,
                     conversationId: input.conversationId,
                     body: bubble,
+                    // A âncora nasce COM a mensagem (FR-024), não num update depois.
+                    // Cada bolha carrega a mesma origem porque as bolhas são recortes
+                    // físicos de uma resposta só — dividir a resposta não divide a prova.
+                    ...(pendingCitations.length > 0
+                      ? { metadata: { citations: pendingCitations, ai_generated: true } }
+                      : {}),
                   });
                 },
               }),
@@ -1474,6 +1535,64 @@ export async function runAgentTurn(
               enforceInternalVocabulary: false,
             });
           }
+          if (chain.status === 'vetoed' && chain.code === 'assistencia_sem_lastro') {
+            // Spec 002, FR-011/FR-012. Aqui NÃO existe fail-safe que libere o envio: sem
+            // material, a afirmação não sai nem na terceira tentativa. O que existe é a
+            // garantia de que o cliente não fica mudo — e ela é do SISTEMA, não do modelo.
+            //
+            // Por que o sistema fala e não o modelo: se dependêssemos de ele reescrever,
+            // o turno em que ele insistisse acabaria sem nenhuma mensagem, e o cliente
+            // ficaria no vácuo esperando. Isso é exatamente o "morre sem sintoma" que o
+            // invariante 4 do sistema vivo proíbe — e seria causado pelo guardrail que
+            // veio melhorar o atendimento.
+            if (!assistenciaSemLastroEscalada) {
+              assistenciaSemLastroEscalada = true;
+              try {
+                await escalarAssistenciaSemLastro(pool, {
+                  tenantId,
+                  leadId,
+                  conversationId: input.conversationId,
+                  perguntaOriginal: skillSignal,
+                  // F1 não tem vínculo cliente↔operadora ainda (chega na F2). "não
+                  // identificada" é informação honesta; um campo em branco não seria.
+                  escopo: null,
+                  log: runLog,
+                });
+              } catch (err) {
+                // A escalação falhar não pode impedir o cliente de ser avisado. O aviso
+                // na Central é importante; a pessoa do outro lado da conversa é mais.
+                runLog.error('escalação da recusa por falta de lastro falhou', {
+                  error: (err instanceof Error ? err.message : String(err)).slice(0, 160),
+                });
+              }
+              const avisoAoCliente = await runBeforeSend({
+                ...beforeSendArgs,
+                body: FRASE_DE_RECUSA_SEM_LASTRO,
+                // A frase não afirma nada sobre a operadora, então a classificação já a
+                // deixaria passar. O gate segue ARMADO de propósito: se um dia alguém
+                // reescrever a frase e ela virar afirmação, é melhor que o guarda pegue.
+                groundings: [],
+                openedCaseThisTurn,
+                hasOpenCase: hasOpenCase || openedCaseThisTurn,
+              });
+              if (avisoAoCliente.status === 'sent') {
+                outcomes.push(avisoAoCliente.outcome);
+              } else {
+                runLog.warn('aviso de recusa não chegou ao cliente', {
+                  status: avisoAoCliente.status,
+                  ...(avisoAoCliente.status === 'vetoed' ? { gate: avisoAoCliente.gate } : {}),
+                });
+              }
+            }
+            return {
+              ok: true,
+              status: 'enviada',
+              message:
+                'não há material carregado que sustente essa afirmação, então ela não foi enviada. ' +
+                'O cliente já foi avisado de que uma pessoa vai confirmar, e a conversa foi escalada. ' +
+                'Não escreva mais nada neste turno.',
+            };
+          }
           if (chain.status === 'vetoed') {
             // Erro de ENSINO pt-br (mesmo shape de get_lead_context/breaker): o
             // modelo o vê no turno seguinte. NÃO é exceção — não derruba o run.
@@ -1481,24 +1600,15 @@ export async function runAgentTurn(
           }
           const outcome = chain.outcome;
           outcomes.push(outcome);
-          if (outcome.kind === 'sent' && pendingCitations.length > 0) {
-            try {
-              await pool.query(
-                `update messages
-                 set metadata = coalesce(metadata, '{}'::jsonb)
-                   || jsonb_build_object('citations', $3::jsonb, 'ai_generated', true)
-                 where organization_id = $1 and id = $2`,
-                [tenantId, outcome.messageId, JSON.stringify(pendingCitations)],
-              );
-            } catch (err) {
-              // citação é enriquecimento, não invariante — falha só loga.
-              runLog.warn('citações não anexadas à outbound', {
-                message_id: outcome.messageId,
-                error: (err instanceof Error ? err.message : String(err)).slice(0, 120),
-              });
-            }
-            pendingCitations = [];
-          }
+          // As citações NÃO são mais carimbadas aqui. Elas viajam no `metadata` do
+          // `channel.send`, ou seja, nascem no MESMO insert da mensagem (spec 002,
+          // FR-024). O que existia neste ponto era um `update` pós-envio cujo `catch`
+          // dizia *"citação é enriquecimento, não invariante — falha só loga"*: quando
+          // ele falhava, a mensagem já estava no telefone do cliente e ninguém mais
+          // conseguia dizer de onde ela tinha saído. Rastreabilidade que depende de uma
+          // segunda escrita dar certo não é rastreabilidade.
+          pendingCitations = [];
+          pendingGroundings = [];
           switch (outcome.kind) {
             case 'sent':
             case 'already_sent':

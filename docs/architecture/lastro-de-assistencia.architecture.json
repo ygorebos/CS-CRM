@@ -1,0 +1,334 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Lastro de assistência — sem trecho que sustente, a afirmação não sai",
+    "subtitle": "fatia F1 da spec 002: o veto determinístico, quem o arma, e por que o cliente nunca fica mudo",
+    "output": "lastro-de-assistencia.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    {
+      "id": "humano",
+      "label": "O que a pessoa vê"
+    },
+    {
+      "id": "config",
+      "label": "Configuração"
+    },
+    {
+      "id": "motor",
+      "label": "Motor do turno"
+    },
+    {
+      "id": "cadeia",
+      "label": "Cadeia before_send"
+    },
+    {
+      "id": "dados",
+      "label": "Banco"
+    }
+  ],
+  "mainPath": [
+    "cliente",
+    "inbound",
+    "busca",
+    "gate",
+    "veto",
+    "frase",
+    "aviso"
+  ],
+  "nodes": [
+    {
+      "id": "cliente",
+      "lane": "humano",
+      "col": 1,
+      "type": "external",
+      "label": "cliente no WhatsApp",
+      "sublabel": "\"perdi meu boleto, como faço?\""
+    },
+    {
+      "id": "inbound",
+      "lane": "motor",
+      "col": 2,
+      "type": "worker",
+      "label": "inbound-turn.ts",
+      "sublabel": "o turno do agente"
+    },
+    {
+      "id": "busca",
+      "lane": "motor",
+      "col": 3,
+      "type": "module",
+      "label": "search-knowledge.ts",
+      "sublabel": "devolve trechos — e, ao falhar, ausência de lastro (FR-013)"
+    },
+    {
+      "id": "lexico",
+      "lane": "config",
+      "col": 3,
+      "type": "module",
+      "label": "lexico-assistencia.ts",
+      "sublabel": "vocabulário fechado, 7 categorias — nunca literal espalhado"
+    },
+    {
+      "id": "classifica",
+      "lane": "cadeia",
+      "col": 4,
+      "type": "module",
+      "label": "classificarAfirmacaoDeAssistencia",
+      "sublabel": "determinística; na dúvida é assistência (A-03)"
+    },
+    {
+      "id": "guardrail",
+      "lane": "config",
+      "col": 4,
+      "type": "config",
+      "label": "ai_agents.guardrails → rag_must_hit",
+      "sublabel": "editável na tela; até esta fatia salvava e ninguém lia (FR-015)"
+    },
+    {
+      "id": "padrao",
+      "lane": "config",
+      "col": 2,
+      "type": "config",
+      "label": "GUARDRAILS_DO_AGENTE_PADRAO",
+      "sublabel": "a instalação nova já nasce recusando (FR-030)"
+    },
+    {
+      "id": "gate",
+      "lane": "cadeia",
+      "col": 5,
+      "type": "module",
+      "label": "assistanceGroundingGate",
+      "sublabel": "posição 2.5 — depois de lgpd, antes de pacing (cadeia v7)"
+    },
+    {
+      "id": "veto",
+      "lane": "cadeia",
+      "col": 6,
+      "type": "decision",
+      "label": "sem âncora → veto",
+      "sublabel": "assistencia_sem_lastro — não há fail-safe que libere"
+    },
+    {
+      "id": "frase",
+      "lane": "motor",
+      "col": 7,
+      "type": "module",
+      "label": "FRASE_DE_RECUSA_SEM_LASTRO",
+      "sublabel": "quem fala é o sistema, não o modelo — o cliente nunca fica mudo"
+    },
+    {
+      "id": "aviso",
+      "lane": "humano",
+      "col": 8,
+      "type": "frontend",
+      "label": "Central de avisos",
+      "sublabel": "kind assistance_without_grounding, com a pergunta original"
+    },
+    {
+      "id": "escalacao",
+      "lane": "motor",
+      "col": 7,
+      "type": "module",
+      "label": "escalar-sem-lastro.ts",
+      "sublabel": "conversa volta à fila humana — sem force_human irrevogável"
+    },
+    {
+      "id": "trace",
+      "lane": "dados",
+      "col": 6,
+      "type": "table",
+      "label": "before_send_traces",
+      "sublabel": "veto, e também 'skipped: disarmed' — a medição existe antes do efeito"
+    },
+    {
+      "id": "mensagens",
+      "lane": "dados",
+      "col": 8,
+      "type": "table",
+      "label": "messages.metadata.citations",
+      "sublabel": "a âncora nasce no INSERT, não num update pós-envio (FR-024)"
+    },
+    {
+      "id": "inbox",
+      "lane": "dados",
+      "col": 9,
+      "type": "table",
+      "label": "agent_inbox_items",
+      "sublabel": "migration 0116 — o único schema desta fatia"
+    },
+    {
+      "id": "onboarding",
+      "lane": "humano",
+      "col": 1,
+      "type": "frontend",
+      "label": "onboarding · Configurar IA",
+      "sublabel": "createDefaultAgent.ts — grava o valor de fábrica nos dois caminhos"
+    },
+    {
+      "id": "testar",
+      "lane": "humano",
+      "col": 5,
+      "type": "frontend",
+      "label": "botão Testar do agente",
+      "sublabel": "avaliar-resposta-de-teste.ts — declara o que NÃO avaliou (FR-034)"
+    }
+  ],
+  "edges": [
+    {
+      "id": "e1",
+      "from": "cliente",
+      "to": "inbound",
+      "label": "pergunta de assistência"
+    },
+    {
+      "id": "e2",
+      "from": "inbound",
+      "to": "busca",
+      "label": "search_knowledge"
+    },
+    {
+      "id": "e3",
+      "from": "busca",
+      "to": "gate",
+      "label": "groundings (os MESMOS trechos, sem segunda leitura)"
+    },
+    {
+      "id": "e4",
+      "from": "lexico",
+      "to": "classifica",
+      "label": "termos por categoria"
+    },
+    {
+      "id": "e5",
+      "from": "classifica",
+      "to": "gate",
+      "label": "é afirmação de assistência?"
+    },
+    {
+      "id": "e6",
+      "from": "guardrail",
+      "to": "gate",
+      "label": "arma o gate + min_citations"
+    },
+    {
+      "id": "e7",
+      "from": "padrao",
+      "to": "guardrail",
+      "label": "valor de fábrica no onboarding"
+    },
+    {
+      "id": "e8",
+      "from": "gate",
+      "to": "veto",
+      "label": "afirmação sem âncora"
+    },
+    {
+      "id": "e9",
+      "from": "gate",
+      "to": "trace",
+      "label": "todo veredito, inclusive desarmado"
+    },
+    {
+      "id": "e10",
+      "from": "veto",
+      "to": "escalacao",
+      "label": "uma vez por turno"
+    },
+    {
+      "id": "e11",
+      "from": "escalacao",
+      "to": "inbox",
+      "label": "aviso deduplicado por episódio"
+    },
+    {
+      "id": "e12",
+      "from": "escalacao",
+      "to": "aviso",
+      "label": "o corretor vê o que falta carregar"
+    },
+    {
+      "id": "e13",
+      "from": "veto",
+      "to": "frase",
+      "label": "o sistema responde ao cliente"
+    },
+    {
+      "id": "e14",
+      "from": "frase",
+      "to": "cliente",
+      "label": "\"uma pessoa vai confirmar\""
+    },
+    {
+      "id": "e15",
+      "from": "gate",
+      "to": "mensagens",
+      "label": "passou: a âncora viaja no insert"
+    },
+    {
+      "id": "e16",
+      "from": "mensagens",
+      "to": "aviso",
+      "label": "origem abrível na conversa"
+    },
+    {
+      "id": "e17",
+      "from": "onboarding",
+      "to": "padrao",
+      "label": "instalação nova e repetição do passo"
+    },
+    {
+      "id": "e18",
+      "from": "classifica",
+      "to": "testar",
+      "label": "\"esta resposta vai exigir lastro na conversa real\""
+    },
+    {
+      "id": "e19",
+      "from": "lexico",
+      "to": "testar",
+      "label": "a MESMA regra da conversa, não uma cópia"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "As duas coisas que tinham de ser verdade ao mesmo tempo",
+      "items": [
+        "o gate nasce DESARMADO na cadeia — no caminho determinístico (follow-up por template) um veto seria drop silencioso, e cliente mudo é pior que o defeito que o gate veio corrigir",
+        "o agente da instalação nova nasce ARMADO — GUARDRAILS_DO_AGENTE_PADRAO grava rag_must_hit no onboarding",
+        "faltando a segunda, a instalação fresca teria o guarda instalado e desligado, com a suíte inteira verde. Cada peça isolada estava certa; a costura é que não existia",
+        "vigiado por tests/unit/agente-padrao-nasce-com-lastro.test.ts"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Quem fala quando o veto acontece",
+      "items": [
+        "o SISTEMA, não o modelo. Se dependesse de o modelo reescrever, o turno em que ele insistisse acabaria sem mensagem nenhuma e o cliente ficaria no vácuo",
+        "FRASE_DE_RECUSA_SEM_LASTRO passa pela cadeia inteira — o veto não é bypass de opt-out, LGPD ou janela",
+        "ela não promete prazo: FR-011 pede expectativa realista quando o sistema a souber, e nesta fatia ele não sabe. Prazo inventado é o mesmo dano com outra roupa"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "Não-ligações declaradas",
+      "items": [
+        "a recusa NÃO chama performHumanHandoff: aquele caminho grava contacts.force_human irrevogável, e puniria o corretor por uma lacuna do acervo dele — carregado o material, o agente tem de voltar a atender sozinho",
+        "o veto NÃO tem fail-safe de liberação após N tentativas (ao contrário do gate de vocabulário interno): sem material, a afirmação não sai nem na terceira tentativa",
+        "a citação NÃO é mais carimbada por update pós-envio; o `catch` que dizia 'falha só loga' desapareceu junto"
+      ]
+    },
+    {
+      "dot": "sky",
+      "title": "O que esta fatia deliberadamente não faz",
+      "items": [
+        "não existe catálogo curado ainda (fatia F2): layer é sempre 'tenant', e o campo já nasce no Grounding para não migrar âncora gravada depois",
+        "não existe vínculo cliente↔operadora: o aviso diz 'Operadora: não identificada', que é informação honesta e não campo vazio",
+        "não existe message_groundings: a âncora vive em messages.metadata, no formato que a F5 vai ler"
+      ]
+    }
+  ]
+}
