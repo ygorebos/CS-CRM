@@ -582,8 +582,25 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
       **(SC-001, SC-002)**
 - [ ] **T061** Estado de entrega alcança o valor final em **≥ 99%** de 20 mensagens, com **zero**
       regressões observadas na tela. **(SC-003)**
-- [~] **T062** **Metade feita.** A varredura mecânica (SC-005) está pronta e verde; a rajada de 50
-      medida ao vivo (SC-004) depende do ambiente — ver o bloco de bloqueio no fim desta fase.
+- [X] **T062** ✅ **AS DUAS METADES.** A varredura mecânica (SC-005) e a **rajada de 50 medida**
+      (SC-004), executada em 2026-08-08 contra Postgres real com o `baseline.sql`, servido por
+      PostgREST, usando a **ação de automação de verdade** (obtida do registro por `getAction`) — não
+      uma réplica das três linhas de espaçamento.
+
+    ```json
+    { "rajada": 50, "linhas_no_banco": 50, "sucessos": 50, "espacamento_configurado_ms": 1200,
+      "amostras_de_intervalo": 49, "intervalos_respeitados": 49, "pct_respeitado": "100.0%",
+      "intervalo_minimo_ms": 1217, "intervalo_mediano_ms": 1589, "envios_fora_da_janela": 0 }
+    ```
+
+  - **A primeira passada deu 95,9%, e o erro era meu.** Eu marcava `Date.now()` **antes** de chamar a
+    ação, o que mistura a espera com a duração do envio anterior — e o primeiro intervalo não tem
+    predecessor de quem se espaçar. Trocado pelos `created_at` carimbados pelo Postgres, virou 100%
+    com mínimo de 1217 ms contra 1200 configurados. Fica registrado porque é o modo de errar mais
+    fácil aqui: medição mal instrumentada produz número **plausível**, e um 95,9% plausível teria
+    virado "quase lá" em vez de "meça direito".
+  - **Sabotagem — removido o `await sleep(wait)`:** 0% respeitados, mediana de **52 ms**. A rajada
+    inteira sai em ~2,5 s: é assim que um número é banido.
   - **A metade mecânica é a que sobrevive ao tempo.** Uma rajada medida hoje prova o código de hoje;
     a varredura reprova o atalho de amanhã. O risco real não é a trava estar errada — é alguém
     acrescentar um caminho de envio que não passa por ela, e a trava continuar perfeita e
@@ -706,8 +723,7 @@ que Auth e Storage não entram em nada do que a T066 mede.
 | Task | Falta |
 |---|---|
 | T060, T061 | **Número de WhatsApp real** entregando, para medir p95 do clique à chegada e estado final |
-| T062 (rajada) | Supabase de pé: a cadeia de vazão lê `channel_session_warmup` e `daily_message_limit`. **A metade mecânica já está verde** |
-| T063 | Banco fresco do `baseline.sql` + `next build`/`next start` + gateway. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
+| T063 | **Auth (GoTrue) + Next servido + browser.** É a única que precisa do stack Supabase inteiro: login de conta nova não sai com PostgREST sozinho, e o prelúdio do `test-db.sh` cria um `auth.users` de STUB que o GoTrue não aceita. A spec já existe: `tests/e2e/conexao-pelo-gateway.spec.ts` |
 | T067 | **Celular real** recebendo mídia. Não há substituto — o requisito é o anexo abrir no aparelho do destinatário |
 
 **Por que as de banco/app não foram executadas aqui:** esta máquina roda ambientes de outras sessões
