@@ -7,7 +7,7 @@
 [quickstart.md](./quickstart.md)
 
 **Tests**: **OBRIGATÓRIOS.** A spec os exige (FR-031, FR-032, FR-033) e o Princípio XI da
-constituição v1.2.0 os torna condição de "pronto". Toda tarefa `[TEST]` é escrita **antes** da
+constituição (v1.2.0 quando isto foi escrito; v2.2.0 hoje) os torna condição de "pronto". Toda tarefa `[TEST]` é escrita **antes** da
 implementação que ela vigia e tem de ficar **vermelha** primeiro; toda fase termina com a tarefa
 de **sabotagem**, que prova que o teste realmente vigia.
 
@@ -95,9 +95,11 @@ desta fase fechar.**
 > qualquer conexão criada pelo onboarding — que é justamente o caminho do corretor. Só
 > `app/api/v1/channels/official/route.ts:200` grava segredo de verdade.
 
-- [x] T017a [TEST] `tests/invariants/channel-session-segredo.test.ts` — toda `channel_session` nasce com segredo decifrável de comprimento ≥16; nenhuma nasce com placeholder
+- [x] T017a [TEST] toda `channel_session` nasce com segredo decifrável de comprimento ≥16; nenhuma nasce com placeholder
+
+  > **Entregue como `tests/unit/gateway-segredo-por-conexao.test.ts`**, e não em `tests/invariants/` como a tarefa pedia. O arquivo vigia o **gerador** e o **detector de placeholder**, que são puros. ⚠️ **A troca de suíte tem consequência de gate**: `tests/invariants/` roda no job `invariants`, obrigatório na branch protection; `tests/unit/` roda no `verify`, também obrigatório — então a prova continua travando merge. O que se perdeu foi a prova **de banco** de que nenhuma linha nasce com placeholder, que exige Postgres real. Registrado como lacuna em T068.
 - [x] T017b Gerar segredo forte na criação da sessão e cifrá-lo em `app/api/v1/channel-sessions/route.ts` e `app/api/v1/onboarding/whatsapp/session/route.ts`, no padrão que `app/api/v1/channels/official/route.ts:200` já usa
-- [x] T017c Curar as linhas existentes **fora do SQL**: passo idempotente em `scripts/curar-segredos-de-canal.ts`, chamado pelo `install.sh` e pelo `update.sh` **depois** de `ensure_encryption_key`, que gera segredo forte para toda `channel_session` com `webhook_secret_encrypted` placeholder e o cifra por `encryptWebhookSecret` (`lib/webhooks/secrets.ts`) — o mesmo caminho que `app/api/v1/channels/official/route.ts:132` já usa
+- [x] T017c Curar as linhas existentes **fora do SQL**: passo idempotente em `scripts/curar-segredos-de-canal.ts` **depois** de `ensure_encryption_key`, que gera segredo forte para toda `channel_session` com `webhook_secret_encrypted` placeholder e o cifra por `encryptWebhookSecret` (`lib/webhooks/secrets.ts`) — o mesmo caminho que `app/api/v1/channels/official/route.ts:132` já usa
 
   > ⛔ **Não fazer isso na migration nem no apêndice do `baseline.sql`.** Medido:
   > `public.fn_encrypt_oauth` (`baseline.sql:5276`) faz
@@ -146,8 +148,10 @@ e a contagem não muda.
 
 ### Testes primeiro (têm de ficar vermelhos)
 
-- [x] T020 [TEST] [P] [US1] `tests/invariants/gateway-inbound-idempotencia.test.ts` — mesma entrega duas vezes produz **uma** mensagem, e a segunda responde `202` com `duplicate: true`
-- [x] T021 [TEST] [P] [US1] `tests/invariants/gateway-inbound-posse-nome.test.ts` — nome definido por humano em `contacts.name`/`display_name` **não** é sobrescrito pelo nome vindo do canal (vigia o `coalesce` de `fn_upsert_wa_contact`, hoje sem teste nenhum)
+- [x] T020 [TEST] [P] [US1] mesma entrega duas vezes produz **uma** mensagem, e a segunda responde `202` com `duplicate: true`
+- [x] T021 [TEST] [P] [US1] nome definido por humano em `contacts.name`/`display_name` **não** é sobrescrito pelo nome vindo do canal (vigia o `coalesce` de `fn_upsert_wa_contact`, que estava sem teste nenhum)
+
+  > **Entregues fundidas em `tests/invariants/gateway-ingest-idempotencia.test.ts`** (o cabeçalho do arquivo cita T020/T021). Os nomes `gateway-inbound-idempotencia.test.ts` e `gateway-inbound-posse-nome.test.ts` que estas tarefas pediam **não existem** — dois arquivos separados exercitariam a mesma montagem de organização e conexão duas vezes. Cobertura preservada; corrigido aqui em 2026-08-08 porque tarefa apontando para arquivo inexistente vira busca perdida na próxima sessão.
 - [x] T022 [TEST] [P] [US1] `tests/e2e/gateway-inbound.spec.ts` — pela tela, em ambiente fresco: envelope assinado entra e a mensagem aparece no inbox com contato e corpo corretos
 
   > **Executada em 2026-08-08, e a execução achou dois defeitos NA PRÓPRIA SPEC.** Stack fresco
@@ -172,7 +176,9 @@ e a contagem não muda.
 
 - [x] T023 [US1] Implementar `lib/gateway/ingest.ts` para `event_kind: "new_message"`: resolve identidade, chama `fn_upsert_wa_contact` e `fn_upsert_wa_conversation` (reuso — **não** escrever `insert` próprio em `contacts`/`conversations`), insere em `messages` capturando `code === '23505'` como caminho normal
 - [x] T024 [US1] Disparar a cadeia viva a partir do ingest novo — emissão em `event_log` do `ai_agent.dispatch_requested` e auditoria, espelhando `lib/waha/ingest.ts:462`
-- [x] T025 [US1] Implementar `workers/gateway-inbound-worker.ts` consumindo `webhook_events_log` com `provider='gateway'` e `status='received'`, marcando `processed`/`error` e incrementando `attempts`
+- [x] T025 [US1] Consumir `webhook_events_log` com `provider='gateway'` e `status='received'`, marcando `processed`/`error` e incrementando `attempts`
+
+  > **Entregue como `app/api/v1/cron/gateway-inbound-drain/route.ts`**, agendado no serviço `scheduler`, e não como `workers/gateway-inbound-worker.ts`. O arquivo que a tarefa nomeava **não existe**: o dreno precisa das mesmas credenciais e do mesmo cliente admin das rotas, e o repositório já agenda todo o resto por rota de cron. Um worker próprio seria um segundo mecanismo de agendamento para uma única função. Corrigido aqui em 2026-08-08.
 - [x] T026 [US1] Ligar o disparo imediato em segundo plano na rota (`app/api/v1/webhooks/gateway/[token]/route.ts`), **depois** da resposta — é o que sustenta o alvo de ≤5s
 - [x] T027 [US1] Respeitar `channel_sessions.ingest_path` no ingest: conexão `legacy` recusa entrega pelo caminho novo com motivo explícito
 - [x] T027a [TEST] [P] [US1] `tests/invariants/gateway-inbound-identidade-canonica.test.ts` — o mesmo contato chegando com as duas grafias de identificador (número canônico e identificador interno do canal) cai numa **única** conversa, sem partir o histórico
@@ -235,7 +241,7 @@ reavaliado antes de qualquer investimento adicional.
 - [x] T036 [US2] Implementar `app/api/v1/cron/gateway-inbound-drain/route.ts` e agendá-la no `scheduler` do `docker-compose.prod.yml`, no padrão do `event-log-drain`
 - [x] T037 [US2] Tornar o descarte visível: item na Central de avisos quando houver entrega `dead` (Princípio II — falta de funcionamento aparece na tela, não em `log.Warn`)
 
-  > Migration **0118** (+ apêndice no `baseline.sql` + MANIFEST): `agent_inbox_items.kind` ganha `gateway_delivery_dead`. Kind próprio, e não reuso de `channel_secret_missing`, porque o desfecho é oposto e é ele que decide a ação de quem lê: lá nada se perde e as mensagens entram quando a chave existir; aqui **acabou**, não haverá outra tentativa. O dreno já emitia `gateway.entrega_descartada` no `event_log` e **ninguém escutava** — evento sem consumidor, anti-pattern nº 3, e na prática o mesmo silêncio do `log.Warn` que esta spec existe para acabar. Do lado do gateway, o gancho equivalente é `AoMorrer`, hoje em log de erro.
+  > Migration **0121** (+ apêndice no `baseline.sql` + MANIFEST): `agent_inbox_items.kind` ganha `gateway_delivery_dead`. Kind próprio, e não reuso de `channel_secret_missing`, porque o desfecho é oposto e é ele que decide a ação de quem lê: lá nada se perde e as mensagens entram quando a chave existir; aqui **acabou**, não haverá outra tentativa. O dreno já emitia `gateway.entrega_descartada` no `event_log` e **ninguém escutava** — evento sem consumidor, anti-pattern nº 3, e na prática o mesmo silêncio do `log.Warn` que esta spec existe para acabar. Do lado do gateway, o gancho equivalente é `AoMorrer`, hoje em log de erro.
 
 - [ ] T038 [US2] Executar o roteiro do `quickstart.md` §2, incluindo o reinício do **gateway** no meio do intervalo
 
@@ -382,9 +388,9 @@ inbox identificada pelo canal.
 
   > `lib/channels/rotulo-de-canal.ts` + selo na lista e no cabeçalho, alimentado por `channel_sessions.provider` (acrescentado ao `SELECT_COLS` da listagem). Duas decisões: o rótulo é o nome que o usuário reconhece ("WhatsApp", não "whatsapp_uazapi" — ele não escolheu uazapi), e **canal implícito não ganha selo** — marcar 100% das conversas com "WhatsApp" seria ruído em toda linha, e ruído constante deixa de ser lido justamente no dia em que aparecesse a conversa diferente. Canal que este build não conhece não vira selo com nome cru. 5 testes.
 
-- [ ] ~~T058 [US4] Acrescentar o gateway como serviço em `docker-compose.prod.yml` e fazê-lo subir pelo `hostgator-setup-kit/install.sh` e `update.sh`~~ — **INVALIDADA pela constituição v2.0.0**
+- [ ] ~~T058 [US4] Acrescentar o gateway como serviço em `docker-compose.prod.yml` e fazê-lo subir pelo `hostgator-setup-kit/install.sh` e `update.sh`~~ — **INVALIDADA pela constituição (Princípio XIV, introduzido na v2.0.0, vigente na v2.2.0)**
 
-  > **Não executada porque a constituição proíbe, e o conflito é frontal.** O Princípio XIV (v2.0.0)
+  > **Não executada porque a constituição proíbe, e o conflito é frontal.** O Princípio XIV
   > diz: *"O gateway MUST NOT entrar no compose de produção do CRM, e o deploy de um MUST NOT exigir
   > o deploy do outro."* Esta task manda exatamente o contrário. Ela foi escrita sob a v1.2.0, quando
   > o produto era self-host e "subir junto" era a única forma de o clone ter o serviço.
@@ -397,15 +403,15 @@ inbox identificada pelo canal.
 
 - [x] T058a [US4] Fazer **conexão nova nascer em `ingest_path='gateway'`** — reescopada da v2.0.0
 
-  > `lib/gateway/caminho-de-ingestao.ts`, ligada nos **dois** caminhos de criação (`/api/v1/channel-sessions` e `/api/v1/channels/official`). A regra segue o interruptor: ligado nasce `'gateway'`, desligado nasce `'legacy'`. **Não** é fixo em `'gateway'` de propósito — com o recebimento desligado, a conexão apontaria para uma rota que responde 404 e o gateway descartaria sem retentar (contrato §5): ela nasceria muda. O default `'legacy'` da coluna continua valendo só para as linhas anteriores à `0116`.
+  > `lib/gateway/caminho-de-ingestao.ts`, ligada nos **dois** caminhos de criação (`/api/v1/channel-sessions` e `/api/v1/channels/official`). A regra segue o interruptor: ligado nasce `'gateway'`, desligado nasce `'legacy'`. **Não** é fixo em `'gateway'` de propósito — com o recebimento desligado, a conexão apontaria para uma rota que responde 404 e o gateway descartaria sem retentar (contrato §5): ela nasceria muda. O default `'legacy'` da coluna continua valendo só para as linhas anteriores à `0119`.
 
 - [x] T058b [TEST] [US4] `tests/invariants/gateway-conexao-nova.test.ts` — a conexão nova nasce no caminho da instalação; a que já existia em `'legacy'` não é convertida
 
-  > 5 testes. Cobre também que o CHECK recusa um terceiro caminho: sem ele, um typo (`gatewey`) faria a conexão cair no legado em silêncio — o defeito com a pior relação entre custo de digitar e custo de descobrir. Reescopado: "instalação nova" virou "conexão nova", porque em SaaS de instância única não há instalação nova (constituição v2.0.0, Princípio IV).
+  > 5 testes. Cobre também que o CHECK recusa um terceiro caminho: sem ele, um typo (`gatewey`) faria a conexão cair no legado em silêncio — o defeito com a pior relação entre custo de digitar e custo de descobrir. Reescopado: "instalação nova" virou "conexão nova", porque em SaaS de instância única não há instalação nova (constituição v2.0.0, Princípio IV — mantido na v2.2.0).
 
 - [x] T059 [US4] Tornar a ausência do gateway visível como problema de configuração na tela (Central de avisos / banner), nunca como silêncio (FR-027)
 
-  > Migration **0119** + `gateway_inbound_down` + `lib/gateway/aviso-de-recebimento-desligado.ts`, detectado pelo dreno (que já roda a cada minuto e já é o dono da fila — cron novo para uma checagem de duas colunas seria peça a mais para esquecer). O modo de falha é o mais silencioso da feature: `ingest_path='gateway'` + `GATEWAY_INBOUND_ENABLED=false` fazem a rota responder **404**, e o gateway **descarta sem retentar** porque 404 é defeito de configuração. Nada entra, nada volta, e a tela fica igual a uma segunda-feira devagar. O aviso cala quando não é o caso (ligado, ou sem conexão migrada): alarme falso é o que ensina a ignorar a Central. Do lado de ops, `/api/v1/health` ganhou o check `gateway`. 4 testes.
+  > Migration **0122** + `gateway_inbound_down` + `lib/gateway/aviso-de-recebimento-desligado.ts`, detectado pelo dreno (que já roda a cada minuto e já é o dono da fila — cron novo para uma checagem de duas colunas seria peça a mais para esquecer). O modo de falha é o mais silencioso da feature: `ingest_path='gateway'` + `GATEWAY_INBOUND_ENABLED=false` fazem a rota responder **404**, e o gateway **descarta sem retentar** porque 404 é defeito de configuração. Nada entra, nada volta, e a tela fica igual a uma segunda-feira devagar. O aviso cala quando não é o caso (ligado, ou sem conexão migrada): alarme falso é o que ensina a ignorar a Central. Do lado de ops, `/api/v1/health` ganhou o check `gateway`. 4 testes.
 
 - [x] T060 [US4] Medir SC-008: contar as linhas de código de ingestão específicas do canal novo — o alvo é **zero**
 
@@ -437,7 +443,9 @@ inbox identificada pelo canal.
 
   > **Aberta — depende de ambiente vivo.** O comportamento está documentado no runbook (T063) e a idempotência que o sustenta é cobrada por invariante; falta a execução com os dois lados de pé.
 
-- [ ] T065 Cronometrar a jornada de estreia em instalação fresca (`quickstart.md` §4): ≤10 min, **sem regressão**, e contagem de passos de tela idêntica à de antes da feature
+- [ ] T065 Cronometrar a jornada de estreia em **conta nova** (`quickstart.md` §4): ≤10 min, **sem regressão**, e contagem de passos de tela idêntica à de antes da feature
+
+  > ⚠️ **O roteiro §4 precisa ser reescrito antes de esta tarefa ser executável, e os três motivos independem do gateway**: (a) o passo 1 manda "instale do zero pelo `install.sh`", e a v2.2.0 aposentou o kit self-host — o ambiente certo é **conta nova em banco fresco**; (b) o cronômetro começa no **login**, e a v2.2.0 moveu o início do relógio para o **cadastro**; (c) o passo 5 exige comparação com uma **medição anterior à feature** que não existe registrada em lugar nenhum — sem essa linha de base, "sem regressão" não é verificável. Levantado em 2026-08-08.
 
   > **Aberta — depende de ambiente fresco e relógio.** O que a feature acrescenta ao caminho de estreia é **zero passo de tela**: a conexão nova nasce já no caminho certo (T058a), sem pergunta nova. Falta cronometrar.
 
@@ -462,8 +470,8 @@ inbox identificada pelo canal.
   > | 8 | sem `console.log` | ✅ `lint` cobre; o seed de e2e usa `console.info`/`error`, permitidos |
   > | 9 | env nova em `.env.example` + `lib/env.ts` | ✅ `GATEWAY_INTERNAL_TOKEN` nos dois + runbook; as três da fila no `.env.example` do `gateway_go` |
   > | 10 | doc atualizada se mudou contrato | ✅ runbook, mapa de arquitetura, mapa de jornadas, MANIFEST |
-  > | 11 | schema saiu como migration + baseline + MANIFEST, com caminho de volta | ✅ `0118` e `0119`, ambas aditivas (vocabulário só cresce) — o caminho de volta é trivial e está declarado: nenhuma linha existente viola as constraints novas |
-  > | 12 | provado pela tela em conta nova | ⬜ **NÃO** — é o buraco declarado (T022/T047). A spec existe e roda no job `e2e`; falta a execução |
+  > | 11 | schema saiu como migration + baseline + MANIFEST, com caminho de volta | ✅ `0121` e `0122`, ambas aditivas (vocabulário só cresce) — o caminho de volta é trivial e está declarado: nenhuma linha existente viola as constraints novas |
+  > | 12 | provado pela tela em conta nova | ✅ `tests/e2e/gateway-inbound.spec.ts`, 4 casos, executados em stack isolado (`de14f3ad`). **A execução achou dois defeitos na própria prova**: `toHaveCount` é satisfeito no primeiro instante em que existe uma bolha, e a rota dá ACK **antes** de ingerir; e a contagem por texto casava a prévia da conversa na listagem, não a bolha da thread. Com a idempotência sabotada, a suíte passava verde e o banco terminava com duas mensagens idênticas. Corrigidos (espera pelo estado resolvido em `webhook_events_log` + `data-testid` na bolha) e reconfirmados por sabotagem |
   > | 13 | Living System Checklist | ✅ mapa em `docs/architecture/` com 19 peças, 24 arestas e 4 não-ligações declaradas |
   > | 14 | tela nova tem porta | N/A — nenhuma tela nova. O selo de canal entra em tela que já existe |
   > | XI | teste que prova + suíte verde + sabotagem confirmada | ✅ quatro sabotagens nesta rodada (host do payload: 2 vermelhos; não-regressão: 1; descarte de tipo desconhecido: 1; e a de fila em memória da fase 4: 3) |
@@ -487,8 +495,8 @@ Phase 1 (Setup)
 - **US2 e US3 são independentes entre si** e podem correr em paralelo depois da US1.
 - **US6 depende da US5** apenas por proximidade de arquivo (`lib/gateway/ingest.ts`), não por
   lógica.
-- **T058 (kit self-host) é o ponto de não-retorno**: antes dele tudo é reversível pela chave de
-  corte.
+- **Não há ponto de não-retorno.** T058 era ele, e foi invalidada pelo Princípio XIV — nada nesta
+  feature toca deploy. Tudo é reversível pela chave de corte por conexão, do começo ao fim.
 
 ## Parallel Execution Examples
 
@@ -552,9 +560,42 @@ aprendizado custou duas jornadas e o plano é reavaliado antes de qualquer inves
 
 Depois do MVP, a ordem por risco decrescente: durabilidade (o que separa demo de operação),
 autenticidade (dano irreversível), riqueza da conversa, e por fim a colheita do investimento
-(canal novo + kit self-host).
+(canal novo + a queda do gateway visível no health e na Central).
 
 **Custo total**: ≈ **7 a 9 jornadas deste time**, distribuídas nas 5 fatias do `plan.md`.
 
 **O desligamento do caminho legado não está em nenhuma fase** — é passo posterior, condicionado a
 evidência em produção (FR-030).
+
+---
+
+## Levantadas na revisão pós-merge (2026-08-08)
+
+Achados da auditoria de consistência feita depois do merge da `main`. Não são retrabalho das 68:
+são coberturas que **perderam o executor** ou que nunca o tiveram, e que só apareceram quando a
+constituição mudou por baixo.
+
+- [ ] T069 Dar executor à cura de segredos de canal. `scripts/curar-segredos-de-canal.ts` existe e
+      é idempotente, mas **nada o chama** — `grep` no repositório inteiro só acha a própria
+      docstring e três comentários que afirmam que o `install.sh`/`update.sh` o chamam. Nenhum dos
+      dois o chama, e a v2.2.0 aposentou o kit de qualquer forma.
+
+  > Por que importa: a entrega do gateway é **fail-closed sem válvula**. Conexão criada antes da
+  > T017b tem `webhook_secret_encrypted` placeholder e recusa **100%** das entregas. O aviso
+  > `channel_secret_missing` (T017e) leva isso à Central, então o defeito é **visível** — mas
+  > visível não é curado, e quem vê não tem botão. O lugar natural do gancho é o dreno, que já roda
+  > a cada minuto e já é o dono da fila; a alternativa é uma ação na própria Central. **É decisão
+  > de escopo, não conserto mecânico** — por isso entra como tarefa e não foi feita na revisão.
+
+- [ ] T070 Provar em banco que nenhuma `channel_session` nasce com segredo placeholder. A T017a
+      entregou a prova do **gerador** e do **detector** em `tests/unit/`; falta a prova de banco,
+      que é a que vigia a rota de criação de verdade. Suíte: `tests/invariants/`.
+
+- [ ] T071 Implementar o cron de retenção de `webhook_events_log`. A T066 entregou a **política**
+      (três faixas, escrita em `docs/runbooks/gateway-relay.md`) e o runbook diz textualmente que
+      a execução não está agendada. Confirmado: nenhuma rota em `app/api/v1/cron/`, nenhuma entrada
+      no `scheduler` do `docker-compose.prod.yml`, nenhum script.
+
+  > Por que sobe de "polimento" para tarefa própria: `raw_body` guarda **conteúdo de conversa de
+  > cliente**, e a tabela passou a receber todo o tráfego de entrada. Sem poda, isto é questão de
+  > LGPD antes de ser questão de disco.

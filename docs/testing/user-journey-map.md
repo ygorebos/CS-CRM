@@ -505,8 +505,8 @@ que exigem número de WhatsApp, gateway de pé e app servido:
 
 | Caso | Task | O que falta |
 |---|---|---|
-| J2.9 — mensagem real no inbox pela tela | T022 / T030 | celular real + p95 de 20 envios |
-| J2.10 — anexo abre pela tela | T047 | os três anexos, com receiver real |
+| J2.9 — mensagem real no inbox pela tela | T030 | celular real + p95 de 20 envios. **T022 feita** (`de14f3ad`): a spec de tela existe e é verde num stack isolado |
+| J2.10 — anexo abre pela tela | — | **T047 feita** (`de14f3ad`) |
 | CRM fora do ar 5 min sem perder mensagem | T038 | derrubar e subir com o gateway entregando |
 | Rajada de 200 mensagens em 60s (SC-010) | T038a | com o teto de requisições **ligado** |
 | Rollback de uma conexão sem perder o que está em voo | T064 | virar a chave nos dois sentidos em ambiente vivo |

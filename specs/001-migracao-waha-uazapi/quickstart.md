@@ -54,6 +54,11 @@ passa a duplicar e o teste tem que ficar vermelho.
 5. Repita reiniciando **o gateway** no meio do intervalo — a pendência tem que sobreviver
    (é o que separa fila durável de fila em memória, D5).
 
+> ⚠️ **`ENTREGA_FILA_DIR` tem que apontar para um VOLUME antes do passo 5.** Ela nasce vazia, e
+> vazia significa **entrega sem durabilidade** — o comportamento anterior à feature. Apontá-la para
+> um caminho dentro da imagem tem o mesmo efeito: o reinício leva a pendência junto. Rodar §2 sem
+> isso prova o oposto do que a US2 promete, e a falha passa como legítima.
+
 **Sabotagem que tem de reprovar**: troque a fila em disco por fila em memória — o passo 5 perde
 mensagens e o teste tem que ficar vermelho.
 
@@ -65,7 +70,14 @@ mensagens e o teste tem que ficar vermelho.
 `test:unit` **não** executa `tests/invariants/**`, e isolamento provado só em unitário é falso
 verde.
 
-Com um **emissor HTTP real** (não mock), dispare contra a rota, nesta ordem:
+Dispare contra a rota, nesta ordem:
+
+> **Ressalva registrada (2026-08-08).** O roteiro pedia um **emissor HTTP real**. A prova foi
+> entregue como invariante de banco (`gateway-inbound-autenticidade.test.ts`), cujo emissor é SQL,
+> não HTTP — desvio declarado na nota de T040. O que se ganhou: a prova roda no job `invariants`,
+> obrigatório na branch protection, em vez de depender de um processo externo que ninguém sobe no
+> CI. O que se perdeu: a rota não é exercitada pela pilha HTTP nesta prova. O caso 7 continua sendo
+> coberto ponta a ponta pela spec de Playwright.
 
 | # | Requisição | Esperado |
 |---|---|---|
@@ -74,7 +86,7 @@ Com um **emissor HTTP real** (não mock), dispare contra a rota, nesta ordem:
 | 3 | assinatura válida, `X-Gateway-Timestamp` de 10 min atrás | `401` (fora da janela) |
 | 4 | assinatura válida da organização A, token da organização B | `401`, nada em nenhuma das duas |
 | 5 | `organization_id` no corpo apontando outra org | vence o token; a linha nasce na org do token |
-| 6 | segredo removido da conexão | `401` — fecha, nunca abre |
+| 6 | segredo removido da conexão | **`503` `gateway_secret_not_provisioned`** — fecha, nunca abre |
 | 7 | entrega legítima | `202`, linha na org certa |
 
 Depois: com **duas organizações reais** recebendo tráfego ao mesmo tempo, prove que um usuário da
@@ -94,11 +106,15 @@ origem do `organization_id` do token para o corpo. As duas têm de derrubar a su
 
 **Prova de aceite do Princípio VIII.** Cronometrada, em instalação fresca, sem suporte humano.
 
-1. Instale do zero (o caminho do `install.sh`).
-2. Cronômetro começa no **login**.
+1. **Conta nova em banco fresco** (`baseline.sql` + `bootstrap-owner`), não instalação nova — a
+   v2.2.0 redefiniu "fresco" como conta, e aposentou o kit self-host.
+2. Cronômetro começa no **cadastro** (v2.2.0 moveu o início do relógio; era o login).
 3. Conecte o canal e mande uma mensagem real de outro celular.
 4. Cronômetro para na **primeira resposta do agente**.
 5. Alvo: **≤10 minutos**, e **sem regressão** contra a medição anterior a esta feature.
+   ⚠️ **Essa medição de base não existe registrada em lugar nenhum.** Ou ela é levantada antes
+   (rodando a jornada com `GATEWAY_INBOUND_ENABLED=false`), ou "sem regressão" não é verificável e
+   o critério vira opinião. Ver T065.
 6. Conte os passos de tela antes e depois da feature. Diferença esperada: **zero**.
 
 Se aparecer qualquer tela, campo ou instrução mencionando "gateway", a feature **falhou** este
@@ -133,9 +149,17 @@ buscar o host externo e o teste tem que ficar vermelho.
 
 ## 7. SC-010 — rajada
 
+**Ambiente, além do §0**: Upstash configurado (sem ele o teto de taxa degrada para por-processo e a
+rajada não prova nada sobre produção — `plan.md`, risco 5); um agente com chave de LLM (senão não
+existe "ritmo de resposta do agente" para medir); e um emissor capaz de 200 msg/60s. **O teto de
+taxa fica LIGADO** — rajada provada com o limite desligado não prova nada.
+
 1. Dispare 200 mensagens em 60 segundos.
 2. Confirme: 200 no inbox, zero duplicatas, e o ritmo de resposta do agente ainda obedecendo os
    limites anti-banimento existentes.
+
+**Sabotagem que tem de reprovar**: remova a captura de `23505` no insert de `messages` — a rajada
+passa a produzir duplicatas e o passo 2 tem que ficar vermelho.
 
 ---
 

@@ -32,8 +32,9 @@ o anti-pattern "duplicação sem source of truth".
 
 ## 2. O que muda no schema (a tripla obrigatória)
 
-Migration `20260808_______0119_gateway_inbound.sql` + apêndice idempotente no `baseline.sql` +
-linha no `MANIFEST.md`. Próximo número da sequência medido: **0116**.
+Migration `20260808150000_0119_gateway_inbound.sql` + apêndice idempotente no `baseline.sql` +
+linha no `MANIFEST.md`. *(Nasceu como `0116`. Renumerada para `0119` em 2026-08-08, no merge da
+`main`: a spec 002 já tinha ocupado 0116–0118. A faixa desta spec é **0119–0122**.)*
 
 ### 2.1 `channel_sessions.provider` — estender vocabulário
 

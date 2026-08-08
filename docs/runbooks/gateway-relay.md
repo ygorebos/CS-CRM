@@ -1,7 +1,13 @@
 # Runbook — gateway multicanal em modo relay
 
-**Para quem**: quem opera uma instalação do DeskcommCRM e precisa entender, ligar ou diagnosticar
-o recebimento de mensagens pelo gateway.
+**Para quem**: quem opera o DeskcommCRM e precisa entender, ligar ou diagnosticar o recebimento de
+mensagens pelo gateway.
+
+> ⚠️ **O gateway NÃO faz parte do deploy do CRM** (Princípio XIV: serviço único, compartilhado,
+> sem réplica, com ciclo próprio). Ele não entra no `docker-compose.prod.yml` e seu endereço é
+> **configuração**. Os `127.0.0.1:8090` que aparecem adiante são do **ambiente de
+> desenvolvimento**, onde o perfil `gateway` do compose sobe uma cópia local — nunca a
+> configuração de produção. Copiá-los para produção é o anti-pattern nº 16 do `CLAUDE.md`.
 
 **Spec**: [`specs/001-migracao-waha-uazapi/`](../../specs/001-migracao-waha-uazapi/spec.md) ·
 **Contrato**: [`contracts/gateway-inbound-v1.md`](../../specs/001-migracao-waha-uazapi/contracts/gateway-inbound-v1.md)
@@ -22,8 +28,15 @@ faz isso é o CRM, pelo caminho dele. O gateway entrega o envelope e sai.
 O gateway nasceu dentro de outro produto, onde ele **persistia** o que recebia num banco próprio.
 Aqui isso não serve: ninguém leria aquele banco, e ele seria mais uma peça para o operador manter.
 
-Modo relay é o gateway **normalizando e entregando, sem persistir**. É o que permite embarcá-lo na
-instalação do CRM sem arrastar um banco extra junto.
+Modo relay é o gateway **normalizando e entregando, sem persistir**. É o que permite que a entrega
+ao CRM não dependa do banco de outro produto.
+
+> A redação anterior dizia "é o que permite embarcá-lo na instalação do CRM". O modo continua
+> certo; a justificativa caiu com o Princípio XIV. **E há um limite conhecido**: hoje
+> `GATEWAY_MODE=relay` só dispensa as variáveis de Supabase no boot — nenhum handler consulta
+> `IsRelay()`, e o caminho de resolução de conexão continua indo ao banco do outro produto. Ou
+> seja: relay evita a **escrita**, não a **leitura**. Medido em 2026-08-08; é o que bloqueia as
+> últimas provas desta spec e a frente 1 da [spec 004](../../specs/004-envio-pelo-gateway/spec.md).
 
 > Sem esse modo o processo **não sobe**: `internal/config/config.go` exige `SUPABASE_URL` e
 > `SUPABASE_SERVICE_ROLE_KEY` como obrigatórias e entra em pânico sem elas.
@@ -33,7 +46,7 @@ instalação do CRM sem arrastar um banco extra junto.
 | Variável | Padrão | O que faz |
 |---|---|---|
 | `GATEWAY_INBOUND_ENABLED` | `false` | Liga a rota de recebimento nova. Desligado por padrão: instalação existente continua no caminho WAHA legado. |
-| `GATEWAY_BASE_URL` | vazio | Base do gateway na rede interna. **Obrigatória quando a rota está ligada — o app não sobe sem ela.** |
+| `GATEWAY_BASE_URL` | vazio | Endereço do gateway, como **configuração** — nunca presumido. **Obrigatória quando a rota está ligada: o app não sobe sem ela.** |
 | `GATEWAY_MAX_BODY_BYTES` | `10485760` (10 MiB) | Teto do corpo da entrega. |
 | `GATEWAY_MAX_MEDIA_BYTES` | `104857600` (100 MiB) | Teto do anexo baixado. |
 | `GATEWAY_INTERNAL_TOKEN` | vazio | Credencial com que o CRM se autentica **ao baixar anexo** do gateway (direção CRM → gateway, oposta à da entrega). Vazia: o download vai sem `Authorization`, o que só funciona em gateway sem token. Não derruba o boot — mídia indisponível não pode virar sistema fora do ar. |
@@ -125,7 +138,7 @@ troca é segura em produção.
 Conexão criada depois desta feature nasce com `ingest_path` seguindo o interruptor global: com
 `GATEWAY_INBOUND_ENABLED=true` ela nasce `'gateway'`; desligado, nasce `'legacy'`
 (`lib/gateway/caminho-de-ingestao.ts`). O default `'legacy'` da coluna continua valendo **só** para
-as linhas que já existiam quando a migration `0116` foi aplicada — mudá-las em massa seria virar a
+as linhas que já existiam quando a migration `0119` foi aplicada — mudá-las em massa seria virar a
 chave de todo mundo sem aviso.
 
 Nascer sempre `'gateway'` seria pior que o default: com o interruptor desligado, a conexão apontaria

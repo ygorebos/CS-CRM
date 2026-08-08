@@ -123,7 +123,7 @@ export async function POST(req: NextRequest): Promise<Response> {
       webhook_secret_encrypted: segredoCifrado,
       // Conexão nova nasce no caminho que a instalação usa de verdade. O
       // default 'legacy' da coluna vale para as linhas que já existiam quando a
-      // 0116 rodou; herdá-lo aqui deixaria o gateway de pé e sem uso.
+      // 0119 rodou; herdá-lo aqui deixaria o gateway de pé e sem uso.
       ingest_path: caminhoDeIngestaoParaConexaoNova(),
       status: "STARTING",
       last_status_change_at: new Date().toISOString(),

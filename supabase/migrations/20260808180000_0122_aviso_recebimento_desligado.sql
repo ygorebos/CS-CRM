@@ -1,4 +1,4 @@
--- 0119 — conexão migrada para o gateway com o recebimento DESLIGADO (spec 001, T037/T059)
+-- 0122 — conexão migrada para o gateway com o recebimento DESLIGADO (spec 001, T037/T059)
 --
 -- O modo de falha que este kind torna visível é o mais silencioso da feature
 -- inteira, e é de CONFIGURAÇÃO, não de queda:
