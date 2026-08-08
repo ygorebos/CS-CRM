@@ -211,7 +211,13 @@ reavaliado antes de qualquer investimento adicional.
 **Independent Test**: emissor HTTP real dispara as sete requisições da tabela do `quickstart.md` §3.
 
 - [ ] T040 [TEST] [P] [US3] `tests/invariants/gateway-inbound-autenticidade.test.ts` — as sete requisições da tabela do quickstart §3, cada uma provando que **nada** foi gravado quando recusada
-- [ ] T041 [TEST] [P] [US3] `tests/invariants/gateway-inbound-isolamento.test.ts` — duas organizações recebendo ao mesmo tempo; usuário da org A enxerga **zero** linhas da org B em `messages`, `conversations` e `contacts`, **com caso de controle** provando antes que as linhas da org B existem
+- [x] T041 [TEST] [P] [US3] `tests/invariants/gateway-inbound-isolamento.test.ts` — duas organizações recebendo ao mesmo tempo; usuário da org A enxerga **zero** linhas da org B em `messages`, `conversations` e `contacts`, **com caso de controle** provando antes que as linhas da org B existem
+
+  > **A leitura é feita com claims de JWT, nunca pelo service role** — o service role bypassa RLS,
+  > então medir por ele diria o que o servidor consegue ver, não o que o usuário vê. E cada caso de
+  > "vê zero" tem o par "vê as próprias": zero sozinho passaria também com a RLS negando tudo, que
+  > é bug de produto com cara de teste verde. Sabotagem confirmada: abrir `messages_select` para
+  > `using (true)` no baseline deixa 3 dos 5 casos vermelhos.
 - [ ] T042 [US3] Garantir no ingest que o `organization_id` vem sempre da linha de `channel_sessions` resolvida pelo token, e que qualquer `organization_id` presente no corpo é **ignorado** e a tentativa registrada
 - [ ] T043 [US3] Fazer `webhook_events_log` registrar recusa com motivo suficiente para reconstruir o caso sem log de aplicação (SC-012)
 - [ ] T044 [US3] Rodar `pnpm test:db` inteiro e confirmar que os invariantes novos entram no job `invariants` (obrigatório na branch protection)
