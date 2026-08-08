@@ -13,6 +13,7 @@ import { apiClient } from "@/lib/api/client";
 import type { RotuloDoEscopo } from "@/lib/vocabulary/knowledge-scope";
 
 import {
+  CAMINHOS_DO_CATALOGO,
   LEGENDA_DE_ORIGEM,
   LIMIAR_DA_BUSCA,
   LISTA_TRUNCADA,
@@ -21,6 +22,7 @@ import {
   SUBTITULO,
   VAZIO_TEXTO,
   VAZIO_TITULO,
+  acaoDeMaterial,
   avisoDeAlternancia,
   explicacaoDoEstado,
   filtrarEscopos,
@@ -165,14 +167,21 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
                       </Badge>
                     </div>
                     <p className="mt-1 text-sm text-text-muted">{explicacaoDoEstado(escopo)}</p>
-                    {escopo.is_active && escopo.materials_count === 0 && (
-                      <Link
-                        href="/app/ai/knowledge/sources"
-                        className="mt-1 inline-block text-sm font-medium text-accent underline underline-offset-4"
-                      >
-                        Carregar material
-                      </Link>
+                    {/*
+                      T091 — a recusa dita ANTES do clique. Quem veio do catálogo não é
+                      editável (a rota responde `403 escopo_do_catalogo_nao_editavel`), e
+                      descobrir isso por erro é descobrir tarde. A frase vem com as duas
+                      saídas; o link abaixo é a porta da segunda.
+                    */}
+                    {escopo.origin === ORIGEM_CATALOGO && (
+                      <p className="mt-1 text-sm text-text-muted">{CAMINHOS_DO_CATALOGO}</p>
                     )}
+                    <Link
+                      href={acaoDeMaterial(escopo).href}
+                      className="mt-1 inline-block text-sm font-medium text-accent underline underline-offset-4"
+                    >
+                      {acaoDeMaterial(escopo).texto}
+                    </Link>
                   </div>
 
                   {/*

@@ -97,6 +97,50 @@ export function rotuloDaOrigem(origem: EscopoDoTenant["origin"]): string {
   return origem === ORIGEM_CATALOGO ? "Já vem no sistema" : "Você adicionou";
 }
 
+/**
+ * Os DOIS caminhos que o corretor tem sobre o que veio pronto (T091, FR-008 e FR-035).
+ *
+ * O contrato responde `403 escopo_do_catalogo_nao_editavel` a quem tenta mudar o que é do
+ * fabricante. Um 403 é a hora errada de descobrir isso: quem já clicou já formou a
+ * expectativa, e a recusa depois do gesto é o que faz o usuário achar que o produto está
+ * quebrado. Então a tela **diz antes**, permanentemente, na linha do próprio item — e diz
+ * as duas saídas que existem, porque "não pode editar" sozinho é um beco:
+ *
+ *  1. **desligar** — o material fica inerte só para este tenant (FR-008);
+ *  2. **sobrepor** — carregar material próprio, que **vence** o do catálogo quando os dois
+ *     falam do mesmo assunto (FR-035, desempate por camada).
+ *
+ * A segunda é a que quase ninguém adivinharia sozinho, e é a que resolve o caso real:
+ * "o telefone que veio aqui está errado para a minha regional".
+ */
+export const CAMINHOS_DO_CATALOGO =
+  "O que já vem no sistema você não altera nem apaga. Tem dois caminhos: desligar aqui, ou carregar material seu — quando os dois falarem do mesmo assunto, vale o seu.";
+
+/**
+ * O link de ação da linha, e o texto dele.
+ *
+ * Três casos, em ordem de urgência:
+ *
+ *  - **ligado e sem material nenhum**: o pior estado da tela (o interruptor está certo e o
+ *    agente continua sem ter o que dizer). O convite é seco: "Carregar material".
+ *  - **veio do catálogo**: o caminho de sobreposição de `CAMINHOS_DO_CATALOGO` precisa de
+ *    uma porta, senão continua sendo uma frase que ninguém sabe onde executar.
+ *  - **próprio, já com material**: acrescentar mais é o gesto natural, e o link o encurta.
+ *
+ * O destino leva a operadora no endereço para o formulário do outro lado já vir com ela
+ * escolhida — a alternativa é o corretor chegar lá e ter de lembrar de onde veio.
+ */
+export function acaoDeMaterial(escopo: EscopoDoTenant): { texto: string; href: string } {
+  const href = `/app/ai/knowledge/sources?escopo=${escopo.id}`;
+  if (escopo.is_active && escopo.materials_count === 0) {
+    return { texto: "Carregar material", href };
+  }
+  if (escopo.origin === ORIGEM_CATALOGO) {
+    return { texto: `Carregar material seu sobre ${escopo.display_name}`, href };
+  }
+  return { texto: `Carregar mais material sobre ${escopo.display_name}`, href };
+}
+
 // ---------------------------------------------------------------------------
 // As frases
 // ---------------------------------------------------------------------------
@@ -167,9 +211,15 @@ export const VAZIO_TEXTO =
 
 export const SEM_RESULTADO = "Nenhum resultado para o que você digitou.";
 
-/** O aviso do teto de leitura. Ver o comentário do `LIMITE_DA_TELA` em `page.tsx`. */
+/**
+ * O aviso do teto de SEGURANÇA — não de um limite de produto. Ver `TETO_DE_SEGURANCA`.
+ *
+ * A frase anterior mandava usar a busca para chegar aos demais, e isso era mentira: a
+ * busca filtra o que já veio, então o que ficou de fora da leitura não aparecia por
+ * nenhum caminho. Aviso que aponta uma saída inexistente é pior que aviso nenhum.
+ */
 export const LISTA_TRUNCADA =
-  "A lista está mostrando os primeiros itens em ordem alfabética. Use a busca para chegar aos demais.";
+  "A lista ficou grande demais para mostrar de uma vez. O que está aqui são os primeiros, em ordem alfabética — avise o suporte se faltar algum.";
 
 /**
  * Toda frase que esta tela mostra, num lugar só — é o que o teste de jargão varre.
@@ -179,8 +229,49 @@ export const LISTA_TRUNCADA =
 export const TEXTO_FIXO_DA_TELA: readonly string[] = [
   SUBTITULO,
   LEGENDA_DE_ORIGEM,
+  CAMINHOS_DO_CATALOGO,
   VAZIO_TITULO,
   VAZIO_TEXTO,
   SEM_RESULTADO,
   LISTA_TRUNCADA,
 ];
+
+// ---------------------------------------------------------------------------
+// Leitura da lista (T100 — N operadoras, sem teto de tela)
+// ---------------------------------------------------------------------------
+
+/**
+ * Quantas linhas cada leitura traz. Não é o teto da tela: é o tamanho do balde.
+ *
+ * A página lê em lotes e **continua lendo enquanto vier lote cheio**, de modo que o
+ * número de operadoras que cabem na tela é o número que existe no banco (FR-003, US4
+ * cenário 3). Até T100 a página fazia UMA leitura de 200 e avisava que tinha cortado —
+ * o corretor com a operadora 201 simplesmente não a via, e a busca não a alcançava porque
+ * ela nunca tinha chegado ao browser.
+ */
+export const TAMANHO_DA_LEITURA = 200;
+
+/**
+ * Onde a leitura para, aconteça o que acontecer.
+ *
+ * Não é limite de produto — é o que impede um defeito de paginação (ou uma tabela que
+ * cresceu sem ninguém olhar) de virar uma página que nunca termina de carregar. Quando
+ * ele é atingido a tela **diz** (`LISTA_TRUNCADA`); silêncio aqui seria a mesma falha
+ * silenciosa que a feature inteira existe para eliminar.
+ */
+export const TETO_DE_SEGURANCA = 5_000;
+
+/** A faixa (`.range()`) de uma leitura, contando de zero. */
+export function faixaDaLeitura(pagina: number): { de: number; ate: number } {
+  const de = pagina * TAMANHO_DA_LEITURA;
+  return { de, ate: de + TAMANHO_DA_LEITURA - 1 };
+}
+
+/**
+ * Continua lendo? Sim enquanto o último lote veio CHEIO — lote cheio significa que pode
+ * haver mais — e enquanto o teto de segurança não foi alcançado.
+ */
+export function deveLerMais(recebidosNaUltimaLeitura: number, totalLido: number): boolean {
+  if (recebidosNaUltimaLeitura < TAMANHO_DA_LEITURA) return false;
+  return totalLido < TETO_DE_SEGURANCA;
+}

@@ -2,9 +2,9 @@ import { redirect } from "next/navigation";
 
 import {
   COLUNAS_DO_ESCOPO,
-  LIMITE_MAXIMO,
   contarMateriais,
   projetarEscopo,
+  type ContagemDeMateriais,
   type EscopoDoTenant,
   type LinhaDeEscopo,
 } from "@/app/api/v1/knowledge-scopes/_escopos";
@@ -14,6 +14,12 @@ import { createClient } from "@/lib/supabase/server";
 import { resolverRotuloDoEscopo } from "@/lib/vocabulary/knowledge-scope";
 
 import { EscoposClient } from "./_client";
+import {
+  TAMANHO_DA_LEITURA,
+  TETO_DE_SEGURANCA,
+  deveLerMais,
+  faixaDaLeitura,
+} from "./_regras";
 
 export const dynamic = "force-dynamic";
 
@@ -47,15 +53,18 @@ export const dynamic = "force-dynamic";
  */
 
 /**
- * Teto de leitura da página, igual ao máximo que a rota aceita numa chamada.
+ * ## T100 — por que esta página lê em lote até acabar
  *
- * O recorte editorial do catálogo é deliberadamente pequeno — poucas operadoras, produtos
- * de uma região (FR-041) —, então paginar esta tela seria construir uma engrenagem para um
- * caso que o desenho não prevê. O que NÃO se faz é esconder o corte: quando ele acontece, a
- * tela diz que está mostrando os primeiros e oferece a busca.
+ * Ela lia UMA vez, no máximo `LIMITE_MAXIMO` linhas, e avisava que tinha cortado. Isso é
+ * um teto de tela, e FR-003/US4 cenário 3 dizem o contrário: o corretor vê **todas** as
+ * operadoras, com o estado de cada uma, sem limite de quantas cabem. O corte era pior do
+ * que parecia — a busca desta tela filtra o que já veio, então a operadora que ficou de
+ * fora da leitura não era alcançável por caminho nenhum.
+ *
+ * O laço lê `TAMANHO_DA_LEITURA` por vez e continua enquanto vier lote cheio. O
+ * `TETO_DE_SEGURANCA` que o encerra não é limite de produto: é a rede que impede um
+ * defeito de paginação de virar página infinita — e, quando ele é atingido, a tela diz.
  */
-const LIMITE_DA_TELA = LIMITE_MAXIMO;
-
 export default async function EscoposDeConhecimentoPage() {
   const user = await requireAuth();
   const activeOrg = await resolveActiveOrg(user);
@@ -79,18 +88,36 @@ export default async function EscoposDeConhecimentoPage() {
   //
   // A ordem é alfabética e NÃO leva `is_active` em conta de propósito: uma lista que se
   // reordena a cada clique faria o corretor perder de vista a linha que ele acabou de mexer
-  // — e clicar na errada em seguida.
-  const { data, error } = await supabase
-    .from("knowledge_scopes")
-    .select(COLUNAS_DO_ESCOPO)
-    .eq("organization_id", activeOrg.orgId)
-    .order("display_name", { ascending: true })
-    // +1 só para saber que houve corte, sem um `count` que varre a tabela.
-    .limit(LIMITE_DA_TELA + 1);
+  // — e clicar na errada em seguida. O desempate por `id` existe porque duas operadoras
+  // podem ter o mesmo nome: sem ele, a ordem entre lotes não é estável e uma linha poderia
+  // aparecer duas vezes enquanto outra some.
+  const linhas: LinhaDeEscopo[] = [];
+  let error: unknown = null;
+
+  for (let pagina = 0; ; pagina++) {
+    const { de, ate } = faixaDaLeitura(pagina);
+    const resposta = await supabase
+      .from("knowledge_scopes")
+      .select(COLUNAS_DO_ESCOPO)
+      .eq("organization_id", activeOrg.orgId)
+      .order("display_name", { ascending: true })
+      .order("id", { ascending: true })
+      .range(de, ate);
+
+    if (resposta.error) {
+      error = resposta.error;
+      break;
+    }
+
+    const lote = (resposta.data ?? []) as unknown as LinhaDeEscopo[];
+    linhas.push(...lote);
+    if (!deveLerMais(lote.length, linhas.length)) break;
+  }
 
   // Falha de leitura NÃO cai no estado vazio: "nada por aqui ainda" e "não consegui ler"
   // são a mesma tela para o corretor, e ele agiria em cima da primeira — concluindo que a
-  // instalação não trouxe nada, quando o que houve foi um erro.
+  // instalação não trouxe nada, quando o que houve foi um erro. Falha no meio da leitura
+  // também cai aqui: mostrar meia lista sem dizer nada esconderia operadora que existe.
   if (error) {
     return (
       <div className="flex h-full flex-col gap-6 p-6">
@@ -104,12 +131,21 @@ export default async function EscoposDeConhecimentoPage() {
     );
   }
 
-  const linhas = (data ?? []) as unknown as LinhaDeEscopo[];
-  const truncado = linhas.length > LIMITE_DA_TELA;
-  const pagina = truncado ? linhas.slice(0, LIMITE_DA_TELA) : linhas;
+  // A leitura só para no teto de segurança — e aí, sim, a tela avisa.
+  const truncado = linhas.length >= TETO_DE_SEGURANCA;
 
-  const contagens = await contarMateriais(supabase, activeOrg.orgId, pagina);
-  const escopos: EscopoDoTenant[] = pagina.map((linha) =>
+  // A contagem vai em lotes do mesmo tamanho da leitura: `contarMateriais` monta um
+  // `in (...)` com os ids que recebe, e mandar milhares de uma vez estouraria o tamanho da
+  // requisição — que é uma falha que só aparece na instalação com muitas operadoras.
+  const contagens = new Map<string, ContagemDeMateriais>();
+  for (let i = 0; i < linhas.length; i += TAMANHO_DA_LEITURA) {
+    const lote = linhas.slice(i, i + TAMANHO_DA_LEITURA);
+    for (const [id, contagem] of await contarMateriais(supabase, activeOrg.orgId, lote)) {
+      contagens.set(id, contagem);
+    }
+  }
+
+  const escopos: EscopoDoTenant[] = linhas.map((linha) =>
     projetarEscopo(linha, contagens.get(linha.id)),
   );
 
