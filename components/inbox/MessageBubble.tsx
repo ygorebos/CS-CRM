@@ -8,12 +8,20 @@ import type { Message } from "@/lib/types/messaging";
 import { CitationButton } from "@/components/ai/CitationButton";
 import { MediaRenderer } from "@/components/inbox/media/MediaRenderer";
 import {
+  deveMostrarOrigem,
   extractCitations,
   isAiGeneratedMessage,
 } from "@/lib/ai/citations/types";
 
 interface Props {
   message: Message;
+  /**
+   * @deprecated Não decide mais se a origem aparece (spec 002, FR-022 · T106).
+   *
+   * A rastreabilidade saiu de trás do modo de depuração: o corretor chega ao trecho sem
+   * ativar interruptor nenhum. A prop continua aceita para não quebrar os chamadores, e
+   * é ignorada de propósito — removê-la da assinatura é limpeza de outro commit.
+   */
   debugCitations?: boolean;
 }
 
@@ -39,8 +47,13 @@ export function MessageBubble({ message, debugCitations }: Props) {
   const isBareSticker = hasMedia && message.type === "sticker" && !message.body;
   const aiGenerated = isAiGeneratedMessage(message.metadata);
   const citations = extractCitations(message.metadata);
-  const showCitationButton =
-    isOutbound && aiGenerated && (debugCitations ?? false);
+  // FR-022 / T106: a origem aparece por padrão. A regra vive em `deveMostrarOrigem`,
+  // testada em `lib/ai/citations/origem.test.ts` — e não recebe `debugCitations`, que é
+  // como se garante que nenhum interruptor volte a decidir isto por acidente.
+  const showCitationButton = deveMostrarOrigem({
+    isOutbound,
+    metadata: message.metadata,
+  });
   const senderLabel = (() => {
     if (!isOutbound) return null;
     if (message.sent_via === "ai") return "IA";

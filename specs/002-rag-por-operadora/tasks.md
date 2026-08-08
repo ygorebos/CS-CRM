@@ -329,9 +329,9 @@ sozinha na tela, com o debug desligado.
 
 - [ ] T104 [US3] Criar migration `supabase/migrations/<ts>_0126_rastreabilidade_validade_lacunas.sql` com `message_groundings` (tenant-aware, `layer`, `source_ref` com a cópia histórica), espelhá-la no apêndice de `supabase/baseline.sql` e registrar no MANIFEST
 - [ ] T105 [US3] Gravar `message_groundings` no mesmo caminho que envia a mensagem, em `lib/agent-engine/agent/inbound-turn.ts` — ou a resposta é rastreável, ou não é enviada (FR-024) Também é o que cumpre FR-021: a âncora vira registro permanente, não campo de conveniência.
-- [ ] T106 [US3] Tirar a citação de trás do toggle de depuração em `components/inbox/MessageBubble.tsx` (hoje `:40-43`) e `hooks/ai/useDebugToggle.ts`
-- [ ] T107 [US3] Exibir em `components/inbox/MessageBubble.tsx` o texto do trecho, o material, o escopo, a data de atualização **e a camada** de origem (FR-022, FR-039)
-- [ ] T108 [US3] Tratar em `components/inbox/MessageBubble.tsx` a ausência de origem em resposta que **não** é de assistência como normal, sem sinalizar problema (US3 cenário 4)
+- [X] T106 [US3] Tirar a citação de trás do toggle de depuração em `components/inbox/MessageBubble.tsx` (hoje `:40-43`) e `hooks/ai/useDebugToggle.ts`
+- [X] T107 [US3] Exibir em `components/inbox/MessageBubble.tsx` o texto do trecho, o material, o escopo, a data de atualização **e a camada** de origem (FR-022, FR-039)
+- [X] T108 [US3] Tratar em `components/inbox/MessageBubble.tsx` a ausência de origem em resposta que **não** é de assistência como normal, sem sinalizar problema (US3 cenário 4) **Feito sem depender da tabela nova**: a T026 já grava a âncora em `messages.metadata` no formato da F5, com `snippet` (texto do trecho), `layer` e o `source_ref` (título, escopo e data) — que é cópia histórica embutida na mensagem. A regra virou `deveMostrarOrigem`/`descreverOrigem` em `lib/ai/citations/types.ts`, com suíte própria; a tela só a consome. T104/T105 seguem necessárias para consultar âncora independentemente da mensagem, não para FR-022/FR-039.
 
 **Checkpoint**: o erro vira corrigível, e o corretor sabe a quem cobrar a correção.
 
