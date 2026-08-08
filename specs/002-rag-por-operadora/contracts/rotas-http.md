@@ -62,6 +62,21 @@ mudar qualquer outro campo de um espelho.
 Carrega material próprio (FR-004, FR-007). `multipart/form-data` para arquivo, JSON para texto
 colado.
 
+**`{id}` é o UUID do escopo OU a palavra reservada `todas`.** Escrito ao construir a rota, porque
+o contrato não dizia como se declara "vale para todas as operadoras" nesta superfície — e o
+`data-model.md` recusa, com razão, um escopo fictício "todos" como LINHA em `knowledge_scopes`
+(ele apareceria na lista do corretor e no filtro do contato como se fosse uma operadora).
+
+A palavra no segmento da URL resolve sem criar linha nenhuma. E resolve um segundo problema, que
+é o ponto de FR-001: **a declaração de escopo mora no PATH, nunca no corpo**. Um corpo sem
+`scope_id` e sem `applies_to_all` é indistinguível de um corpo em que a tela esqueceu de mandá-los,
+e o CHECK do banco devolveria um erro que ninguém entende. No path, a ausência é impossível: ou há
+um segmento, ou não há rota. Qualquer outro valor — incluindo o `undefined` que uma tela monta sem
+seleção — é `400 material_sem_escopo` com frase acionável.
+
+O corpo é validado como `strictObject` **sem** `scope_id`, `applies_to_all` nem `organization_id`:
+mandá-los é `422`. Declaração em dois lugares é declaração que um dia discorda de si mesma.
+
 Antes de aceitar, a rota **declara e valida** formato e tamanho máximo (FR-007). Recusa com
 `422 material_sem_texto_extraivel`, `415 formato_nao_suportado` ou `413 material_muito_grande`,
 cada uma com `message` em português dizendo o que fazer em seguida — nunca aceita para falhar
