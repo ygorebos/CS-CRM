@@ -154,12 +154,32 @@ Forma recomendada: **um repo, dois builds** (§5 da decisão), não fork literal
       fila no mesmo diretório (o reinício), drena com o banco de volta — 3/3, zero perda. O "nada
       duplicou" é do lado do CRM (idempotência por `external_id`, provada na Fase 1). A versão com
       processo real morto no meio é a §6 do quickstart (T068). **(FR-013, SC-011 parcial)**
-- [ ] **T027** Teto de taxa **por conexão** (não global, não por IP — todas as entregas vêm do mesmo
-      endereço). Um tenant não pode degradar outro. **(Princípio XIV)**
+- [X] **T027** ✅ **FEITA** (commit `68207ff`) — balde de fichas por conexão em `store.ComTeto`,
+      composto como `ComFila(ComTeto(crm))`: estouro é erro **transitório**, vira pendência de disco
+      da própria conexão e drena no ritmo do teto, enquanto as outras seguem em tempo real.
+      **Medido antes: nenhum rate limit existia no gateway, em camada nenhuma.** Default 25/s
+      sustentado, rajada 50. Sabotagem: teto desligado derruba 2 testes. **(Princípio XIV)**
 - [ ] **T028** Endpoint de reconciliação: dado uma janela, devolver o que foi entregue naquela
       conexão. É o que a T050 do lado do CRM consome. **(FR-013a)**
+      ⚠️ **Desenho decidido na análise de 2026-08-08 — a fonte é o PROVEDOR, não a memória do
+      gateway.** A reconciliação existe para achar a mensagem que *nunca chegou a existir* do lado
+      do CRM — inclusive a que o próprio gateway perdeu. Um gateway respondendo da própria memória
+      não enxerga o que nunca viu; perguntar ao upstream (uazapi `/message/find` por janela) é a
+      única fonte que enumera o que existiu independentemente do caminho de escrita.
 - [ ] **T029** Rotas de provisionamento do `gateway-provisioning-v1.md` §3–§8 — **o caminho
-      escolhido na T003**, não mais condicional. Com as duas correções que o contrato pede:
+      escolhido na T003**, não mais condicional.
+      ⚠️ **Bloqueio de desenho achado na análise de 2026-08-08, com decisão registrada:** na
+      variante CRM, o registro de conexão do gateway (credencial do provedor, base_url, estado)
+      **não tem onde morar** — `wa_connections` é do Cotador, e o papel `gateway_writer` não lê
+      tabela nenhuma do CRM (nem deve: o CRM não pode guardar credencial de provedor, contrato
+      §11). **Decisão: armazém embutido próprio do gateway** (arquivo no mesmo disco da fila, ex.
+      bbolt/SQLite), coerente com "o gateway é dono da instância" — e o resolver ganha a mesma
+      costura que o store ganhou (T029a). A alternativa 'schema próprio no Postgres do CRM' foi
+      rejeitada: embaça a linha constitucional que a v2.3.0 acabou de desenhar e acopla os deploys.
+- [ ] **T029a** Costura do **resolver**: interface com a implementação atual (lê `wa_connections`
+      do Cotador) e a da variante CRM (lê o armazém embutido da T029). Sem ela, TODA rota de envio
+      da variante CRM continua consultando o banco do Cotador — que é exatamente o vazamento entre
+      produtos que o fork existe para impedir. Com as duas correções que o contrato pede:
       comparação de token em **tempo constante** (`internal/middleware/token.go:25` usa `!=`,
       enquanto `admin.go:44` já usa `subtle.ConstantTimeCompare`) e **escopo de admin** para
       provisionar/desprovisionar — hoje um token único deixa quem envia mensagem apagar instância.
