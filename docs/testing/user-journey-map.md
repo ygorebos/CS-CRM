@@ -505,8 +505,8 @@ que exigem número de WhatsApp, gateway de pé e app servido:
 
 | Caso | Task | O que falta |
 |---|---|---|
-| J2.9 — mensagem real no inbox pela tela | T022 / T030 | celular real + p95 de 20 envios |
-| J2.10 — anexo abre pela tela | T047 | os três anexos, com receiver real |
+| J2.9 — mensagem real no inbox pela tela | T030 | celular real + p95 de 20 envios. **T022 feita** (`de14f3ad`): a spec de tela existe e é verde num stack isolado |
+| J2.10 — anexo abre pela tela | — | **T047 feita** (`de14f3ad`) |
 | CRM fora do ar 5 min sem perder mensagem | T038 | derrubar e subir com o gateway entregando |
 | Rajada de 200 mensagens em 60s (SC-010) | T038a | com o teto de requisições **ligado** |
 | Rollback de uma conexão sem perder o que está em voo | T064 | virar a chave nos dois sentidos em ambiente vivo |
@@ -516,3 +516,56 @@ que exigem número de WhatsApp, gateway de pé e app servido:
 de cobertura de UMA jornada. Espalhado pelas tasks, "falta provar pela tela" vira seis linhas
 distantes umas das outras, e a soma delas — *a jornada de recebimento nunca foi percorrida inteira
 por uma pessoa* — não aparece em lugar nenhum.
+
+---
+
+## Envio e conexão pelo gateway — cobertura e o que depende de ambiente (spec 004, 2026-08-08)
+
+A frente de **envio** (F2), a de **conexão** (F3) e as transversais estão implementadas e cobertas
+por teste automatizado. O que segue aberto é **execução medida**: as provas que exigem número de
+WhatsApp real, gateway de pé e app servido — e nenhuma delas é dúvida de projeto.
+
+**O que a rede já vigia (com a sabotagem que a torna verdadeira):**
+
+| Promessa | Onde | Sabotagem que a derruba |
+|---|---|---|
+| Envio migrado sai com endereço | `endereco-da-conexao-no-envio.test.ts` | resolver o ref pela coluna errada ⇒ 1 vermelho |
+| Recuperação não fala o dialeto errado | `agent-watchdog.test.ts` | forçar o canal antigo no redrive ⇒ 2 vermelhos |
+| Aceite é provisório | `messages-handler-desfechos.test.ts` | gravar `delivered` na resposta síncrona ⇒ 6 vermelhos |
+| Mídia sobrevive à fila | idem | TTL de volta a 600 s ⇒ 1 vermelho |
+| Grupo impedido com motivo verdadeiro | idem | `error_code` fixo ⇒ 1 vermelho |
+| Legenda não some | `adapters/gateway.test.ts` | descartar `media.caption` ⇒ 1 vermelho |
+| Queda do gateway é audível | `aviso-de-gateway-fora.test.ts` | 502 contando como "no ar" ⇒ 1 vermelho |
+| Parear é ato de admin nas duas portas | `rbac-matrix.test.ts` | rebaixar o papel ⇒ 2 vermelhos |
+| Conexão nasce no caminho da instalação | `portas-de-conexao-convergem.test.ts` | remover `ingest_path` ⇒ 1 vermelho |
+| Criar canal é tudo-ou-nada | `conexao-tudo-ou-nada.test.ts` | remover a compensação ⇒ 1 vermelho |
+| QR não é refeito no escuro | `pareamento-com-validade.test.ts` | ignorar a validade ⇒ 3 vermelhos |
+| Migrar/voltar não toca os demais | `canal-reversivel-e-auditado.test.ts` | remover o filtro de canal ⇒ 1 vermelho |
+| Reconciliar não é silencioso | `reconciliacao-nao-e-silenciosa.test.ts` | nunca abrir o aviso ⇒ 1 vermelho |
+| A tela não nomeia provedor | `tela-nao-nomeia-provedor.test.ts` | devolver o nome à cópia ⇒ 1 vermelho |
+| Nenhum envio escapa das travas | `nenhum-envio-escapa-das-travas.test.ts` | envio novo fora da cadeia ⇒ 1 vermelho |
+| Fila não enche o disco | `gateway_go/internal/entrega/fila_teto_test.go` | remover o teto ⇒ 1 vermelho |
+
+**J3 — conectar um número pelo gateway (pela TELA).** A spec existe:
+`tests/e2e/conexao-pelo-gateway.spec.ts`. Ela **não roda no CI** e está declarada como tal no
+`e2e.yml`, porque exige o gateway de pé com `STORE_ALVO=crm` e `GATEWAY_ADMIN_TOKEN` no `.env` do
+CRM. O primeiro caso da spec **afirma essa pré-condição** em vez de assumi-la — sem as duas
+variáveis a Central cai no caminho antigo, e a spec passaria medindo o canal errado, que é o pior
+desfecho possível para um teste.
+
+**O que ainda depende de ambiente real:**
+
+| Caso | Task | O que falta |
+|---|---|---|
+| 20 envios reais, p95 do clique à chegada ≤ 5 s | T060 | número de WhatsApp + gateway de pé |
+| Estado final alcançado em ≥ 99% de 20 | T061 | idem, com a tela aberta durante |
+| Rajada de 50: espaçamento e janela | T062 (metade) | idem. **A metade mecânica já está verde** |
+| Conta nova, QR ≤ 15 s, jornada ≤ 10 min | T063 | banco fresco + app servido + gateway |
+| 10 falhas de provisionamento sem órfão | T065 | provedor recusando de verdade |
+| Reverter no meio de tráfego | T066 | tráfego real atravessando a virada |
+| Imagem, documento e áudio abrindo NO APARELHO | T067 | **celular real** — não há substituto |
+| Gateway derrubado, 100% reagendável + 1 aviso | T068 | derrubar o processo com envio em voo |
+
+**Por que isto está escrito aqui e não só no `tasks.md`.** Pelo mesmo motivo da seção da spec 001: a
+soma destas oito linhas é uma frase que nenhuma task diz sozinha — *a jornada de envio nunca foi
+percorrida inteira por uma pessoa*.

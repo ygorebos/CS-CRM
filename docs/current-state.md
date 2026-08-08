@@ -283,3 +283,22 @@ Duas lições que valem para quem mantiver este documento:
 2. **Este arquivo apodrece rápido.** O repo moveu 556 commits em poucos dias. Trate as datas
    do frontmatter como prazo de validade, não como enfeite — e prefira reconferir os números
    com os comandos citados a confiar na tabela.
+
+---
+
+## Envio e conexão pelo gateway (spec 004) — 2026-08-08
+
+**Pronto e coberto:** as três frentes (escrita direta no banco, envio, conexão) mais as
+transversais. 4 migrations (0127–0130), cada uma com a tripla completa; `pnpm test:db` verde em
+install e update.
+
+**Incompleto, e é execução — não código:** oito provas da Fase 6 dependem de ambiente real (número de
+WhatsApp, gateway de pé, app servido). A lista exata, com o que falta em cada uma, está em
+`docs/testing/user-journey-map.md`. A spec de tela `tests/e2e/conexao-pelo-gateway.spec.ts` existe e
+**não roda no CI** — está declarada como não-coberta no `e2e.yml`, com o motivo.
+
+**Antes de prometer prazo com base nesta spec:** o que não foi percorrido por uma pessoa é a jornada
+de envio inteira. Tudo abaixo dela está provado por teste; a jornada em si, não.
+
+**Config nova no deploy:** `GATEWAY_ADMIN_TOKEN` (diferente do interno de propósito — ver
+`docs/migracao-para-o-gateway.md`).

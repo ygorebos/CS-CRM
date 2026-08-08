@@ -72,8 +72,8 @@ export const metaCloudAdapter: ChannelAdapter = {
 
   resolveRecipient(input: RecipientInput): string | null {
     // Grupos: a API de grupos da Cloud é recente e não faz parte deste seam ainda.
-    // Devolver null é honesto — o chamador grava `missing_phone_number` em vez de
-    // montar um endereço que a Meta recusaria.
+    // Devolver null é honesto — o chamador grava `group_send_unsupported` (spec
+    // 004, T039) em vez de montar um endereço que a Meta recusaria.
     if (input.isGroup) return null;
     if (!input.phoneNumber) return null;
     const digits = toE164Digits(input.phoneNumber);

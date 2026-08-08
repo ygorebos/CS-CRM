@@ -56,6 +56,16 @@ export const KIND_LABEL = {
   // rota de recebimento, mas entende "está desligado" e entende que alguém
   // precisa ligar. O nome da variável fica no corpo, para quem for consertar.
   gateway_inbound_down: "O recebimento de mensagens está desligado",
+  // Fala do EFEITO ("paradas"), não da causa: "gateway" e "serviço de conexão"
+  // são palavras nossas, e quem lê a Central só precisa saber que não é ele, que
+  // nada se perdeu e que dá para responder pelo aparelho enquanto isso. O par com
+  // o de cima é deliberado — lá alguém precisa LIGAR algo; aqui não há nada que o
+  // usuário possa fazer, e prometer ação a quem não pode agir é pior que calar.
+  gateway_unreachable: "As mensagens estão paradas: o serviço de conexão não responde",
+  // Fala do que ACONTECEU com a conversa, não do mecanismo. "Reconciliação" e
+  // "divergência" são palavras nossas; o que o corretor precisa saber é que há
+  // mensagem nova em conversa antiga, e que pode ter gente esperando resposta.
+  gateway_reconciliation_gap: "Mensagens chegaram atrasadas ao histórico",
   // Diz o que FALTA, não o que o guardrail fez. "Recusa por ausência de lastro" é
   // verdade e é inútil para quem lê: o dono do negócio precisa entender que existe um
   // cliente esperando e que a solução está na mão dele — carregar o material. O motivo

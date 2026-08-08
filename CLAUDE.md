@@ -5,11 +5,11 @@
 **Este arquivo é a doutrina — a autoridade final sobre convenção e anti-pattern.** Complementos, na ordem em que ajudam:
 
 - [`AGENTS.md`](AGENTS.md) — mesmo contrato em forma portável (para Codex/Cursor/Copilot e afins). É derivado deste arquivo, não o substitui. **Ao mudar doutrina aqui, verifique se `AGENTS.md` desatualizou.**
-- [`docs/index.md`](docs/index.md) — índice dos 123 docs, com regra de precedência quando dois docs discordam. Use antes de sair varrendo `docs/`.
+- [`docs/index.md`](docs/index.md) — índice dos 147 docs, com regra de precedência quando dois docs discordam. Use antes de sair varrendo `docs/`.
 - [`docs/current-state.md`](docs/current-state.md) — o que está pronto, incompleto e quebrado. **Leia antes de estimar ou prometer qualquer coisa.**
 - [`docs/harness-audit.md`](docs/harness-audit.md) — onde a verificação tem buraco. Importante: `pnpm gov:verify` **não** cobre `test:db` nem `test:e2e` — verde ali não é prova para mudança de schema ou de UI.
 - [`docs/threat-model.md`](docs/threat-model.md) — superfície de ataque real da instância.
-- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.2.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
+- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.3.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
 
 ---
 
@@ -84,9 +84,10 @@ DeskcommCRM é um sistema operacional de vendas com agentes de IA nativos — ni
 ### Gateway (`gateway_go`) — porta de entrada de TODO tráfego
 - É o **receptor geral**: mensagens de todos os canais (WhatsApp oficial e não-oficial, Instagram Direct, o que vier) e demais webhooks. Recebe, autentica a origem, **normaliza para um envelope único** e entrega ao CRM
 - **Código novo do CRM NÃO lê payload cru de provedor** — nem WAHA, nem uazapi, nem Meta. Só envelope
-- **O gateway NUNCA escreve no banco do CRM.** Quem persiste é o CRM, com `organization_id` resolvido de fonte confiável (path token / segredo), nunca do corpo
+- **O gateway NUNCA toca tabela do CRM.** Escrever tabela crua a partir dele é proibido, sem exceção. O que a constituição **v2.3.0** passou a permitir é a **quarta superfície**: função `security definer` versionada, e só sob as seis travas do Princípio VII — (1) zero grant de tabela, nem `select`; (2) papel Postgres dedicado, **nunca** `service_role` nem segredo capaz de emitir outro papel; (3) `organization_id` resolvida **dentro do banco**, a partir da conexão pela qual a mensagem chegou — **nunca** de parâmetro nem do corpo; (4) assinatura versionada como contrato; (5) invariante em CI que reprova se o papel ganhar privilégio de tabela; (6) sem HTTP dentro da função. Falhar em **qualquer** uma torna a superfície proibida, não degradada. Desenho: [`specs/004-envio-pelo-gateway/decisao-escrita-direta.md`](specs/004-envio-pelo-gateway/decisao-escrita-direta.md)
+- **A quarta superfície é só do gateway.** Ela **não** se estende ao Cotador — a ponte com ele é contrato HTTP explícito, nada além
 - **Instância única, compartilhada, sem réplica, deploy separado.** Sem `localhost`, sem nome de serviço de compose — endereço é configuração. Não entra no `docker-compose.prod.yml` do CRM
-- **Sem réplica = SPOF declarado:** mensagem tem de sobreviver ao gateway reiniciar — retentativa durável + fila em disco do lado dele, dreno periódico do lado do CRM. Queda vira alerta pra nós **e** aviso na Central pro usuário; silêncio é proibido
+- **Sem réplica = SPOF declarado:** mensagem tem de sobreviver ao gateway reiniciar. **As duas pontas são obrigatórias**, e a do CRM muda de forma conforme o caminho: entrega por HTTP → fila de entrada com dreno periódico; escrita pela quarta superfície → **reconciliação periódica** (o CRM pergunta ao gateway o que foi entregue numa janela e grava o que faltar, idempotente). Divergência vira **alerta** — reconciliar em silêncio é proibido. **Uma ponta só é descumprimento, não escolha de custo:** a que empurra só protege contra o CRM estar fora do ar; a que puxa é a única que enxerga mensagem que nunca chegou a existir aqui. Queda vira alerta pra nós **e** aviso na Central pro usuário
 - Teto de taxa **por conexão**, nunca global nem por IP (todas as entregas vêm do mesmo endereço)
 
 ### Cobrança — não mora aqui
@@ -147,6 +148,9 @@ DeskcommCRM é um sistema operacional de vendas com agentes de IA nativos — ni
 13. Bearer plaintext armazenado no DB (deve ser hash SHA256)
 14. `console.log` deixado em código merged (use logger estruturado ou Sentry breadcrumb)
 15. Código novo do CRM lendo **payload cru de provedor** (WAHA/uazapi/Meta) em vez do envelope do gateway
+15a. Gateway tocando **tabela** do CRM — `insert`/`update`/`select` direto. Só função versionada, sob as seis travas do Princípio VII (v2.3.0). E `service_role` key ou segredo do JWT na mão do gateway é a mesma violação por outro caminho: com eles o papel dedicado vira decoração
+15b. Gateway escrevendo com o tenant vindo de **parâmetro** ou do corpo, em vez de resolvido dentro do banco pela conexão
+15c. Escrita do gateway com **uma ponta só** de durabilidade — fila no gateway sem reconciliação no CRM, ou vice-versa
 16. Supor o gateway na mesma máquina/rede/deploy (`localhost`, nome de serviço de compose, "sobe junto")
 17. Dado de cobrança (plano, assinatura, pagamento, cartão) modelado neste repo — o dono é o Cotador
 18. Mudança destrutiva de schema sem caminho de volta (renomear coluna, dropar coluna em uso) — instância única não tem versão de escape
@@ -305,7 +309,14 @@ Processo padrão (siga sempre):
 4. **Data migrations genéricas**: se a migration corrige/deduplica dados, escreva pensando em QUALQUER estado do banco — **nunca hardcode IDs de organização** (o banco é compartilhado por todos os tenants; ID fixo conserta um e ignora os outros). Repointe FKs conferindo o catálogo (`information_schema` FK map) para não perder histórico.
 5. **Registre no MANIFEST**: adicione uma linha em `supabase/migrations/MANIFEST.md` (tabela "Applied") descrevendo versão, nome e o QUÊ/PORQUÊ.
 6. **Reflita no `supabase/baseline.sql` (OBRIGATÓRIO — é o que sobe ambiente do zero e o que o gate `invariants` aplica).** O baseline é um dump `--schema-only` + um **apêndice idempotente** no fim do arquivo (blocos rotulados `-- ---- <coisa> (migration NNNN) ----`). `scripts/test-db.sh` aplica **só o baseline.sql**, em modo install (banco novo, `ON_ERROR_STOP=1`) **e** update (re-aplica em banco existente, **sem** `ON_ERROR_STOP`) — os dois têm que passar. Então toda mudança de schema pós-snapshot DEVE ser acrescentada ao apêndice, **idempotente e auto-curativa**: `add column if not exists`, `create ... if not exists`, `create or replace function`, e — se a mudança adiciona constraint — **deduplicar/corrigir os dados ANTES** de criar a constraint (senão a re-aplicação num banco com dado sujo quebra). Sem isto, o ambiente fresco não recebe a mudança e o gate reprova.
-7. **Aplique e prove**: aplique via `supabase db push` (⚠️ **não** pelo MCP autenticado do Supabase — ele aponta para o banco de produção do **Cotador**, não para o do CRM), capture o estado ANTES/DEPOIS e prove invariantes (ex.: contagem de linhas que não pode mudar). Se mexeu em contrato, regenere `lib/database.types.ts`. Valide o baseline num Postgres descartável (`pgvector/pgvector:pg17` + extensões) aplicando `install` (fresh, `ON_ERROR_STOP=1`) e `update` (re-aplicar, sem a flag) — ambos têm que passar. É o que `pnpm test:db` faz.
+7. **Aplique e prove**: aplique via `supabase db push` — **nunca por MCP**, e há duas razões independentes. **(a) Doutrinária, e vale mesmo com o alvo certo:** MCP pula a tripla obrigatória (migration versionada + apêndice no `baseline.sql` + linha no MANIFEST), então o ambiente fresco e o gate `invariants` nascem sem a mudança. **(b) Operacional:** há **dois** servidores MCP de Supabase alcançáveis daqui, e eles apontam para bancos diferentes:
+
+   | Servidor | Prefixo da ferramenta | Banco |
+   |---|---|---|
+   | `supabase-crm` (`.mcp.json` deste repo) | `mcp__supabase-crm__*` | **DeskcommCRM** — este projeto |
+   | `supabase` (autenticado no escopo do usuário) | `mcp__supabase__*` | **Cotador Simplificado, PRODUÇÃO** ☠️ |
+
+   Os dois se chamavam `supabase` até 2026-08-08 — mesmo prefixo, bancos distintos, e nada na ferramenta dizia qual era. O do projeto foi renomeado para `supabase-crm` **por isso**. Não desfaça o nome. Se for **ler** por MCP, confirme o alvo com `get_project_url` mesmo assim: nome é convenção, `project_ref` é fato. Capture o estado ANTES/DEPOIS e prove invariantes (ex.: contagem de linhas que não pode mudar). Se mexeu em contrato, regenere `lib/database.types.ts`. Valide o baseline num Postgres descartável (`pgvector/pgvector:pg17` + extensões) aplicando `install` (fresh, `ON_ERROR_STOP=1`) e `update` (re-aplicar, sem a flag) — ambos têm que passar. É o que `pnpm test:db` faz.
 8. **Backfill de dados quebrados existentes**: constraint nova falha se os dados atuais a violam — a migration (e o apêndice do baseline) deve deduplicar/corrigir ANTES de criar a constraint.
 9. **Função nova em `public` nasce EXPOSTA — revogue as DUAS origens.** Toda `create function` no schema `public` termina com:
 
@@ -334,6 +345,72 @@ Processo padrão (siga sempre):
 - `frontend-design` — UI distinta (não cair em shadcn-default genérico)
 
 ---
+
+## Planejamento acompanha a execução (constituição v2.4.0)
+
+A cada **5 tasks** avançadas — ou ao fechar uma fase, o que vier primeiro — atualize os artefatos de
+planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se o desenho mudou, e
+`docs/current-state.md` se o que está pronto/quebrado mudou.
+
+Planejamento atualizado só no fim mentiu o caminho inteiro. Quem retoma lê o plano, não o histórico
+de commits — e um plano atrasado manda a próxima sessão refazer o que já existe.
+
+## Como medir sem produzir verde falso — DOUTRINA (aprendida medindo, 2026-08-08)
+
+Uma sessão inteira de execução da Fase 6 da spec 004 produziu **cinco defeitos de produto** que
+3157 asserções unitárias não pegavam — e, no caminho, **quatro verdes falsos meus**. As regras
+abaixo são o que separou um do outro. Elas custaram caro; leia antes de escrever teste de tela ou
+medição.
+
+### 1. Leia a captura antes de supor
+
+Playwright grava `test-results/**/error-context.md` — a **página no instante da falha**, em YAML.
+Medido: cada suposição minha sobre a causa custou **uma rodada inteira** (subir ambiente, build,
+rodar); cada leitura da captura resolveu em **um minuto**. Foi ela que revelou "Sua conta exige 2FA"
+depois de eu ter errado a causa duas vezes.
+
+### 2. Ausência prova transição; presença prova chegada
+
+Esperar que a tela de desafio **apareça** como sinal de que o código foi aceito passa na hora — ela
+já está visível. O sinal certo é ela **sumir** (`toHaveCount(0)`). Trocar os dois dá verde imediato
+que não mede nada.
+
+### 3. Asserção negativa exige âncora de lugar
+
+`expect(corpo).not.toMatch(/WAHA/)` passa em **qualquer** página que não contenha o termo —
+inclusive numa que o teste nunca quis abrir. Medido: um caso ficou verde medindo a **tela de login**.
+Afirme onde está (`toHaveURL`, ou um elemento que só existe ali) **antes** de afirmar o que não vê.
+
+### 4. Cronômetro independente do laço
+
+Medir latência com `Date.now()` antes da chamada mistura a espera com a duração da anterior — e o
+primeiro intervalo não tem predecessor. Deu **95,9%** onde a verdade era **100%**. Use carimbo de
+quem não participa do laço: `created_at` do Postgres, timestamp do outro processo.
+
+### 5. Dublê responde no formato que VOCÊ escreveu
+
+Teste com dublê não prova formato de campo nem latência de sistema externo. Dois defeitos desta spec
+viviam exatamente aí: a reconciliação varrendo até `agora` (o provedor leva ~25 min para indexar) e
+o `select` sem a coluna que o próprio ramo novo precisa. **Formato e tempo de terceiro só se sabem
+medindo o terceiro.**
+
+### 6. Estado que sobrevive entre execuções é a causa favorita do "piorou sem eu mexer"
+
+Fator de MFA fica no banco; segredo TOTP vive em módulo e morre com o processo. Re-execução começa
+no desafio sem ter o segredo — 5 vermelhos depois de 2 verdes, sem nada do produto mudar. Zere o
+estado externo no `beforeAll`.
+
+### 7. Código TOTP só vale UMA vez
+
+Casos que logam em sequência caem na mesma janela de 30 s e mandam o mesmo código; o segundo é
+recusado. Ou guarde o último enviado e espere a janela virar, ou — melhor — **logue uma vez** e
+compartilhe a sessão (`mode: serial`).
+
+### 8. Recurso pago que o teste cria, o teste apaga
+
+Instância de provedor custa por unidade. Toda execução que provisiona termina com o `DELETE`, e a
+verificação é o registro vazio — não a intenção. É a mesma doutrina de compensação que a feature
+implementa; ela vale para quem a testa.
 
 ## Definition of Done
 

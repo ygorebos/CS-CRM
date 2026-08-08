@@ -1,4 +1,4 @@
--- 0117 — a conexão que não recebe nada precisa APARECER (spec 001, T017e)
+-- 0120 — a conexão que não recebe nada precisa APARECER (spec 001, T017e)
 --
 -- A entrega do gateway é fail-closed sem válvula: sem chave de verificação, a
 -- rota recusa 100% das entregas daquela conexão. O comportamento é o certo — o

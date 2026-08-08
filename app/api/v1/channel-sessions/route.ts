@@ -9,14 +9,14 @@
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
 
-import { audit } from "@/lib/audit";
 import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
-import { caminhoDeIngestaoParaConexaoNova } from "@/lib/gateway/caminho-de-ingestao";
+import { CHANNEL_PROVIDER_GATEWAY_WHATSAPP } from "@/lib/channels/capabilities";
+import { criarConexaoDeCanal, provisionarEGravarConexao } from "@/lib/channels/criar-conexao";
+import { ErroDoGateway, provisionamentoConfigurado } from "@/lib/gateway/provisionamento";
 import { createChannelSchema } from "@/lib/schemas/channels";
-import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 
@@ -68,8 +68,13 @@ export async function POST(req: NextRequest): Promise<Response> {
   if (!authz.ok) return authz.response;
   const { user, org: activeOrg } = authz;
 
-  const waha = getWahaClient();
-  if (!waha) {
+  // O provisionamento pelo gateway tem precedência quando está configurado: é
+  // ele que a instalação passa a usar. Sem ele, o caminho antigo continua
+  // valendo — a virada é por CONFIGURAÇÃO, não por release.
+  const peloGateway = provisionamentoConfigurado();
+
+  const waha = peloGateway ? null : getWahaClient();
+  if (!peloGateway && !waha) {
     return fail(
       "waha_not_configured",
       "O WhatsApp (WAHA) não está configurado neste ambiente: faltam WAHA_API_BASE_URL e/ou WAHA_API_KEY. Configure-as e tente de novo.",
@@ -94,70 +99,75 @@ export async function POST(req: NextRequest): Promise<Response> {
 
   const supabase = await createClient();
   // Nome de sessão único por canal — o hardcode `org_<8>` era 1 número por org.
+  // Aqui o usuário está ACRESCENTANDO um número aos que já tem; no onboarding a
+  // intenção é outra e o nome é fixo (ver `lib/channels/criar-conexao.ts`).
   const sessionName = `org_${activeOrg.orgId.slice(0, 8)}_${randomUUID().replace(/-/g, "").slice(0, 6)}`;
 
-  // Segredo REAL por conexão, cifrado at-rest. Antes daqui ia
-  // `Buffer.from([0])` — um byte de enfeite —, e a rota de entrega do gateway é
-  // fail-closed sem válvula: com o placeholder ela recusaria 100% das entregas
-  // desta conexão. Sem cifra disponível não se grava: conexão que nasce incapaz
-  // de verificar entrega é defeito que só aparece na primeira mensagem, longe
-  // daqui, onde ninguém liga uma coisa à outra.
-  const segredoCifrado = await provisionarSegredoDeWebhook(supabase);
-  if (!segredoCifrado) {
+  // ── TUDO-OU-NADA (T043 / FR-033, FR-012) ─────────────────────────────────
+  //
+  // A instância nasce PRIMEIRO no lado externo, e a linha do CRM depois. A ordem
+  // não é arbitrária: se a linha viesse antes, um provisionamento que falhasse
+  // deixaria canal fantasma na tela do usuário — e ele tentaria parear um número
+  // que não existe em lugar nenhum. Nesta ordem, a falha do PRIMEIRO passo não
+  // deixa rastro, e a do segundo é compensada logo abaixo.
+  // A orquestração do tudo-ou-nada mora em `lib/channels/criar-conexao.ts`: é a
+  // parte que precisa de prova, e compensação dentro de Route Handler só se
+  // exercita montando request, sessão e cliente — três dublês para testar um if.
+  const pedido = {
+    organizationId: activeOrg.orgId,
+    sessionName,
+    displayName: parsed.data.display_name ?? null,
+    actorUserId: user.id,
+    requestId,
+    origem: "central" as const,
+    colunas: CHANNEL_COLUMNS,
+  };
+
+  let criacao;
+  try {
+    criacao = peloGateway
+      ? await provisionarEGravarConexao(supabase, {
+          ...pedido,
+          platform: CHANNEL_PROVIDER_GATEWAY_WHATSAPP,
+        })
+      : await criarConexaoDeCanal(supabase, pedido);
+  } catch (err) {
+    const e = err instanceof ErroDoGateway ? err : null;
     return fail(
-      "invalid_request",
-      "cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — a conexão não foi criada",
-      422,
-      { requestId },
+      "gateway_error",
+      e?.message ?? "não consegui provisionar a conexão no gateway",
+      e && e.status >= 500 ? 502 : 422,
+      { requestId, details: { codigo: e?.codigo ?? "desconhecido" } },
     );
   }
 
-  const { data: created, error: insErr } = await supabase
-    .from("channel_sessions")
-    .insert({
-      organization_id: activeOrg.orgId,
-      waha_session_name: sessionName,
-      display_name: parsed.data.display_name ?? null,
-      engine: "NOWEB",
-      webhook_path_token: randomUUID().replace(/-/g, ""),
-      webhook_secret_encrypted: segredoCifrado,
-      // Conexão nova nasce no caminho que a instalação usa de verdade. O
-      // default 'legacy' da coluna vale para as linhas que já existiam quando a
-      // 0116 rodou; herdá-lo aqui deixaria o gateway de pé e sem uso.
-      ingest_path: caminhoDeIngestaoParaConexaoNova(),
-      status: "STARTING",
-      last_status_change_at: new Date().toISOString(),
-      consecutive_health_fails: 0,
-      daily_message_limit: 250,
-      metadata: {},
-    })
-    .select(CHANNEL_COLUMNS)
-    .single();
-  if (insErr || !created) {
-    return fail("internal_error", insErr?.message ?? "channel_session_insert_failed", 500, { requestId });
+  if (!criacao.ok) {
+    if (criacao.motivo === "sem_cifra") {
+      return fail(
+        "invalid_request",
+        "cifra indisponível nesta instalação (GUC app.nuvemshop_oauth_key ausente) — a conexão não foi criada",
+        422,
+        { requestId },
+      );
+    }
+    return fail("internal_error", criacao.detalhe, 500, { requestId });
   }
+  const created = criacao.conexao as { id: string };
 
-  try {
-    await waha.startSession(sessionName);
-  } catch (err) {
-    // Rollback: sem WAHA no ar, não deixamos um canal fantasma preso em STARTING.
-    await supabase
-      .from("channel_sessions")
-      .delete()
-      .eq("organization_id", activeOrg.orgId)
-      .eq("id", created.id);
-    return fail("waha_error", wahaFriendlyError(err), 502, { requestId });
+  if (waha) {
+    try {
+      await waha.startSession(sessionName);
+    } catch (err) {
+      // Rollback: sem o transporte no ar, não deixamos um canal fantasma preso
+      // em STARTING.
+      await supabase
+        .from("channel_sessions")
+        .delete()
+        .eq("organization_id", activeOrg.orgId)
+        .eq("id", created.id);
+      return fail("waha_error", wahaFriendlyError(err), 502, { requestId });
+    }
   }
-
-  void audit({
-    action: "channel.connected",
-    actorUserId: user.id,
-    organizationId: activeOrg.orgId,
-    resourceType: "channel_session",
-    resourceId: created.id,
-    requestId,
-    metadata: { waha_session_name: sessionName },
-  });
 
   return ok(created, { requestId, status: 201 });
 }

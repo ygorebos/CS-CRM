@@ -137,6 +137,11 @@ services:
         * * * * * curl -fsS -m25 -H "Authorization: Bearer $$INTERNAL_SECRET" http://app:3000/api/v1/cron/routing-worker >/dev/null 2>&1
         * * * * * curl -fsS -m25 -H "Authorization: Bearer $$INTERNAL_SECRET" http://app:3000/api/v1/cron/recover-stuck-messages >/dev/null 2>&1
         * * * * * curl -fsS -m45 -H "Authorization: Bearer $$INTERNAL_SECRET" http://app:3000/api/v1/cron/gateway-inbound-drain >/dev/null 2>&1
+        # A ponta que PUXA (spec 004, FR-013a). A cada 5 min, e não a cada
+        # minuto como o dreno: ela varre uma JANELA de 1h contra um sistema
+        # externo, então 60 varreduras achariam o que uma acha. Ritmos
+        # diferentes, crons diferentes.
+        */5 * * * * curl -fsS -m60 -H "Authorization: Bearer $$INTERNAL_SECRET" http://app:3000/api/v1/cron/gateway-reconciliation >/dev/null 2>&1
         */5 * * * * curl -fsS -m25 -H "Authorization: Bearer $$INTERNAL_SECRET" "http://app:3000/api/v1/cron/storage-redaction?limit=50" >/dev/null 2>&1
         */5 * * * * curl -fsS -m25 -H "Authorization: Bearer $$INTERNAL_SECRET" http://app:3000/api/v1/cron/snooze-watcher >/dev/null 2>&1
         */5 * * * * curl -fsS -m25 -H "Authorization: Bearer $$INTERNAL_SECRET" http://app:3000/api/v1/cron/attendant-heartbeat >/dev/null 2>&1

@@ -21,7 +21,8 @@ falhou.
 **Análises que a fundamentam**: [`analise-complexidade.md`](./analise-complexidade.md) (caminho
 direto à uazapi, descartado) e
 [`analise-gateway-go-recebimentos.md`](./analise-gateway-go-recebimentos.md) (arquitetura A,
-recomendada e agora ratificada na constituição v1.1.0).
+recomendada, ratificada na constituição v1.1.0 e hoje **obrigatória** pelo Princípio XIV,
+v2.2.0).
 
 ---
 
@@ -285,10 +286,16 @@ pelo celular e conferir que aparece uma vez só, do lado certo.
 **Operação e produto**
 
 - **FR-026**: O gateway MUST poder operar em modo que **normaliza e entrega sem persistir** em
-  banco próprio, para poder ser embarcado na instalação do CRM.
-- **FR-027**: A instalação self-host MUST subir o gateway junto do CRM, sem passo manual adicional
-  para o corretor, e a ausência do gateway MUST ser visível como problema de configuração na tela —
-  nunca como silêncio.
+  banco próprio — para que a entrega ao CRM não dependa do banco de outro produto.
+  *(Reescrito em 2026-08-08. A redação original dizia "para poder ser embarcado na instalação do
+  CRM". O requisito continua valendo; a justificativa caiu com o Princípio XIV, que fez do gateway
+  serviço único e compartilhado. O comportamento exigido não mudou — mudou por que o queremos.)*
+- **FR-027**: A ausência ou indisponibilidade do gateway MUST ser visível — alerta para a operação
+  **e** aviso na Central para o usuário —, nunca silêncio. O endereço do gateway MUST ser
+  configuração; o CRM MUST NOT supor que ele sobe junto, mora na mesma máquina ou na mesma rede.
+  *(Reescrito em 2026-08-08. A redação original era "A instalação self-host MUST subir o gateway
+  junto do CRM", que é literalmente o que o Princípio XIV proíbe. A metade que sobreviveu — o
+  silêncio ser proibido — era a parte que importava, e é a que T059 entregou.)*
 - **FR-028**: O corretor MUST NOT precisar conhecer, configurar ou nomear o gateway em nenhum
   momento da jornada de estreia.
 - **FR-029**: Os dois caminhos de recebimento (legado e gateway) MUST poder coexistir, com chave de
@@ -353,11 +360,18 @@ pelo celular e conferir que aparece uma vez só, do lado certo.
 
 ## Assumptions
 
-- **O gateway é código próprio e pode virar dependência de runtime do CRM.** Ele tem imagem
-  container própria e será embarcado na instalação, não consumido como serviço de terceiro. Isso
-  responde a decisão nº 1 da análise: **um gateway por instalação**, não um compartilhado — um
-  gateway compartilhado faria o CRM self-hosted de um cliente mandar tráfego para infraestrutura
-  nossa, o que mata a independência do self-host e cria dado pessoal em trânsito por terceiro.
+- **O gateway é serviço único, nosso, compartilhado por todos os tenants, com ciclo de deploy
+  próprio.** Ele não entra no compose de produção do CRM e seu endereço é configuração.
+  *(Reescrito em 2026-08-08. A redação original afirmava o oposto — "um gateway por instalação,
+  não um compartilhado" — e justificava a arquitetura pela independência do self-host. A
+  constituição v2.2.0 decidiu o contrário: não há instalação de cliente, e o Princípio XIV define
+  o gateway como instância única compartilhada. **A alternativa que a `research.md` D10 rejeitou é
+  a que hoje é obrigatória.** O desenho técnico da feature — envelope, ACK-primeiro, fila durável,
+  chave de corte por conexão — sobreviveu intacto à inversão; só o argumento mudou. Guardado aqui
+  em vez de apagado porque uma decisão cuja razão sumiu volta a ser questionada.)*
+  A contrapartida que a redação antiga temia continua real e agora tem dono: sem réplica, o
+  gateway é ponto único de falha declarado, e é por isso que XIV cobra fila durável dos dois lados
+  e aviso visível na queda.
 - **"Demais webhooks" significa tráfego de canal conversacional.** Entram: mensagens, estados de
   entrega e marcas de leitura de qualquer canal. **Não** entram: webhooks de e-commerce e os
   retornos de LGPD exigidos em endereços fixos por plataformas externas — o gateway não tem
@@ -372,6 +386,8 @@ pelo celular e conferir que aparece uma vez só, do lado certo.
   gateway sabendo tratá-los. Mudar isso é decisão de produto separada.
 - **O caminho legado não é removido nesta feature.** Ele é desligado depois, com evidência.
 - **Envio continua pelo caminho atual nesta feature.** A costura de envio já existe no CRM e não é
-  o gargalo; unificar envio pelo gateway é fatia posterior.
-- **Instalações existentes precisam de caminho de atualização** que não perca mensagem durante a
-  virada — daí a chave de corte por conexão (FR-029).
+  o gargalo; unificar envio pelo gateway é fatia posterior — hoje é a
+  [spec 004](../004-envio-pelo-gateway/spec.md), junto com conexão e provisionamento.
+- **A instância existente precisa de caminho de virada** que não perca mensagem no meio — daí a
+  chave de corte por conexão (FR-029). Não há clone nem VPS de cliente para servir de rede: é o
+  único banco que existe, e a reversão por conexão é a única volta.

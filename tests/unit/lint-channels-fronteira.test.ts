@@ -28,7 +28,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { PADROES, nomeiaProvider } from "../../scripts/lint-channels.pattern";
+import {
+  PADROES,
+  leFormaCruaDeProvedor,
+  nomeiaProvider,
+} from "../../scripts/lint-channels.pattern";
 
 describe("fronteira do padrão de nome de provider", () => {
   it.each([
@@ -75,5 +79,45 @@ describe("fronteira do padrão de nome de provider", () => {
     // E nenhuma delas pode voltar a usar `\b`, que é o defeito da #118.
     expect(PADROES.SEPARADO.source).not.toContain("\\b");
     expect(PADROES.PASCAL.source).not.toContain("\\b");
+  });
+});
+
+/**
+ * Invariante 2 — FORMA crua de payload (spec 004, T052 / FR-042).
+ *
+ * O invariante 1 pega o NOME do provider; este pega o que é pior de achar
+ * depois: código lendo a forma da resposta dele sem citar o nome.
+ */
+describe("leFormaCruaDeProvedor", () => {
+  it("pega as formas que só existem no payload do provedor", () => {
+    for (const trecho of [
+      "const id = data.key.id;",
+      "return msg._serialized;",
+      "const wid = resposta.messageid;",
+      "if (m.remoteJid) return null;",
+    ]) {
+      expect(leFormaCruaDeProvedor(trecho), trecho).toBe(true);
+    }
+  });
+
+  it("NÃO reprova o código correto — a regra curta é a decisão, não a preguiça", () => {
+    // Medido na main: incluir `chatId`, `fromMe`, `pushName` e `participant`
+    // apontava 8 arquivos, e NENHUM lia payload cru — `chatId` é o nome que o
+    // handler dá ao destinatário resolvido PELO adapter. Regra que reprova
+    // código certo ensina a contorná-la, e vira a catraca com furo do #118.
+    for (const trecho of [
+      "const chatId = adapter.resolveRecipient(input);",
+      "const { externalId } = await adapter.send(envelope);",
+      "contato.pushName ?? contato.name",
+      "if (envelope.fromMe) return;",
+      "select('id, participant_id')",
+    ]) {
+      expect(leFormaCruaDeProvedor(trecho), trecho).toBe(false);
+    }
+  });
+
+  it("a fronteira não pega pedaço de outra palavra", () => {
+    expect(leFormaCruaDeProvedor("const messageidx = 1;")).toBe(false);
+    expect(leFormaCruaDeProvedor("xmessageid")).toBe(false);
   });
 });

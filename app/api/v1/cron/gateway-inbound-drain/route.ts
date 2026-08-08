@@ -36,6 +36,7 @@ import type { NextRequest } from "next/server";
 import { fail, ok } from "@/lib/api/wrappers";
 import { env } from "@/lib/env";
 import { avisarEntregaDescartada } from "@/lib/gateway/aviso-de-descarte";
+import { avisarGatewayForaDoAr } from "@/lib/gateway/aviso-de-gateway-fora";
 import { avisarRecebimentoDesligado } from "@/lib/gateway/aviso-de-recebimento-desligado";
 import { parseEnvelope } from "@/lib/gateway/envelope";
 import { ingerirEnvelope } from "@/lib/gateway/ingest";
@@ -84,6 +85,16 @@ async function handle(req: NextRequest): Promise<Response> {
     habilitado: env.GATEWAY_INBOUND_ENABLED,
     requestId,
   });
+
+  // FR-023 / Princípio XIV: o gateway é SPOF declarado, e a queda dele tem de
+  // ser AUDÍVEL nas duas pontas — alerta para nós, aviso na Central para quem
+  // está na tela. Sem isto, "o serviço caiu" chega ao corretor como "hoje
+  // ninguém respondeu", que é indistinguível de um dia devagar.
+  //
+  // Depois do aviso de desligado e antes do lote, pela mesma lógica: quando o
+  // gateway está fora, o lote não tem nada para recolher, e o vazio seria lido
+  // como ausência de movimento.
+  const sondagem = await avisarGatewayForaDoAr(admin, { requestId });
 
   const corte = new Date(Date.now() - CARENCIA_SEGUNDOS * 1000).toISOString();
 
@@ -165,6 +176,9 @@ async function handle(req: NextRequest): Promise<Response> {
       dead: mortas,
       failed: falhas,
       inbound_off_notices: avisosDeDesligado,
+      gateway_reachable: sondagem.alcancavel,
+      gateway_down_notices: sondagem.avisosAbertos,
+      gateway_down_notices_resolved: sondagem.avisosResolvidos,
     },
     { requestId },
   );

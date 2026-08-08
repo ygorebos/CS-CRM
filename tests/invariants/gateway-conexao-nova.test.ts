@@ -4,7 +4,7 @@
  * ## A diferença entre "funciona" e "parece funcionar"
  *
  * O default de `channel_sessions.ingest_path` é `'legacy'`, e está certo assim:
- * as linhas que já existiam quando a 0116 rodou estavam recebendo pelo caminho
+ * as linhas que já existiam quando a 0119 rodou estavam recebendo pelo caminho
  * antigo naquele instante, e virar a chave delas em massa seria mudar o
  * comportamento de todo mundo sem aviso.
  *
@@ -54,7 +54,7 @@ function criarConexao(sufixo: string, ingestPath?: string): string {
 describe("caminho de ingestão da conexão nova (T058b)", () => {
   it("a coluna existe com default 'legacy' — a linha antiga não muda de comportamento sozinha", () => {
     semear();
-    // Este é o caso da instalação que já rodava antes da 0116: sem valor
+    // Este é o caso da instalação que já rodava antes da 0119: sem valor
     // explícito, continua no caminho em que estava.
     expect(criarConexao("t058_default")).toBe("legacy");
   });
@@ -63,7 +63,7 @@ describe("caminho de ingestão da conexão nova (T058b)", () => {
     semear();
     const decidido = caminhoDeIngestaoParaConexaoNova(true);
     expect(decidido).toBe("gateway");
-    // E o valor decidido pousa mesmo — o CHECK da 0116 aceita, e não vira
+    // E o valor decidido pousa mesmo — o CHECK da 0119 aceita, e não vira
     // `legacy` no meio do caminho.
     expect(criarConexao("t058_ligado", decidido)).toBe("gateway");
   });
@@ -71,7 +71,7 @@ describe("caminho de ingestão da conexão nova (T058b)", () => {
   it("com o recebimento DESLIGADO, a conexão nova nasce no legado", () => {
     semear();
     const decidido = caminhoDeIngestaoParaConexaoNova(false);
-    // Nascer 'gateway' aqui criaria a combinação que o aviso da 0119 denuncia:
+    // Nascer 'gateway' aqui criaria a combinação que o aviso da 0122 denuncia:
     // conexão apontada para uma rota desligada, que responde 404 e faz o
     // gateway descartar sem retentar. A conexão nasceria muda.
     expect(decidido).toBe("legacy");

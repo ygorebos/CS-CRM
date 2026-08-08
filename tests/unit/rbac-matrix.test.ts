@@ -239,3 +239,66 @@ describe("grupo leads (read agent 200, write viewer 403)", () => {
     expect(await errorCode(res)).toBe("forbidden_role");
   });
 });
+
+// ---------------------------------------------------------------------------
+// parear número — admin nas DUAS portas (spec 004, T045 / FR-035)
+// ---------------------------------------------------------------------------
+describe("grupo pareamento de canal (admin nas duas portas)", () => {
+  /**
+   * A regra é a mesma há muito tempo; o que faltava era ela valer nas duas
+   * portas. Medido em 2026-08-08: `/api/v1/channel-sessions` exigia `admin`,
+   * mas `/api/v1/onboarding/whatsapp/session` exigia apenas estar autenticado —
+   * então um `viewer` podia iniciar o pareamento de um número da organização e,
+   * pior, **ressuscitar** um canal que o admin tinha excluído (a rota reativa a
+   * linha arquivada, e o nome da sessão é derivado do id da org, então bate
+   * sempre).
+   *
+   * O par de casos existe porque o defeito era exatamente a DIVERGÊNCIA: cobrir
+   * só a porta consertada deixaria a outra livre para divergir de novo.
+   */
+  it("POST /channel-sessions nega 403 para manager", async () => {
+    session("manager");
+    const { POST } = await import("@/app/api/v1/channel-sessions/route");
+    const res = await POST(req("/api/v1/channel-sessions", { method: "POST", body: "{}" }));
+    expect(res.status).toBe(403);
+    expect(await errorCode(res)).toBe("forbidden_role");
+  });
+
+  it("POST /onboarding/whatsapp/session nega 403 para manager — a porta que ficava aberta", async () => {
+    session("manager");
+    const { POST } = await import("@/app/api/v1/onboarding/whatsapp/session/route");
+    const res = await POST(req("/api/v1/onboarding/whatsapp/session", { method: "POST" }));
+    expect(res.status).toBe(403);
+    expect(await errorCode(res)).toBe("forbidden_role");
+  });
+
+  it("POST /onboarding/whatsapp/session nega 403 para viewer, e AUDITA a negativa", async () => {
+    session("viewer");
+    const { POST } = await import("@/app/api/v1/onboarding/whatsapp/session/route");
+    const res = await POST(req("/api/v1/onboarding/whatsapp/session", { method: "POST" }));
+    expect(res.status).toBe(403);
+    expect(vi.mocked(audit).mock.calls.some(([e]) => e.action === "authz.denied")).toBe(true);
+  });
+
+  it("admin PASSA do portão nas duas (o que barra depois é a config, não o papel)", async () => {
+    // Sem env de transporte a rota devolve 503 — o que importa aqui é que ela
+    // chegou lá, isto é, que o papel não foi o motivo da recusa.
+    session("admin");
+    const central = await import("@/app/api/v1/channel-sessions/route");
+    const r1 = await central.POST(req("/api/v1/channel-sessions", { method: "POST", body: "{}" }));
+    expect(r1.status).not.toBe(403);
+
+    const onboarding = await import("@/app/api/v1/onboarding/whatsapp/session/route");
+    const r2 = await onboarding.POST(req("/api/v1/onboarding/whatsapp/session", { method: "POST" }));
+    expect(r2.status).not.toBe(403);
+  });
+
+  it("GET do onboarding segue aberto a qualquer membro — só LÊ o estado", async () => {
+    // Negar a leitura transformaria a tela de onboarding num erro para quem não
+    // pode parear, sem impedir nada: o pareamento é o POST.
+    session("viewer");
+    const { GET } = await import("@/app/api/v1/onboarding/whatsapp/session/route");
+    const res = await GET();
+    expect(res.status).toBe(200);
+  });
+});

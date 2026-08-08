@@ -8,6 +8,10 @@ import {
   type WatchdogConfig,
 } from "@/lib/agent-engine/edge/crm/session-reconciler";
 import { createLogger } from "@/lib/agent-engine/obs/logger";
+// O adapter do gateway lê a config a cada chamada (`lib/env` é singleton
+// parseado no import) — mutar o objeto é o único jeito de apontar o teste para
+// o gateway-mock. Restaurado no afterAll do bloco.
+import { env } from "@/lib/env";
 
 /**
  * Fase 4A-2 — watchdog de sessão (o incidente real do Carlos, congelado em teste).
@@ -79,6 +83,14 @@ beforeAll(async () => {
   const addr = wahaMock.address();
   wahaPort = typeof addr === "object" && addr !== null ? addr.port : 0;
 
+  // O redrive passou a enviar pelo ADAPTER do canal (spec 004, T035), e o
+  // adapter do WAHA lê a credencial de `process.env` a cada chamada — as MESMAS
+  // duas variáveis de que `workers/agent-worker/main.ts` monta o WatchdogConfig
+  // (`main.ts:209`). Apontá-las para o mock é o que faz o teste exercitar o
+  // caminho de produção em vez de um atalho.
+  process.env.WAHA_API_BASE_URL = `http://127.0.0.1:${wahaPort}`;
+  process.env.WAHA_API_KEY = "test-key";
+
   await pool.query(
     `insert into organizations (id, slug, legal_name, display_name)
      values ($1, 'wd-proof', 'Watchdog Proof', 'Watchdog Proof') on conflict (id) do nothing`,
@@ -120,6 +132,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  delete process.env.WAHA_API_BASE_URL;
+  delete process.env.WAHA_API_KEY;
   await new Promise<void>((resolve) => wahaMock.close(() => resolve()));
   await pool.end();
 });
@@ -158,5 +172,120 @@ describe("4A-2 — watchdog reconcilia o espelho e reenvia queued", () => {
     const redriven = await redriveQueued(pool, watchdogCfg(), log);
     expect(redriven).toBe(0);
     expect(sendTextCalls).toHaveLength(1); // nenhum sendText novo
+  });
+});
+
+/**
+ * Spec 004, FR-020 / T035 — o watchdog num canal MIGRADO para o gateway.
+ *
+ * O defeito congelado aqui: o redrive montava `POST /api/sendText` do WAHA na
+ * mão. Numa sessão do gateway `waha_session_name` é NULA (o CHECK
+ * `channel_sessions_provider_ref_check` exige `gateway_connection_id` no lugar),
+ * então o WAHA recebia `{"session": null, ...}` e a mensagem era marcada `sent`.
+ * Lugar errado — ou lugar nenhum — com a tela dizendo que foi.
+ */
+const SESSION_GW = "bbbbbbbb-0000-4000-8000-000000000011";
+const CONV_GW = "bbbbbbbb-0000-4000-8000-000000000012";
+const MSG_GW = "bbbbbbbb-0000-4000-8000-000000000013";
+const GATEWAY_CONN = "conn-do-gateway-para-o-watchdog";
+const GATEWAY_MSG_ID = "wamid-do-gateway-1";
+
+describe("4A-2 + spec 004 — redrive num canal migrado para o gateway (FR-020)", () => {
+  let gatewayMock: http.Server;
+  const postsNoGateway: Array<Record<string, unknown>> = [];
+  const baseUrlOriginal = env.GATEWAY_BASE_URL;
+  const tokenOriginal = env.GATEWAY_INTERNAL_TOKEN;
+
+  beforeAll(async () => {
+    gatewayMock = http.createServer((req, res) => {
+      if (req.method === "POST" && req.url === "/v1/messages") {
+        let body = "";
+        req.on("data", (c) => (body += c));
+        req.on("end", () => {
+          postsNoGateway.push(JSON.parse(body) as Record<string, unknown>);
+          res.writeHead(200, { "content-type": "application/json" });
+          res.end(JSON.stringify({ message_id: GATEWAY_MSG_ID }));
+        });
+        return;
+      }
+      res.writeHead(404);
+      res.end();
+    });
+    await new Promise<void>((resolve) => gatewayMock.listen(0, "127.0.0.1", resolve));
+
+    await pool.query(
+      `insert into channel_sessions
+         (id, organization_id, provider, gateway_connection_id, status, webhook_secret_encrypted)
+       values ($1, $2, 'whatsapp_uazapi', $3, 'WORKING', '\\x00'::bytea)
+       on conflict (id) do nothing`,
+      [SESSION_GW, ORG, GATEWAY_CONN],
+    );
+    await pool.query(
+      `insert into conversations (id, organization_id, contact_id, channel_session_id, status, is_group)
+       values ($1, $2, $3, $4, 'open', false) on conflict (id) do nothing`,
+      [CONV_GW, ORG, CONTACT, SESSION_GW],
+    );
+    await pool.query(
+      `insert into messages (id, organization_id, conversation_id, channel_session_id, contact_id,
+                             type, direction, status, body, sent_via, sent_at, metadata)
+       values ($1, $2, $3, $4, $5, 'text', 'outbound', 'queued', 'resposta presa no canal migrado',
+               'ai', now(), '{"queued_reason":"channel_session_not_working"}')
+       on conflict (id) do nothing`,
+      [MSG_GW, ORG, CONV_GW, SESSION_GW, CONTACT],
+    );
+  });
+
+  afterAll(async () => {
+    env.GATEWAY_BASE_URL = baseUrlOriginal;
+    env.GATEWAY_INTERNAL_TOKEN = tokenOriginal;
+    // O container é COMPARTILHADO entre arquivos: uma queued 'ai' deixada aqui
+    // vira +1 no redrive de qualquer outra suíte que conte mensagens.
+    await pool.query("delete from messages where id = $1", [MSG_GW]);
+    await new Promise<void>((resolve) => gatewayMock.close(() => resolve()));
+  });
+
+  it("canal do gateway sem credencial: fica queued, e o WAHA NÃO recebe nada", async () => {
+    env.GATEWAY_INTERNAL_TOKEN = "";
+    const chamadasNoWahaAntes = sendTextCalls.length;
+
+    const redriven = await redriveQueued(pool, watchdogCfg(), log);
+    expect(redriven).toBe(0);
+
+    // A asserção que congela o defeito: nenhum sendText do WAHA para uma sessão
+    // que não é do WAHA. Antes do conserto, este número subia.
+    expect(sendTextCalls).toHaveLength(chamadasNoWahaAntes);
+
+    const { rows } = await pool.query("select status from messages where id = $1", [MSG_GW]);
+    // NOOP de canal não configurado devolve externalId null; marcar `sent` aqui
+    // trocaria "ainda vai" por "já foi" sem nada ter saído.
+    expect(rows[0]!.status).toBe("queued");
+  });
+
+  it("com o gateway no ar: sai PELO GATEWAY, endereçada pela conexão da sessão", async () => {
+    const addr = gatewayMock.address();
+    const porta = typeof addr === "object" && addr !== null ? addr.port : 0;
+    env.GATEWAY_BASE_URL = `http://127.0.0.1:${porta}`;
+    env.GATEWAY_INTERNAL_TOKEN = "token-interno-do-teste";
+    const chamadasNoWahaAntes = sendTextCalls.length;
+
+    const redriven = await redriveQueued(pool, watchdogCfg(), log);
+    expect(redriven).toBe(1);
+
+    expect(postsNoGateway).toHaveLength(1);
+    // `connection_id` vem de `gateway_connection_id` da SESSÃO (FR-017). Antes
+    // do conserto de `resolveSessionRef` ele chegava `undefined` e o
+    // `JSON.stringify` apagava a chave — envio sem destino.
+    expect(postsNoGateway[0]).toMatchObject({
+      connection_id: GATEWAY_CONN,
+      tipo: "text",
+      texto: "resposta presa no canal migrado",
+    });
+    expect(sendTextCalls).toHaveLength(chamadasNoWahaAntes); // o WAHA segue de fora
+
+    const { rows } = await pool.query(
+      "select status, external_id from messages where id = $1",
+      [MSG_GW],
+    );
+    expect(rows[0]).toMatchObject({ status: "sent", external_id: GATEWAY_MSG_ID });
   });
 });

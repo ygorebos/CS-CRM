@@ -14,7 +14,7 @@ de plano de saúde (multi-nicho é capacidade, não prioridade). WhatsApp como c
 primário, com **todo tráfego de entrada chegando pelo `gateway_go`**. Multi-tenant com
 RLS desde o dia 1, LGPD nativa. **Entrega: SaaS de instância única, operada por nós** —
 ninguém instala nada. **Cobrança é gerenciada no Cotador Simplificado, não aqui.**
-Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.2.0).
+Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.3.0).
 
 **Consequência que muda como você trabalha:** existe **uma** instância e **um** banco.
 Bug em produção atinge todos os tenants ao mesmo tempo, e **não há versão de escape** —
@@ -87,6 +87,35 @@ o summary do job. Se você mexeu em UI fora desse subconjunto, a prova é sua.
 - Log: `lib/logger.ts` (estruturado). **`console.log` é proibido** em código merged.
 - Testes ao lado do código (`lib/foo/bar.test.ts`) ou em `tests/{unit,api,invariants,e2e}/`.
 - Comentários em PT-BR são a norma neste repo — mantenha o idioma do arquivo que editar.
+
+## Canal e gateway (`gateway_go`) — regras que não se negociam
+
+Todo tráfego de entrada chega pelo `gateway_go`, **repo irmão com deploy separado**
+(`/root/PROJETOS/gateway_go`). Constituição v2.3.0, Princípios VII e XIV.
+
+- **Código novo do CRM não lê payload cru de provedor** (WAHA/uazapi/Meta). Só envelope
+  normalizado.
+- **O gateway nunca toca tabela do CRM.** `insert`/`update`/`select` direto é proibido, sem
+  exceção. Ele escreve **só por função `security definer` versionada** — a "quarta superfície" —
+  e só sob as seis travas: (1) zero grant de tabela, nem `select`; (2) papel Postgres dedicado,
+  **nunca** `service_role` nem o segredo do JWT; (3) `organization_id` resolvida **dentro do
+  banco** pela conexão de origem, nunca de parâmetro nem do corpo; (4) assinatura versionada como
+  contrato; (5) invariante em CI reprovando se o papel ganhar privilégio de tabela; (6) sem HTTP
+  dentro da função. Falhar em qualquer uma torna a superfície proibida, não degradada.
+- **A quarta superfície é só do gateway.** Não se estende ao Cotador Simplificado — a ponte com
+  ele é contrato HTTP explícito, nada além.
+- **Endereço do gateway é configuração.** Sem `localhost`, sem nome de serviço de compose, sem
+  "sobe junto". Ele não entra no `docker-compose.prod.yml` do CRM.
+- **Sem réplica = ponto único de falha declarado, e a durabilidade tem duas pontas
+  obrigatórias.** A do gateway é fila em disco com retentativa; a do CRM é fila de entrada com
+  dreno (quando a entrega é HTTP) ou **reconciliação periódica** (quando o gateway escreve por
+  função). Divergência vira alerta — reconciliar em silêncio é proibido. Uma ponta só é
+  descumprimento.
+- **Teto de taxa por conexão**, nunca global nem por IP — todas as entregas vêm do mesmo endereço.
+- Queda do gateway vira alerta para a operação **e** aviso na Central para o usuário. Silêncio é
+  proibido: o sintoma natural é "as mensagens pararam", sem lugar nenhum para olhar.
+
+Desenho e medições: `specs/004-envio-pelo-gateway/decisao-escrita-direta.md`.
 
 ## Diretórios e arquivos SENSÍVEIS
 
@@ -183,3 +212,70 @@ Este repositório tem PRDs, specs, regras de negócio e doutrina escritos
 Se a regra não está escrita, diga que não está e pergunte — não preencha a lacuna com
 suposição plausível. Ao documentar, marque o que é `CONFIRMADO` (provado por código) e o
 que é `INFERIDO`.
+
+## Planejamento acompanha a execução (constituição v2.4.0)
+
+A cada **5 tasks** avançadas — ou ao fechar uma fase, o que vier primeiro — atualize os artefatos de
+planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se o desenho mudou, e
+`docs/current-state.md` se o que está pronto/quebrado mudou.
+
+Planejamento atualizado só no fim mentiu o caminho inteiro. Quem retoma lê o plano, não o histórico
+de commits — e um plano atrasado manda a próxima sessão refazer o que já existe.
+
+## Como medir sem produzir verde falso — DOUTRINA (aprendida medindo, 2026-08-08)
+
+Uma sessão inteira de execução da Fase 6 da spec 004 produziu **cinco defeitos de produto** que
+3157 asserções unitárias não pegavam — e, no caminho, **quatro verdes falsos meus**. As regras
+abaixo são o que separou um do outro. Elas custaram caro; leia antes de escrever teste de tela ou
+medição.
+
+### 1. Leia a captura antes de supor
+
+Playwright grava `test-results/**/error-context.md` — a **página no instante da falha**, em YAML.
+Medido: cada suposição minha sobre a causa custou **uma rodada inteira** (subir ambiente, build,
+rodar); cada leitura da captura resolveu em **um minuto**. Foi ela que revelou "Sua conta exige 2FA"
+depois de eu ter errado a causa duas vezes.
+
+### 2. Ausência prova transição; presença prova chegada
+
+Esperar que a tela de desafio **apareça** como sinal de que o código foi aceito passa na hora — ela
+já está visível. O sinal certo é ela **sumir** (`toHaveCount(0)`). Trocar os dois dá verde imediato
+que não mede nada.
+
+### 3. Asserção negativa exige âncora de lugar
+
+`expect(corpo).not.toMatch(/WAHA/)` passa em **qualquer** página que não contenha o termo —
+inclusive numa que o teste nunca quis abrir. Medido: um caso ficou verde medindo a **tela de login**.
+Afirme onde está (`toHaveURL`, ou um elemento que só existe ali) **antes** de afirmar o que não vê.
+
+### 4. Cronômetro independente do laço
+
+Medir latência com `Date.now()` antes da chamada mistura a espera com a duração da anterior — e o
+primeiro intervalo não tem predecessor. Deu **95,9%** onde a verdade era **100%**. Use carimbo de
+quem não participa do laço: `created_at` do Postgres, timestamp do outro processo.
+
+### 5. Dublê responde no formato que VOCÊ escreveu
+
+Teste com dublê não prova formato de campo nem latência de sistema externo. Dois defeitos desta spec
+viviam exatamente aí: a reconciliação varrendo até `agora` (o provedor leva ~25 min para indexar) e
+o `select` sem a coluna que o próprio ramo novo precisa. **Formato e tempo de terceiro só se sabem
+medindo o terceiro.**
+
+### 6. Estado que sobrevive entre execuções é a causa favorita do "piorou sem eu mexer"
+
+Fator de MFA fica no banco; segredo TOTP vive em módulo e morre com o processo. Re-execução começa
+no desafio sem ter o segredo — 5 vermelhos depois de 2 verdes, sem nada do produto mudar. Zere o
+estado externo no `beforeAll`.
+
+### 7. Código TOTP só vale UMA vez
+
+Casos que logam em sequência caem na mesma janela de 30 s e mandam o mesmo código; o segundo é
+recusado. Ou guarde o último enviado e espere a janela virar, ou — melhor — **logue uma vez** e
+compartilhe a sessão (`mode: serial`).
+
+### 8. Recurso pago que o teste cria, o teste apaga
+
+Instância de provedor custa por unidade. Toda execução que provisiona termina com o `DELETE`, e a
+verificação é o registro vazio — não a intenção. É a mesma doutrina de compensação que a feature
+implementa; ela vale para quem a testa.
+
