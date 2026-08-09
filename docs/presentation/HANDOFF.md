@@ -162,7 +162,7 @@ Tudo decidido durante a sessão autônoma está documentado em:
 ## Riscos pendentes pra mitigar
 
 1. **Banimento WAHA**: anti-banimento implementado no schema (rate limit, warm-up tracking, STOP detection), mas runbook de troca de número precisa ser testado em prática.
-2. **OAuth Nuvemshop**: chave de encryption (`app.nuvemshop_oauth_key`) precisa ser injetada via `ALTER DATABASE ... SET app.nuvemshop_oauth_key='...'` antes do primeiro OAuth — documentado em Spec 06 §3.1.
+2. **Cifra de segredos**: `SECRET_ENCRYPTION_KEY` (`openssl rand -hex 32`) no ambiente do app. Sem ela **nenhuma conexão de canal nasce** (422 "cifra indisponível"), e não só o OAuth Nuvemshop. A via antiga (`ALTER DATABASE ... SET app.nuvemshop_oauth_key`) é inexecutável em Supabase gerenciado — exige superusuário. Confira com `scripts/verificar-cifra-de-segredos.ts`.
 3. **Particionamento `crm_lead_activities`**: foi feito não-particionado no MVP; quando volume passar 5M rows, migrar pra `partition by range(performed_at)` mensal.
 4. **fn_audit_log_row** simplificado no MVP (sem diff completo); melhorar quando tiver tempo.
 5. **Vercel não conectado** ainda — fluxo manual de criar projeto e adicionar env vars previsto pra próxima sessão.

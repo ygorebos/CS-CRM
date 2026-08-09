@@ -155,7 +155,7 @@ Wave fundadora. Cria todas as tabelas do epic e o ponto de entrada do OAuth como
 
 1. Escrever migration 0008 com schema completo da Spec 06 §3.1–§3.3 + tabela `sync_progress` (§6.4) + funções de cripto (§3.1 final)
 2. Aplicar via `mcp__plugin_supabase_supabase__apply_migration`
-3. Setar `app.nuvemshop_oauth_key` via SQL `ALTER DATABASE postgres SET app.nuvemshop_oauth_key = '<32-byte-hex>'`
+3. ~~Setar `app.nuvemshop_oauth_key` via SQL `ALTER DATABASE postgres SET app.nuvemshop_oauth_key = '<32-byte-hex>'`~~ — **impossível em Supabase gerenciado** (papel `postgres` não é superusuário; PG15+ recusa com `permission denied to set parameter`, medido 2026-08-08). A cifra passou para a aplicação: defina `SECRET_ENCRYPTION_KEY` (`openssl rand -hex 32`) no ambiente e confira com `scripts/verificar-cifra-de-segredos.ts`
 4. Implementar `signState`/`verifyState` em `lib/oauth/state.ts` (JWT HS256, claims `{org_id, user_id, nonce, iat, exp}`, TTL 600s)
 5. Implementar Server Action `connectNuvemshop()`: `requireOrgAdmin()` → `signState({...})` → monta URL `https://www.nuvemshop.com.br/apps/${APP_ID}/authorize?client_id=${CID}&state=${state}` → `redirect(url)`
 6. Smoke test manual: chamar Server Action via botão temporário, verificar redirect 302 com state válido decodificável
