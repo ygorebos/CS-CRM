@@ -52,6 +52,22 @@ const schema = z.object({
   CPF_ENCRYPTION_KEY: required("CPF_ENCRYPTION_KEY"),
   // Opcional (template genérico) — só necessária ao ligar NUVEMSHOP_ENABLED.
   NUVEMSHOP_OAUTH_ENCRYPTION_KEY: z.string().optional().default(""),
+  /**
+   * Chave da cifra at-rest de segredos de webhook/canal (AES-256-GCM na
+   * aplicação — `lib/crypto/envelope-secreto.ts`). 32 bytes em hex (64 chars) ou
+   * base64. Substitui a GUC `app.nuvemshop_oauth_key`, que exige superusuário e
+   * por isso nunca pôde ser setada no Supabase gerenciado. Vazia aqui e vazia em
+   * NUVEMSHOP_OAUTH_ENCRYPTION_KEY = nenhuma conexão de canal consegue nascer.
+   */
+  SECRET_ENCRYPTION_KEY: z.string().optional().default(""),
+  /**
+   * Dispensa o segundo fator — e SÓ tem efeito quando `NEXT_PUBLIC_APP_URL`
+   * aponta para localhost em http (ver `lib/auth/mfa-ambiente.ts`). Ligada num
+   * ambiente com URL pública, não desliga nada: a chave viaja em `.env` copiado
+   * e o sintoma de um vazamento desses seria a ausência de uma tela, que
+   * ninguém nota.
+   */
+  MFA_DISPENSADA_LOCAL: z.string().optional().default(""),
   WAHA_BYO_ENCRYPTION_KEY: required("WAHA_BYO_ENCRYPTION_KEY"),
   /**
    * AES-256-GCM key (32 bytes em base64) usada pra cifrar API keys em

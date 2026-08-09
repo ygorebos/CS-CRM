@@ -668,8 +668,9 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
     60+ caracteres reprova. Mesmo mecanismo da catraca do `lint-channels`.
   - **Prova:** `tests/unit/nenhum-envio-escapa-das-travas.test.ts` (3). Sabotagem (arquivo novo
     chamando `adapter.send` fora da cadeia): reprova nomeando o arquivo.
-- [~] **T063** **2 de 5 casos verdes, e o 3º expôs um GAP REAL DO PRODUTO** — que é exatamente o que
-      esta task existe para achar. **(SC-006, Princípio IV)**
+- [x] **T063** **5 de 5 casos verdes, executada em 2026-08-09.** O caminho até aqui achou um gap real
+      do produto (abaixo) e, depois de corrigido, dois defeitos das minhas próprias asserções.
+      **(SC-006, Princípio IV)**
   - **Verdes:** a pré-condição (gateway configurado) e o estado vazio (tela certa, sem nomear
     provedor, sem mandar rodar comando) — este último **só** depois da âncora `toHaveURL`, porque
     antes ele passava medindo a tela de login.
@@ -689,9 +690,21 @@ Cada uma destas é **execução medida**, não implementação. Sem elas os Succ
   - **Um segundo defeito, no mesmo lugar:** o `select` daquela rota não trazia `gateway_connection_id`,
     então `classificarRef` devolveria "transporte" e o ramo novo **nunca dispararia**. Trocado por
     `CHANNEL_SESSION_REF_COLUMNS` — é o mesmo modo de falha que a T035 já tinha custado uma vez.
-  - ⚠️ **A correção NÃO foi re-executada contra a spec** (ambiente derrubado, instância paga
-    apagada). `pnpm test:unit` 3157/3157 e `pnpm test:db` 555/555 seguem verdes. Re-rodar a spec é o
-    passo que fecha a task.
+  - ✅ **RE-EXECUTADA em 2026-08-09 — 5 de 5.** Ambiente montado do zero: worktree próprio, Supabase
+    local pg17 (portas 556xx) com o `baseline.sql` em modo install, `bootstrap-owner.ts`, `next build`
+    + `next start`, e o gateway na **variante crm** (`STORE_ALVO=crm`) provisionando instância REAL na
+    uazapi. O QR aparece dentro do teto, com um clique.
+  - **Dois defeitos eram das minhas asserções, não do produto** — e os dois davam vermelho honesto:
+    (a) "mais de 10 s entre pedidos de QR" reprovava o comportamento CERTO (material no fim da
+    validade deve ser pedido em 3 s — medido: 3202 ms sobre `expires_at` a ~6,2 s); (b) comparar o 2º
+    pedido com a validade do 1º ignora que a transição `STARTING → SCAN_QR_CODE` re-dispara a busca
+    (pedidos em [0, 3138] ms com validade de ~40 s). O caso agora mede o **agendamento**: estado
+    estável + material válido ⇒ nenhum pedido novo. Sabotado, reprova.
+  - **Um terceiro achado, fora da spec mas no caminho dela:** sem cifra de segredo disponível
+    NENHUMA conexão nasce (422). A GUC `app.nuvemshop_oauth_key` é inexecutável em Supabase
+    gerenciado — `ALTER DATABASE ... SET` exige superusuário. Ver `lib/crypto/envelope-secreto.ts`.
+  - **Compensação executada:** as 11 instâncias pagas criadas na execução foram apagadas, e a
+    verificação é o registro vazio do gateway — não a intenção.
   - **Nenhuma tela nova foi criada** — e não podia ser: a FR-030 exige "sem passo a mais". Mesma
     Central de Conexões, mesmo botão, mesmo diálogo. O que mudou foi o encanamento: uma rota de API
     (`/pairing`, porque a `/qr` devolve bytes e o gateway devolve QR **+ validade**) e o sincronismo
@@ -819,7 +832,7 @@ que Auth e Storage não entram em nada do que a T066 mede.
 | Task | Falta |
 |---|---|
 | T060, T061 | **Número de WhatsApp real** entregando, para medir p95 do clique à chegada e estado final |
-| T063 | **TENTADA em 2026-08-08, e o ambiente FUNCIONOU.** O que falhou foi a minha spec — ver abaixo |
+| ~~T063~~ | **RESOLVIDA em 2026-08-09 — 5 de 5.** Worktree próprio + Supabase local 556xx + gateway `STORE_ALVO=crm`. O que faltava não era recurso: era montar o ambiente sem pisar no de outra sessão |
 | T067 | **Celular real** recebendo mídia. Não há substituto — o requisito é o anexo abrir no aparelho do destinatário |
 
 **Por que as de banco/app não foram executadas aqui:** esta máquina roda ambientes de outras sessões

@@ -215,6 +215,7 @@ jobs:
           pnpm exec playwright test --workers=1 \
             smoke.spec.ts auth.spec.ts error-pages.spec.ts \
             password-recovery.spec.ts signup-journey.spec.ts \
+            recuperacao-de-senha-por-fragmento.spec.ts \
             rbac-roles.spec.ts inbox-scope.spec.ts reset-password-mfa.spec.ts \
             degradacao-silenciosa.spec.ts vps-webhook-outbound-ssrf.spec.ts \
             kanban-owner-filter.spec.ts queue-assign.spec.ts \

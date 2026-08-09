@@ -104,6 +104,27 @@ AI_CRED_AES_KEY=$CHAVE_AI
 WAHA_API_BASE_URL=http://127.0.0.1:3999
 WAHA_API_KEY=e2e-placeholder-nao-e-segredo
 WAHA_WEBHOOK_BASE_URL=http://127.0.0.1:3001
+
+# O endereço do PRÓPRIO app, e ele não é opcional aqui.
+#
+# Sem esta linha, lib/env.ts assume o default \`http://localhost:3000\` — e a suíte
+# roda na 3001. \`/auth/confirm\` monta o redirect com \`new URL(path,
+# NEXT_PUBLIC_APP_URL)\` de propósito (ler \`X-Forwarded-Host\` ali seria open
+# redirect dentro do fluxo de recuperação de senha), então todo link de e-mail
+# terminava num \`Location\` para a 3000, onde não há ninguém escutando.
+#
+# Medido em 2026-08-09: as CINCO specs que passam por \`/auth/confirm\`
+# (password-recovery, reset-password-mfa, signup-journey e as duas de
+# recuperacao-de-senha-por-fragmento) reprovavam com
+# \`net::ERR_CONNECTION_REFUSED\`, e só elas — as outras 38 passavam. Três delas
+# estavam vermelhas na \`main\` havia dias, com a causa parecendo ser do produto.
+NEXT_PUBLIC_APP_URL=http://localhost:${E2E_PORT:-3001}
+
+# Explícito, e não por ausência: a suíte tem spec que EXIGE o segundo fator
+# (reset-password-mfa). Como a linha acima é http://localhost, a dispensa de MFA
+# passaria a ser possível — e bastaria alguém ligar a chave para a spec virar
+# falso verde sem que nada do produto mudasse.
+MFA_DISPENSADA_LOCAL=false
 UPSTASH_REDIS_REST_URL=http://127.0.0.1:3998
 UPSTASH_REDIS_REST_TOKEN=e2e-placeholder-nao-e-segredo
 NEXT_TELEMETRY_DISABLED=1
