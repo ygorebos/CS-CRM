@@ -11412,7 +11412,7 @@ comment on column public.ai_agents.guardrails is
 
 -- ---- remoção lógica do escopo próprio (migration 0135) ----
 --
--- Ver o cabeçalho de supabase/migrations/20260809190000_0134_escopo_removido.sql para o
+-- Ver o cabeçalho de supabase/migrations/20260809200000_0135_escopo_removido.sql para o
 -- porquê de NÃO ser um `delete`: a FK é `on delete set null` e a constraint
 -- `ai_knowledge_sources_scope_xor_all` recusa fonte sem balde.
 

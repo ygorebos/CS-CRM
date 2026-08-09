@@ -37,7 +37,7 @@ o projeto vinha sendo desenvolvido publicamente desde abril de 2026 sem tags.
 |---|---|
 | Arquivos TS/TSX em `app`+`lib`+`components`+`workers` | 1219 |
 | Route handlers (`app/api/**/route.ts`) | 198 |
-| Migrations em `supabase/migrations/` | 127 arquivos, até `0134_escopo_removido` |
+| Migrations em `supabase/migrations/` | 129 arquivos, até `0136_lacuna_sabe_de_qual_operadora` |
 | Testes unitários (`*.test.ts(x)`) | 346 arquivos |
 | Invariantes de banco (`tests/invariants/`) | 94 arquivos |
 | Specs E2E (`tests/e2e/`) | 38 |
