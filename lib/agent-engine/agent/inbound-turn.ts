@@ -1306,6 +1306,10 @@ export async function runAgentTurn(
         conversationId: input.conversationId,
         perguntaOriginal: skillSignal,
         escopo,
+        // O NOME pode vir de uma menção do cliente; o PONTEIRO só do vínculo resolvido.
+        // É ele que deixa a lacuna ser fechada quando o material daquela operadora chegar
+        // (T110, migration 0136).
+        escopoId: vinculoDeEscopo.scopeId,
         escoposDesligadosQueCobririam: desligadasQueCobririam,
         log: runLog,
       });

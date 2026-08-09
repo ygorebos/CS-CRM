@@ -20,6 +20,7 @@
 
 import { isEmbeddingProviderConfigured } from "@/lib/ai/gateway";
 import { embedText } from "@/lib/ai/embed";
+import { fecharLacunasDoEscopo } from "@/lib/ai/knowledge/fechar-lacuna";
 import { acquireDebounce } from "@/lib/ai/rag/debounce";
 import { chunkText, computeContentHash } from "@/lib/ai/rag/chunker";
 import { estimateTokens } from "@/lib/ai/runtime/history";
@@ -225,7 +226,7 @@ async function registrarEstadoDasFontes(
   if (estado.tipo === "sucesso") {
     const agora = new Date().toISOString();
     for (const [fonteId, gravados] of estado.porFonte) {
-      await admin
+      const { data: fonte } = await admin
         .from("ai_knowledge_sources")
         .update({
           last_index_status: "success",
@@ -236,7 +237,24 @@ async function registrarEstadoDasFontes(
           chunks_count: gravados,
         })
         .eq("id", fonteId)
-        .eq("organization_id", organizationId);
+        .eq("organization_id", organizationId)
+        .select("scope_id")
+        .maybeSingle();
+
+      // T110 / SC-013: o material daquela operadora passou a ser buscável, então a lacuna
+      // que existia por falta dele deixa de existir — sem o corretor ter de voltar na
+      // Central fechar um aviso que o sistema já sabe estar resolvido. `gravados` entra na
+      // decisão: material que indexou com ZERO trechos não cobre nada, e fechar ali faria
+      // o corretor acreditar que resolveu.
+      await fecharLacunasDoEscopo(
+        admin,
+        {
+          organizationId,
+          scopeId: (fonte as { scope_id: string | null } | null)?.scope_id ?? null,
+          trechosGravados: gravados,
+        },
+        logger,
+      );
     }
     return;
   }

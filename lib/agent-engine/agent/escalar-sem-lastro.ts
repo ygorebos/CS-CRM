@@ -43,6 +43,15 @@ export interface EscalacaoSemLastro {
    */
   escopo: string | null;
   /**
+   * O ID do escopo, quando o vínculo do contato o resolve (T110, migration 0136).
+   *
+   * Separado de `escopo` de propósito: aquele é o nome que o corretor LÊ, e pode vir de
+   * uma menção do cliente na conversa — texto, sem linha correspondente. Este é o
+   * PONTEIRO, e é o que permite fechar a lacuna quando o material daquela operadora
+   * chega. Nulo é frequente e legítimo; nulo nunca é fechado por chegada de material.
+   */
+  escopoId?: string | null;
+  /**
    * FR-042 (T137): operadoras que existem no catálogo, cobririam este assunto, e estão
    * **desligadas** para este corretor.
    *
@@ -104,8 +113,8 @@ export async function escalarAssistenciaSemLastro(
         ];
 
   const { rowCount } = await db.query(
-    `insert into agent_inbox_items (organization_id, kind, severity, title, body, ref_kind, ref_id)
-     select $1, 'assistance_without_grounding', 'warn', $2, $3, 'contact', $4
+    `insert into agent_inbox_items (organization_id, kind, severity, title, body, ref_kind, ref_id, knowledge_scope_id)
+     select $1, 'assistance_without_grounding', 'warn', $2, $3, 'contact', $4, $5
      where not exists (
        select 1 from agent_inbox_items
        where organization_id = $1
@@ -125,6 +134,7 @@ export async function escalarAssistenciaSemLastro(
         ...linhaFr042,
       ].join('\n'),
       input.leadId,
+      input.escopoId ?? null,
     ],
   );
 
