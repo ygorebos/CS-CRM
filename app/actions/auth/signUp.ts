@@ -52,7 +52,9 @@ export async function signUp(input: SignupInput): Promise<SignUpResult> {
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      emailRedirectTo: `${origin}/auth/confirm`,
+      // Carimbo nosso, pelo mesmo motivo de requestPasswordReset: no PKCE o
+      // GoTrue só acrescenta `&code=…` e não informa o fluxo de origem.
+      emailRedirectTo: `${origin}/auth/confirm?type=signup`,
       data: { org_name: parsed.data.org_name },
     },
   });
