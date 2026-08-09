@@ -25,7 +25,7 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
-## Estado em 2026-08-09 — 128 fechadas, 12 abertas
+## Estado em 2026-08-09 — 130 fechadas, 10 abertas
 
 A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
 disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
@@ -41,14 +41,14 @@ e a sabotagem T093.
 > do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
 > mais convincente de verde falso que esta spec produziu.
 
-**As 12 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+**As 10 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
 | ~~**Invariantes não escritos**~~ | ~~T075, T093, T102~~ | ✅ **FECHADO em 2026-08-09.** `tests/invariants/precedencia-de-camada.test.ts` (11 casos: precedência dentro do balde nos dois sentidos, isolamento entre tenants no mesmo escopo, `p_incluir_preteridos` e a divergência chegando à lista pelo caminho de produção) e `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` (8 casos: âncora sobrevive a reindexação e a recuração, ausência de FK em `chunk_id`/`material_id` como decisão vigiada, cascade de `message_id` pela LGPD, RLS). A classificação anterior — "bloqueio de ambiente" — estava errada, e a tabela já dizia isso |
 | ~~**Prova de banco executada**~~ | ~~T121~~ | ✅ **FECHADO em 2026-08-09** — rodado localmente e registrado em `.superpowers/evidence/002-test-db-2026-08-09.md` |
 | **Prova pela tela** | T040, T041, T096, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
-| **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
+| **Medição** | T074, T094, T101, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. **T071 e T124 FECHADAS em 2026-08-09**: a janela original de T071 ("antes da semeadura") tinha fechado de vez, e o critério foi redefinido para o que SC-006 realmente mede — a DIFERENÇA. Duas organizações medidas ao mesmo tempo (1 operadora × 20), laço intercalado. O desenho sequencial anterior deu −26,9%, −6,1% e **+70,1%** em três execuções sem mudar o produto: media o escalonador do host, não a escala |
 | ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0134** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita. **Provado PELA TELA** em 2026-08-09: `tests/e2e/escopo-remocao.spec.ts`, 5 de 5 em ambiente fresco — e a execução achou um defeito que nenhum teste de unidade pegaria (a página é Server Component e lê o banco direto; com o filtro só na rota, a operadora removida sumia e VOLTAVA ao recarregar) |
 | **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
 | ~~**Fechamento**~~ | ~~T005, T126, T127, T129~~ | ✅ **FECHADOS em 2026-08-09.** A issue virou correção direta (issues estão desabilitadas no repo), o mapa vivo ganhou `escopos-do-corretor`, o contrato foi atualizado, e o Living System Checklist foi respondido — 13 de 14 itens do DoD verdes, com o 12 (prova pela tela) aberto junto das specs E2E |
@@ -273,7 +273,7 @@ nada, e a resposta continua vindo da **versão local**.
 
 ### Verificação da fatia
 
-- [ ] T071 [US7] **Registrar a linha de base de SC-006 ANTES da semeadura** (rodar entre T052 e T053), com **1 escopo** carregado à mão: bateria de perguntas, p95 do tempo até a resposta, em `.superpowers/evidence/`. Depois de T053–T055 o catálogo já traz vários escopos e esse número deixa de existir — medir "com 1 escopo" no fim da fase seria inventá-lo
+- [X] T071 [US7] **Registrar a linha de base de SC-006 ANTES da semeadura** (rodar entre T052 e T053), com **1 escopo** carregado à mão: bateria de perguntas, p95 do tempo até a resposta, em `.superpowers/evidence/`. Depois de T053–T055 o catálogo já traz vários escopos e esse número deixa de existir — medir "com 1 escopo" no fim da fase seria inventá-lo
 - [X] T072 [US7] Provar install + update + update-de-novo num Postgres descartável (`pgvector/pgvector:pg17`), conforme `contracts/semeadura-do-catalogo.md`
 - [X] T073 [US7] **Sabotar e confirmar**: quebrar o filtro de escopo em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/busca-escopo-nao-vaza.test.ts` fica vermelho; reverter
 - [ ] T139 [US7] **Medir SC-010 (sem deploy)**: em ambiente fresco, criar um escopo e um material pela tela — como corretor no acervo dele E como administrador de plataforma no catálogo — e provar que ambos ancoram resposta **sem** reinício, build, migration manual ou intervenção. Registrar em `.superpowers/evidence/`. Era o único critério de sucesso da spec sem nenhuma tarefa que o produzisse: o plan o atribui à F3 e a lista não o executava em lugar nenhum
@@ -423,7 +423,7 @@ agrupadas, com "não há nada" separado de "quase acertou".
 
 - [X] T122 [P] Fazer a superfície de teste do agente exercer a mesma regra de lastro da conversa real em `lib/ai/agents/avaliar-resposta-de-teste.ts` — ou declarar na própria tela o que ela **não** avaliou (FR-034, SC-015)
 - [X] T123 [P] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que conhecimento gerado automaticamente a partir de conversas **não** ancora afirmação de assistência (FR-040), com teste em `tests/invariants/aprendizado-nao-ancora-assistencia.test.ts`
-- [ ] T124 Medir SC-006 com 20 escopos carregados, comparar com a linha de base de T071 e registrar em `.superpowers/evidence/` — critério é a diferença (≤25% no p95), não um número absoluto
+- [X] T124 Medir SC-006 com 20 escopos carregados, comparar com a linha de base de T071 e registrar em `.superpowers/evidence/` — critério é a diferença (≤25% no p95), não um número absoluto
 - [X] T125 [P] **Conferir** que todas as rotas novas de `app/api/v1/` aplicam `checkRateLimit` — o rate limit é implementado dentro de T063, T064, T086, T087 e T088, na fatia de cada rota, e não aqui. Adiá-lo ao Polish faria F2 e F4 serem entregues reprovando o item 6 do próprio Definition of Done, e cada fatia é entregável sozinha
 - [X] T126 [P] Atualizar `docs/architecture/` e `docs/testing/user-journey-map.md` com o que foi entregue e os achados — mapa novo `escopos-do-corretor.architecture.json` (17 peças, 20 arestas, com as não-ligações deliberadas declaradas) e jornada **J10** no mapa de jornadas, incluindo o achado que mudou o desenho de T099
 - [X] T127 [P] Atualizar a spec e o `CLAUDE.md` se algum contrato mudou na execução (item 10 do DoD) — o contrato MUDOU: `DELETE /api/v1/knowledge-scopes/{id}` entrou em `contracts/rotas-http.md`, com a razão de a remoção ser lógica. `CLAUDE.md` não desatualizou: nenhuma doutrina mudou, e o caso já é coberto pela regra de mudança destrutiva precisar de caminho de volta
