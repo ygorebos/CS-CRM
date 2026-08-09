@@ -47,7 +47,11 @@ export async function requestPasswordReset(
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${origin}/auth/confirm`,
+    // `?type=recovery` é NOSSO carimbo, não do GoTrue. No PKCE ele só acrescenta
+    // `&code=…` e não diz de que fluxo veio — sem este parâmetro, `/auth/confirm`
+    // não sabe distinguir redefinição de confirmação de cadastro e mandaria quem
+    // veio trocar a senha para o onboarding.
+    redirectTo: `${origin}/auth/confirm?type=recovery`,
   });
 
   if (error) {

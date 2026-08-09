@@ -164,6 +164,58 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
   });
 
   /**
+   * PKCE — o formato que o app REALMENTE emite, e que ninguém testava.
+   *
+   * `@supabase/ssr` usa PKCE por padrão: `resetPasswordForEmail` grava um
+   * `code_verifier` em cookie e o e-mail chega como `…/verify?token=pkce_…`,
+   * que redireciona para `/auth/confirm?code=<uuid>`.
+   *
+   * Dois defeitos viviam aí, medidos em 2026-08-09:
+   *
+   * 1. `/auth/confirm` não lia `code` — o primeiro clique caía no ramo cego e
+   *    terminava em "Link inválido ou expirado".
+   * 2. O verifier era `SameSite=Strict`, e o clique no e-mail é navegação
+   *    cross-site. Medido com `allHeaders()`: **0 cookies** chegavam. Mesmo com
+   *    o ramo do `code`, a troca não teria como fechar.
+   *
+   * Nenhum teste pegava porque todos usavam `admin/generate_link`, que emite
+   * token NÃO-PKCE — um caminho que usuário nenhum percorre. Doutrina de
+   * medição, regra 5: dublê responde no formato que você escreveu.
+   */
+  test("o cookie de PKCE nasce Lax, senão o link do e-mail nunca fecha", async ({ page, context }) => {
+    await page.goto("/login/forgot");
+    await page.fill("#email", EMAIL);
+    await page.click('button[type="submit"]');
+    await page.waitForTimeout(3_000);
+
+    const verificadores = (await context.cookies()).filter((c) => c.name.includes("code-verifier"));
+    expect(verificadores.length, "pedir a redefinição tem que gravar o verifier").toBeGreaterThan(0);
+    for (const c of verificadores) {
+      // `Strict` não viaja em navegação vinda de outro site — e o clique no
+      // e-mail é exatamente isso. Uma palavra de regressão aqui quebra a
+      // redefinição de senha inteira, em silêncio.
+      expect(c.sameSite, `${c.name} precisa ser Lax`).toBe("Lax");
+      expect(c.httpOnly, `${c.name} continua fora do alcance do JS`).toBe(true);
+    }
+  });
+
+  test("/auth/confirm?code= entra na troca do PKCE, e não no ramo cego", async ({ page }) => {
+    const visitadas: string[] = [];
+    page.on("framenavigated", (f) => {
+      if (f === page.mainFrame()) visitadas.push(new URL(f.url()).pathname);
+    });
+
+    await page.goto("/auth/confirm?type=recovery&code=00000000-0000-4000-8000-000000000000");
+    await expect(page).toHaveURL(/\/login\?error=/, { timeout: 20_000 });
+
+    // O sinal é a AUSÊNCIA do desvio: se o `code` fosse ignorado, a rota cairia
+    // no ramo cego e passaria por /auth/sessao. Passar por lá é a regressão.
+    expect(visitadas, `passou por /auth/sessao: ${visitadas.join(" -> ")}`).not.toContain(
+      "/auth/sessao",
+    );
+  });
+
+  /**
    * Fixação de sessão / login-CSRF, medida em 2026-08-09 num navegador limpo: a
    * primeira versão de `/auth/sessao` chamava `setSession` sozinha, então
    * `#access_token=<token de outra conta>` deixava quem abrisse o link logado no

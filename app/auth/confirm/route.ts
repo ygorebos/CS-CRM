@@ -60,6 +60,77 @@ export async function GET(request: NextRequest) {
   const redirectTo = (path: string) =>
     NextResponse.redirect(new URL(path, env.NEXT_PUBLIC_APP_URL));
 
+  // ── PKCE: o formato que o app REALMENTE emite, e que este arquivo ignorava ──
+  //
+  // `@supabase/ssr` usa PKCE por padrão. `resetPasswordForEmail` chamado da
+  // Server Action grava um `code_verifier` em cookie e manda um link
+  // `…/verify?token=pkce_…`, que redireciona para `/auth/confirm?code=<uuid>` —
+  // **query `code`**, sem `token_hash` e sem fragmento nenhum.
+  //
+  // Nada aqui lia `code`, então o primeiro clique caía no ramo cego e terminava
+  // em "Link inválido ou expirado". Medido em 2026-08-09 com o link do dono:
+  // primeiro clique = `link_invalido`; o segundo, com o token já gasto, virava
+  // `link_expirado` — o que fazia o defeito parecer problema de validade.
+  //
+  // Isto nunca funcionou, e nenhum teste pegava: `admin/generate_link` emite
+  // token NÃO-PKCE, então toda medição feita por ele passava por um caminho que
+  // usuário nenhum percorre.
+  const codigoPkce = url.searchParams.get("code");
+  const erroNaQuery = url.searchParams.get("error_code") ?? url.searchParams.get("error");
+
+  // O GoTrue devolve o erro do PKCE na QUERY (e repetido no fragmento). Ler a
+  // query aqui é o que evita depender do fragmento, que o servidor não vê.
+  if (erroNaQuery) {
+    await audit({
+      action: "auth.email_link_rejected",
+      metadata: { type, reason: url.searchParams.get("error_description"), code: erroNaQuery },
+      requestId,
+    });
+    return redirectTo(
+      erroNaQuery === "otp_expired" ? "/login?error=link_expirado" : "/login?error=link_invalido",
+    );
+  }
+
+  if (codigoPkce) {
+    const supabasePkce = await createClient();
+    const { data, error } = await supabasePkce.auth.exchangeCodeForSession(codigoPkce);
+
+    if (error || !data.user) {
+      await audit({
+        action: "auth.email_link_rejected",
+        metadata: { type, reason: error?.message ?? "no_user", code: error?.code ?? "pkce" },
+        requestId,
+      });
+      return redirectTo(
+        tokenGasto(error) ? "/login?error=link_expirado" : "/login?error=link_invalido",
+      );
+    }
+
+    // O `type` vem do nosso próprio `redirectTo` (requestPasswordReset /
+    // signUp o carimbam): o GoTrue só acrescenta `code`, não diz de que fluxo
+    // veio. Sem ele, recovery e signup terminariam no mesmo lugar.
+    if (type === "recovery") return redirectTo("/login/reset");
+
+    try {
+      await ensureTenantForUser(data.user);
+    } catch (e) {
+      await audit({
+        action: "auth.signup_provision_failed",
+        actorUserId: data.user.id,
+        metadata: { reason: e instanceof Error ? e.message : String(e), via: "pkce" },
+        requestId,
+      });
+      return redirectTo("/login?error=provisionamento");
+    }
+    void audit({
+      action: "auth.signup_confirmed",
+      actorUserId: data.user.id,
+      metadata: { via: "pkce" },
+      requestId,
+    });
+    return redirectTo("/onboarding/welcome");
+  }
+
   if (!tokenHash || !type) {
     // NÃO é necessariamente link inválido — e tratá-lo como tal custou uma
     // sessão inteira de diagnóstico em 2026-08-09. Com o template PADRÃO do
