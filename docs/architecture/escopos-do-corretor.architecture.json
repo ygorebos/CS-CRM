@@ -1,0 +1,210 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Escopos do corretor — ligar, carregar, remover, e o que a busca enxerga",
+    "subtitle": "spec 002, fatias F2/F3/F4: as duas metades de FR-008, a precedência de camada e a remoção que não podia ser um `delete`",
+    "output": "escopos-do-corretor.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "humano", "label": "O que o corretor vê" },
+    { "id": "borda", "label": "Borda HTTP (manager+)" },
+    { "id": "dados", "label": "Tabelas do tenant" },
+    { "id": "catalogo", "label": "Partição curada (plataforma)" },
+    { "id": "busca", "label": "Runtime do agente" }
+  ],
+  "nodes": [
+    {
+      "id": "tela",
+      "lane": "humano",
+      "col": 1,
+      "type": "frontend",
+      "label": "/app/ai/knowledge/scopes",
+      "sublabel": "lista · interruptor · Remover (só o próprio)"
+    },
+    {
+      "id": "regras",
+      "lane": "humano",
+      "col": 2,
+      "type": "module",
+      "label": "_regras.ts",
+      "sublabel": "podeRemover · perguntaDeRemocao · avisoDeAlternancia — copy e regra fora do JSX"
+    },
+    {
+      "id": "materiais",
+      "lane": "humano",
+      "col": 1,
+      "type": "frontend",
+      "label": "/app/ai/knowledge/sources",
+      "sublabel": "N materiais por escopo (T090)"
+    },
+    {
+      "id": "lista",
+      "lane": "borda",
+      "col": 3,
+      "type": "route",
+      "label": "GET/POST /api/v1/knowledge-scopes",
+      "sublabel": "cursor · 409 escopo_ja_existe · filtra deleted_at is null"
+    },
+    {
+      "id": "patch",
+      "lane": "borda",
+      "col": 4,
+      "type": "route",
+      "label": "PATCH /knowledge-scopes/{id}",
+      "sublabel": "renomear · LIGAR/DESLIGAR — a trava 4 de FR-008"
+    },
+    {
+      "id": "delete",
+      "lane": "borda",
+      "col": 5,
+      "type": "route",
+      "label": "DELETE /knowledge-scopes/{id}",
+      "sublabel": "arquiva o acervo, DEPOIS marca deleted_at · 403 no espelho"
+    },
+    {
+      "id": "materialpost",
+      "lane": "borda",
+      "col": 3,
+      "type": "route",
+      "label": "POST /knowledge-scopes/{id}/materials",
+      "sublabel": "formato e tamanho declarados ANTES de aceitar (FR-007)"
+    },
+    {
+      "id": "escopos",
+      "lane": "dados",
+      "col": 6,
+      "type": "table",
+      "label": "knowledge_scopes",
+      "sublabel": "is_active · catalog_scope_id (espelho) · deleted_at (0134)"
+    },
+    {
+      "id": "fontes",
+      "lane": "dados",
+      "col": 6,
+      "type": "table",
+      "label": "ai_knowledge_sources",
+      "sublabel": "scope_id XOR applies_to_all — a constraint que proibiu o `delete`"
+    },
+    {
+      "id": "trechos",
+      "lane": "dados",
+      "col": 7,
+      "type": "table",
+      "label": "ai_chunks",
+      "sublabel": "scope_id copiado da fonte pelo trigger trg_ai_chunks_escopo"
+    },
+    {
+      "id": "groundings",
+      "lane": "dados",
+      "col": 7,
+      "type": "table",
+      "label": "message_groundings",
+      "sublabel": "SEM FK para trecho/material — a cópia congelada da origem"
+    },
+    {
+      "id": "divergencias",
+      "lane": "dados",
+      "col": 7,
+      "type": "table",
+      "label": "knowledge_divergences",
+      "sublabel": "o que o desempate silenciou, com occurrences"
+    },
+    {
+      "id": "catalogoescopos",
+      "lane": "catalogo",
+      "col": 6,
+      "type": "table",
+      "label": "catalog_scopes / catalog_materials",
+      "sublabel": "curados pela plataforma, sem organization_id"
+    },
+    {
+      "id": "sincroniza",
+      "lane": "catalogo",
+      "col": 5,
+      "type": "function",
+      "label": "fn_sincronizar_escopos_do_catalogo",
+      "sublabel": "cria o ESPELHO por tenant, sempre desligado (A-20)"
+    },
+    {
+      "id": "buscar",
+      "lane": "busca",
+      "col": 8,
+      "type": "function",
+      "label": "fn_buscar_lastro (0123→0134)",
+      "sublabel": "security definer · tenant derivado do agente, nunca do chamador"
+    },
+    {
+      "id": "precedencia",
+      "lane": "busca",
+      "col": 9,
+      "type": "logic",
+      "label": "precedência DENTRO do balde",
+      "sublabel": "tenant vence catálogo no MESMO balde; 'todos' sobrevive"
+    },
+    {
+      "id": "registro",
+      "lane": "busca",
+      "col": 9,
+      "type": "module",
+      "label": "divergencia.ts",
+      "sublabel": "p_incluir_preteridos → divergenciasDe → registrarDivergencias"
+    }
+  ],
+  "edges": [
+    { "id": "e1", "from": "tela", "to": "regras", "label": "quem ganha botão de remover, e o que a pergunta diz ANTES do clique" },
+    { "id": "e2", "from": "tela", "to": "lista", "label": "GET com leitura em lotes — N operadoras, sem teto de tela (T100)" },
+    { "id": "e3", "from": "tela", "to": "patch", "label": "UM PATCH { is_active } por clique — SC-011 cronometra este gesto" },
+    { "id": "e4", "from": "tela", "to": "delete", "label": "só depois de confirmar; a linha sai da lista DEPOIS do 200, nunca antes" },
+    { "id": "e5", "from": "materiais", "to": "materialpost", "label": "upload por escopo; 202 e o material nasce em building" },
+    { "id": "e6", "from": "lista", "to": "escopos", "label": "insert/select .eq(organization_id) .is(deleted_at, null)" },
+    { "id": "e7", "from": "patch", "to": "escopos", "label": "update is_active — sem cache, sem job: a próxima pergunta já muda" },
+    { "id": "e8", "from": "delete", "to": "fontes", "label": "1º: is_active=false, status='archived' — o acervo é arquivado, não apagado" },
+    { "id": "e9", "from": "delete", "to": "escopos", "label": "2º: deleted_at + is_active=false — DUAS travas, porque o PATCH acima reativa" },
+    { "id": "e10", "from": "materialpost", "to": "fontes", "label": "insert com scope_id OU applies_to_all — nunca os dois, nunca nenhum" },
+    { "id": "e11", "from": "fontes", "to": "trechos", "label": "trigger trg_ai_chunks_escopo copia o balde da fonte para o trecho" },
+    { "id": "e12", "from": "catalogoescopos", "to": "sincroniza", "label": "cada escopo curado vira um espelho por organização" },
+    { "id": "e13", "from": "sincroniza", "to": "escopos", "label": "insert com catalog_scope_id — é o que torna a linha NÃO removível" },
+    { "id": "e14", "from": "escopos", "to": "buscar", "label": "CTE escopo_ativo: is_active AND deleted_at is null" },
+    { "id": "e15", "from": "trechos", "to": "buscar", "label": "camada tenant: applies_to_all OU scope_id = escopo ativo" },
+    { "id": "e16", "from": "catalogoescopos", "to": "buscar", "label": "camada catálogo: por slug, só a MAIOR versão não-inerte (FR-037)" },
+    { "id": "e17", "from": "buscar", "to": "precedencia", "label": "marca preterido = catálogo com tenant no MESMO balde" },
+    { "id": "e18", "from": "precedencia", "to": "registro", "label": "p_incluir_preteridos=true devolve o rejeitado, marcado" },
+    { "id": "e19", "from": "registro", "to": "divergencias", "label": "upsert por (org, vencedor, perdedor, assunto) — occurrences sobe" },
+    { "id": "e20", "from": "buscar", "to": "groundings", "label": "a âncora vira registro consultável, com a cópia congelada da origem" }
+  ],
+  "cards": [
+    {
+      "dot": "rose",
+      "title": "A remoção NÃO é um `delete`, e a razão é do banco",
+      "items": [
+        "medido em 2026-08-09: `delete from knowledge_scopes` com material no balde ergue `ai_knowledge_sources_scope_xor_all`",
+        "a FK de ai_knowledge_sources.scope_id é `on delete set null`; a constraint da 0118 exige balde OU 'vale para todos' — apagar deixaria a fonte sem nenhum dos dois",
+        "soltar o ponteiro com applies_to_all=true faria o material da operadora REMOVIDA responder a todo mundo, sobre tudo: o oposto de FR-008, e invisível na tela",
+        "FK para cascade apagaria o acervo do corretor — irreversível numa instância única",
+        "daí `deleted_at` (0134), com o acervo ARQUIVADO e a rastreabilidade intacta"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Duas travas para a inércia, e por que uma não bastava",
+      "items": [
+        "a rota escreve deleted_at E is_active=false; a CTE escopo_ativo exige os dois",
+        "com uma trava só, `update ... set is_active = true` ressuscitaria o material removido — e esse UPDATE existe: é o PATCH da mesma rota",
+        "vigiado por tests/invariants/escopo-removido-fica-inerte.test.ts"
+      ]
+    },
+    {
+      "dot": "sky",
+      "title": "Não-ligações deliberadas (ausência de aresta ≠ aresta esquecida)",
+      "items": [
+        "message_groundings NÃO tem FK para ai_chunks nem para catalog_materials: com cascade a reindexação apagaria o histórico; com restrict a reindexação falharia",
+        "o espelho do catálogo NÃO tem caminho até o DELETE: fn_sincronizar_escopos_do_catalogo o recria, e uma remoção que volta sozinha seria mentira",
+        "a busca NUNCA é exposta por rota HTTP do tenant — fn_buscar_lastro é chamada pelo runtime, por conexão de serviço (research D2)",
+        "linha preterida NÃO ancora resposta: ela só existe para virar divergência"
+      ]
+    }
+  ],
+  "mainPath": ["tela", "delete", "escopos", "buscar", "precedencia"]
+}
