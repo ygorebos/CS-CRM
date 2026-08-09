@@ -7,6 +7,7 @@ import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/auth/schem
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
+import { urlDeCallbackDeEmail } from "@/lib/auth/link-de-email";
 
 export type RequestPasswordResetResult =
   | { ok: true }
@@ -47,11 +48,10 @@ export async function requestPasswordReset(
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    // `?type=recovery` é NOSSO carimbo, não do GoTrue. No PKCE ele só acrescenta
-    // `&code=…` e não diz de que fluxo veio — sem este parâmetro, `/auth/confirm`
-    // não sabe distinguir redefinição de confirmação de cadastro e mandaria quem
-    // veio trocar a senha para o onboarding.
-    redirectTo: `${origin}/auth/confirm?type=recovery`,
+    // O carimbo `?type=` é NOSSO, não do GoTrue, e o endereço vem de UM lugar
+    // só — os templates de e-mail dependem de ele terminar com query. Ver
+    // `lib/auth/link-de-email.ts`.
+    redirectTo: urlDeCallbackDeEmail(origin, "recovery"),
   });
 
   if (error) {
