@@ -4,6 +4,7 @@ import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 
 import { createClient } from "@/lib/supabase/server";
+import { mfaDispensadaNesteAmbiente } from "@/lib/auth/mfa-ambiente";
 import { loginSchema, type LoginInput } from "@/lib/auth/schemas";
 import { audit, hashEmail } from "@/lib/audit";
 import {
@@ -89,10 +90,16 @@ export async function signInWithPassword(
 
   // MFA gating — if the user has any verified TOTP factor enrolled, they must
   // complete the challenge in /login/mfa before reaching the app.
-  const { data: factorsData } = await supabase.auth.mfa.listFactors();
-  const verifiedTotp = factorsData?.totp?.find((f) => f.status === "verified");
-  if (verifiedTotp) {
-    return { ok: false, error: "mfa_required", challengeId: verifiedTotp.id };
+  //
+  // Fora de produção a exigência é dispensável (ver `lib/auth/mfa-ambiente.ts`):
+  // a chave só vale com o app em endereço local, então produção continua
+  // exigindo o fator mesmo se a variável vazar para lá.
+  if (!mfaDispensadaNesteAmbiente()) {
+    const { data: factorsData } = await supabase.auth.mfa.listFactors();
+    const verifiedTotp = factorsData?.totp?.find((f) => f.status === "verified");
+    if (verifiedTotp) {
+      return { ok: false, error: "mfa_required", challengeId: verifiedTotp.id };
+    }
   }
 
   await audit({
