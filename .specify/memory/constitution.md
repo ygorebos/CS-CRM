@@ -1,6 +1,27 @@
 <!--
-SYNC IMPACT REPORT
+SYNC IMPACT REPORT (v2.5.0 — 2026-08-09)
 ==================
+Version change: 2.4.0 → 2.5.0
+Bump rationale: MINOR — princípio novo acrescentado, nenhum removido nem redefinido.
+
+Princípio adicionado:
+  - XV. Produção é o Self-Hosted; o Supabase Cloud é Desenvolvimento (NÃO NEGOCIÁVEL)
+
+Motivo: o eixo é o INVERSO da intuição da indústria e não estava escrito em lugar nenhum.
+O `.env.hostgator.example` sugere `https://SEU-PROJETO.supabase.co` e o
+`docker-compose.prod.yml` não tem Postgres — dois sinais que levam o leitor a concluir
+sozinho, e errado, que o Cloud é produção. Corrigido pelo dono em 2026-08-09, depois de
+uma sessão inteira ter operado sob a inversão.
+
+Artefatos propagados nesta emenda:
+  ✅ CLAUDE.md            — seção "Bancos: qual é qual"
+  ✅ AGENTS.md            — mesmo contrato, forma portável
+  ✅ docs/runbooks/supabase-dev-local.md — aviso de eixo no topo
+  ⚠️ Endereço do self-hosted de produção: NÃO documentado aqui de propósito — endereço é
+     configuração e mora em runbook, não na constituição. Falta preencher em
+     docs/runbooks/ (o dono tem o dado; nenhuma sessão o mediu ainda).
+
+------------------------------- histórico ----------------------------------------
 Version change: TEMPLATE (não ratificada) → 1.0.0
 Bump rationale: MAJOR inicial — primeira ratificação. Todos os placeholders do template
 foram substituídos por princípios concretos derivados de CLAUDE.md, README.md e
@@ -767,6 +788,33 @@ mas só é honesta se a durabilidade estiver do lado de fora dele. Sem isso, "se
 "toda mensagem recebida durante o reinício foi perdida", e mensagem perdida é cliente sem
 resposta — o defeito mais caro deste produto e o único que o usuário não tem como detectar.
 
+### XV. Produção é o Self-Hosted; o Supabase Cloud é Desenvolvimento (NÃO NEGOCIÁVEL)
+
+O banco de **produção** do DeskcommCRM é o **Supabase self-hosted, operado por nós**. O projeto
+no **Supabase Cloud é o banco de DESENVOLVIMENTO** — é para onde o `.env.local` aponta e é onde
+se erra de graça.
+
+- Toda sessão MUST confirmar qual dos dois está do outro lado **antes** de escrever, e MUST
+  declarar o alvo em voz alta ao relatar. Nome de projeto, hábito e memória MUST NOT servir de
+  prova; o que prova é o endereço configurado na sessão.
+- Um endereço `*.supabase.co` MUST ser lido como **desenvolvimento**. Ele nunca é o alvo de
+  operação de produção, nem de conferência de "como está lá".
+- Um relatório que diga "em produção" MUST nomear qual banco foi consultado. "Consultei o banco"
+  sem dizer qual é afirmação sem referente, e a confusão que ela cria é a mais cara do repo.
+- O Princípio III (migration em três artefatos) e o expand/contract valem para o self-hosted **e**
+  para o Cloud. O Cloud ser descartável MUST NOT virar licença para `ALTER` solto: ele é o
+  ensaio do que vai rodar em produção, e ensaio com passo pulado não ensaia nada.
+
+**Rationale**: a intuição da indústria é o contrário — Cloud soa "gerenciado, portanto produção";
+self-hosted soa "laboratório". Aqui é ao contrário, e **nada no repositório dizia isso**: o
+`.env.hostgator.example` chega a sugerir `https://SEU-PROJETO.supabase.co` para a instalação, e
+o `docker-compose.prod.yml` não tem serviço de Postgres — o que faz o leitor concluir sozinho, e
+concluir errado, que o banco externo do compose é o Cloud. Uma sessão inteira de 2026-08-09
+operou sob a inversão e chegou a relatar ao dono que o gateway de desenvolvimento "escreve em
+produção". Nada quebrou porque a verdade era a mais segura das duas — mas o erro simétrico
+(tratar produção como rascunho) escreve no banco que não tem versão de escape, e num SaaS de
+instância única não existe clone antigo para servir de rede.
+
 ## Restrições de Stack e Configuração
 
 **Stack canônica** (desvio exige justificativa registrada na Complexity Tracking do plano):
@@ -957,4 +1005,4 @@ ciclo: é o que impede a próxima sessão de começar errado.
 `docs/index.md` (índice dos docs com regra de precedência),
 `docs/current-state.md` (o que está pronto, incompleto e quebrado).
 
-**Version**: 2.4.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-08
+**Version**: 2.5.0 | **Ratified**: 2026-08-07 | **Last Amended**: 2026-08-09

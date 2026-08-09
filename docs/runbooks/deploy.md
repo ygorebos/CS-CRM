@@ -4,6 +4,21 @@ O caminho normal de deploy **não constrói nada na VPS**: o CI publica a imagem
 GHCR e a VPS só puxa. Construir localmente é exceção de emergência, e tem custo —
 está documentado no fim.
 
+> ### ⚠️ Qual banco é produção (é o inverso do que parece)
+>
+> **Produção é o Supabase SELF-HOSTED, operado por nós. O projeto no Supabase Cloud
+> (`*.supabase.co`) é o banco de DESENVOLVIMENTO** — é para onde o `.env.local`
+> aponta. Constituição **v2.5.0**, Princípio XV.
+>
+> Dois sinais deste repo empurram para a conclusão errada, e continuam aqui:
+> `.env.hostgator.example` sugere `https://SEU-PROJETO.supabase.co`, e o
+> `docker-compose.prod.yml` **não tem serviço de Postgres** — o banco é externo por
+> desenho, e é fácil supor que o externo seja o Cloud.
+>
+> Antes de qualquer operação de banco: confirme o endereço que a sessão está usando,
+> e **diga qual banco** ao relatar. "Rodei no banco", sem dizer qual, é afirmação sem
+> referente.
+
 ---
 
 ## 1. O comando

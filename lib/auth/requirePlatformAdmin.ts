@@ -18,6 +18,8 @@
  */
 import { redirect } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
+
+import { mfaDispensadaNesteAmbiente } from "@/lib/auth/mfa-ambiente";
 import { createClient } from "@/lib/supabase/server";
 
 export interface PlatformAdminInfo {
@@ -53,7 +55,9 @@ export async function requirePlatformAdmin(): Promise<PlatformAdminContext> {
     redirect("/admin/forbidden");
   }
 
-  if (paRow.mfa_required) {
+  // A dispensa vale só com o app em endereço local (`lib/auth/mfa-ambiente.ts`).
+  // Em produção este ramo continua obrigatório para super-admin.
+  if (paRow.mfa_required && !mfaDispensadaNesteAmbiente()) {
     const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     if (aalData?.currentLevel !== "aal2") {
       redirect("/login/mfa?next=/admin");
