@@ -145,9 +145,26 @@ function makeSupabase(
    * `canaisVivos`: as sessões não-arquivadas e WORKING da organização — o que
    * decide se a conversa órfã é adotada, fica onde está, ou é ambígua demais.
    */
-  opts: { semColunaArquivada?: boolean; canaisVivos?: Row[] } = {},
+  opts: {
+    semColunaArquivada?: boolean;
+    canaisVivos?: Row[];
+    ecoOcupando?: string;
+    ecoAtrasado?: string;
+  } = {},
 ) {
-  const state: { message: Row | null } = { message: null };
+  const state: {
+    message: Row | null;
+    ecoOcupando: string | null;
+    ecoAtrasado: string | null;
+    ecosRemovidos: number;
+  } = {
+    message: null,
+    ecoAtrasado: opts.ecoAtrasado ?? null,
+    // `ecoOcupando`: o `external_id` que o eco do gateway já gravou antes de
+    // este envio conseguir carimbar o seu. null = sem corrida.
+    ecoOcupando: opts.ecoOcupando ?? null,
+    ecosRemovidos: 0,
+  };
 
   const client = {
     from(table: string) {
@@ -207,12 +224,80 @@ function makeSupabase(
             return { select: () => ({ single: async () => ({ data: { ...state.message }, error: null }) }) };
           },
           update: (patch: Row) => {
+            // O eco do próprio envio já tomou este `external_id`: o índice
+            // `messages_org_external_id_unique` recusa. É a corrida real medida
+            // em 2026-08-09 — o gateway é local e o eco volta em ~200 ms.
+            const colide =
+              state.ecoOcupando !== null &&
+              typeof patch.external_id === 'string' &&
+              patch.external_id === state.ecoOcupando;
+            if (colide) {
+              return {
+                eq: () => ({
+                  select: () => ({
+                    maybeSingle: async () => ({
+                      data: null,
+                      error: {
+                        code: '23505',
+                        message:
+                          'duplicate key value violates unique constraint "messages_org_external_id_unique"',
+                      },
+                    }),
+                  }),
+                }),
+              };
+            }
             state.message = { ...state.message, ...patch };
             return {
               eq: () => ({
                 select: () => ({ maybeSingle: async () => ({ data: { ...state.message }, error: null }) }),
               }),
             };
+          },
+          // A remoção do eco. Encadeável e aguardável; libera o `external_id`.
+          //
+          // O dublê HONRA os filtros, e isso não é capricho: a primeira versão
+          // ignorava todos e apagava sempre — com ela, repor o
+          // `.eq('sent_via','external_device')` no código deixava a suíte VERDE
+          // (medido). O eco do gateway nasce `sent_via = 'crm'`, então um filtro
+          // por `external_device` NÃO pode alcançá-lo, e o dublê precisa dizer
+          // isso.
+          delete: () => {
+            let filtraSentViaDispositivo = false;
+            const alvo: {
+              eq: (coluna?: string, valor?: unknown) => typeof alvo;
+              in: () => typeof alvo;
+              neq: () => typeof alvo;
+              then: (r: (v: { error: null }) => void) => void;
+            } = {
+              eq: (coluna?: string, valor?: unknown) => {
+                if (coluna === 'sent_via' && valor === 'external_device') filtraSentViaDispositivo = true;
+                return alvo;
+              },
+              in: () => alvo,
+              neq: () => alvo,
+              then: (resolver) => {
+                state.ecosRemovidos += 1;
+                // O eco do gateway é `sent_via = 'crm'`: filtro por
+                // `external_device` passa longe dele.
+                if (filtraSentViaDispositivo) {
+                  resolver({ error: null });
+                  return;
+                }
+                // `ecoAtrasado` modela a corrida ESTREITA: o eco ainda não tinha
+                // chegado quando a remoção rodou, e chega logo depois — a única
+                // janela que a retentativa do 23505 existe para cobrir. Sem
+                // isto, a primeira remoção resolveria tudo e o caso 9b passaria
+                // com a retentativa desligada (medido: passava mesmo sabotada).
+                if (state.ecoAtrasado && state.ecosRemovidos === 1) {
+                  state.ecoOcupando = state.ecoAtrasado;
+                } else {
+                  state.ecoOcupando = null;
+                }
+                resolver({ error: null });
+              },
+            };
+            return alvo;
           },
         };
       }
@@ -233,7 +318,7 @@ function makeSupabase(
     rpc: async () => ({ error: null }),
   };
 
-  return client as unknown as SupabaseClient;
+  return Object.assign(client as unknown as SupabaseClient, { __state: state });
 }
 
 const ctx: HandlerCtx = { organization_id: ORG, actor: { type: 'user', id: USER }, requestId: 'req-1' };
@@ -593,6 +678,65 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
    * quer falar com aquele cliente, e a escolha errada manda o histórico pelo
    * número errado. Recusar é o desfecho honesto — e é o de hoje.
    */
+  /**
+   * ⭐ A CORRIDA COM O PRÓPRIO ECO — medida em produção-de-desenvolvimento em
+   * 2026-08-09, e invisível para as 3174 asserções desta suíte até aqui.
+   *
+   * O gateway é local: o eco do envio (`fromMe=true`) volta em ~200 ms e grava
+   * uma linha com o `external_id` que ESTE envio está prestes a carimbar. O
+   * UPDATE bate no índice `messages_org_external_id_unique` e devolve 23505. O
+   * código descartava esse erro (`const { data } =` sem `error`), então a linha
+   * do CRM ficava `queued` PARA SEMPRE — relógio que nunca vira visto — e a
+   * conversa mostrava a mesma frase duas vezes. A mensagem tinha sido entregue.
+   *
+   * O que este caso fixa: 23505 no carimbo faz o handler remover o eco e
+   * carimbar de novo, terminando em `sent` com o `external_id` — na LINHA DO
+   * CRM, que é a única que sabe quem mandou.
+   */
+  it('9. o eco chega antes do carimbo: remove o eco, carimba de novo e termina sent', async () => {
+    wahaConfigured(true);
+    const ID_EXTERNO = 'wamid.corrida';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ id: ID_EXTERNO }), { status: 201 })),
+    );
+
+    const sb = makeSupabase(conversationRow(), null, { ecoOcupando: ID_EXTERNO });
+    const msg = await sendMessageHandler(sb, ctx, textInput());
+
+    expect(msg.status).toBe('sent');
+    expect(msg.external_id).toBe(ID_EXTERNO);
+    // A remoção do eco tem de ter acontecido — senão o `sent` veio de sorte de
+    // ordenação do dublê, não do conserto.
+    expect((sb as unknown as { __state: { ecosRemovidos: number } }).__state.ecosRemovidos).toBeGreaterThan(0);
+  });
+
+  /**
+   * ⭐ 9b é o caso que a retentativa existe para cobrir: o eco chega DEPOIS da
+   * remoção preventiva, na janela de milissegundos entre ela e o carimbo.
+   *
+   * Escrito porque o 9 sozinho era falso verde meu: com o removedor alargado, a
+   * remoção preventiva já limpava o eco e o 23505 nunca acontecia — desligar a
+   * retentativa deixava a suíte VERDE. Sabotagem é o que separa uma coisa da
+   * outra.
+   */
+  it('9b. o eco chega DEPOIS da remoção: a retentativa salva o carimbo', async () => {
+    wahaConfigured(true);
+    const ID_EXTERNO = 'wamid.corrida-tardia';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ id: ID_EXTERNO }), { status: 201 })),
+    );
+
+    const sb = makeSupabase(conversationRow(), null, { ecoAtrasado: ID_EXTERNO });
+    const msg = await sendMessageHandler(sb, ctx, textInput());
+
+    expect(msg.status).toBe('sent');
+    expect(msg.external_id).toBe(ID_EXTERNO);
+    // Duas remoções: a preventiva e a da retentativa.
+    expect((sb as unknown as { __state: { ecosRemovidos: number } }).__state.ecosRemovidos).toBe(2);
+  });
+
   it('8c. canal arquivado + DOIS canais vivos: não adivinha, recusa como antes', async () => {
     wahaConfigured(true);
     const fetchMock = vi.fn();

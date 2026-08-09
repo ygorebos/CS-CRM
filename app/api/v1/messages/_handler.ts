@@ -76,11 +76,28 @@ export const MEDIA_SIGNED_URL_TTL_S = 60 * 60;
  * então os candidatos chegam prontos, de `adapter.echoExternalIds`. Um canal
  * simétrico não implementa o método e o chamador cai no próprio `externalId`.
  *
- * O escopo é deliberadamente estreito — mesma conversa e só o que nasceu de
- * `external_device`. O bare pode colidir entre mensagens diferentes (garantia do
- * WhatsApp, não nossa); restringir mantém o estrago de uma colisão dentro do
- * único lugar onde ela seria de fato a nossa mensagem, e impede de apagar linha
- * do próprio CRM.
+ * ─── Por que o filtro por `sent_via` saiu (medido em 2026-08-09) ────────────
+ *
+ * Até aqui o escopo era "mesma conversa E nascido de `external_device`" — o
+ * carimbo do eco na era do WAHA. Com a spec 004 o eco passou a ser escrito pelo
+ * GATEWAY, que carimba `sent_via = 'crm'`. O filtro deixou de casar, o eco
+ * sobreviveu, e o desfecho medido na instância de desenvolvimento foi:
+ *
+ *   409 · 23505 · duplicate key value violates unique constraint
+ *                 "messages_org_external_id_unique"
+ *
+ * O eco chega em ~200 ms (o gateway é local) e toma o `external_id` antes de o
+ * UPDATE deste envio conseguir gravá-lo. O UPDATE então falha, a linha do CRM
+ * fica `queued` PARA SEMPRE, e a conversa mostra a mesma frase duas vezes — uma
+ * com relógio que nunca vira visto, outra entregue. E o erro do UPDATE era
+ * descartado (`const { data } =` sem `error`), então nada ficava vermelho: 3174
+ * asserções unitárias e os invariantes estavam verdes o tempo todo.
+ *
+ * O escopo continua estreito pelo que importa: `external_id` EXATO, devolvido
+ * pelo canal para ESTE envio, na mesma conversa e na mesma organização. Isso não
+ * pode ser a mensagem de outra pessoa. Restringir também por `sent_via` só
+ * acrescentava a suposição de qual processo escreveu o eco — e foi exatamente
+ * essa suposição que envelheceu.
  */
 async function removerEcoDoProprioEnvio(
   supabase: SB,
@@ -103,15 +120,15 @@ async function removerEcoDoProprioEnvio(
       .delete()
       .eq("organization_id", organizationId)
       .eq("conversation_id", conversationId)
-      .eq("sent_via", "external_device")
       .in("external_id", candidatos)
-      // ⚠️ SEGUNDA CAMADA, SEM COBERTURA POSSÍVEL — escrito porque medi: trocar
-      // este `neq` por um que nunca casa deixa a suíte VERDE. O filtro de
-      // `sent_via` acima já exclui a linha deste envio (que nasce `user`/`ai`,
-      // nunca `external_device`), então nenhum teste alcança esta cláusula.
-      // Fica porque o desfecho que ela impede é o pior que esta função poderia
-      // produzir: apagar a própria mensagem que acabou de ser entregue. Quem
-      // mexer no filtro de cima não vai ser avisado por teste nenhum.
+      // ⚠️ ESTA CLÁUSULA É A ÚNICA COISA QUE IMPEDE O PIOR DESFECHO desta função
+      // — apagar a mensagem que acabou de ser entregue. Antes havia um
+      // `.eq("sent_via", "external_device")` acima dela que a tornava inalcançável;
+      // ele saiu (ver comentário do cabeçalho), então agora ela trabalha de
+      // verdade. Na prática a linha deste envio ainda tem `external_id` NULL
+      // neste instante e não casaria o `in` de qualquer forma — mas depender
+      // disso seria depender de uma ordem de operações que um refactor muda sem
+      // avisar.
       .neq("id", minhaLinhaId);
     if (error) console.error("[messages.send] não consegui remover o eco do próprio envio", error.message);
   } catch (err) {
@@ -494,21 +511,49 @@ export async function sendMessageHandler(
         externalId,
         externalId ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId]) : [],
       );
-      const { data: updated } = await supabase
-        .from("messages")
-        .update({
-          status: "sent",
-          external_id: externalId,
-          ack: 0,
-          // Colunas só do template — é o que responde custo e conformidade de
-          // janela depois, sem varrer jsonb.
-          ...(input.type === "template"
-            ? { template_name: input.template_name, template_language: input.template_language }
-            : {}),
-        })
-        .eq("id", message.id)
-        .select(MSG_COLS)
-        .maybeSingle();
+      const carimbo = {
+        status: "sent",
+        external_id: externalId,
+        ack: 0,
+        // Colunas só do template — é o que responde custo e conformidade de
+        // janela depois, sem varrer jsonb.
+        ...(input.type === "template"
+          ? { template_name: input.template_name, template_language: input.template_language }
+          : {}),
+      };
+      const carimbar = () =>
+        supabase.from("messages").update(carimbo).eq("id", message.id).select(MSG_COLS).maybeSingle();
+
+      let { data: updated, error: erroCarimbo } = await carimbar();
+
+      // 23505 aqui significa UMA coisa: o eco deste mesmo envio chegou entre a
+      // remoção acima e este UPDATE, e levou o `external_id`. A janela é de
+      // milissegundos e o gateway é local, então ela é ESTREITA mas real — foi o
+      // que produziu, medido, linha `queued` permanente com a mensagem entregue.
+      // Remover o eco e carimbar de novo preserva a linha do CRM, que é a única
+      // que sabe QUEM mandou (`sent_by_user_id`, `sent_via`) — adotar a do eco
+      // perderia a autoria.
+      if (erroCarimbo?.code === "23505") {
+        await removerEcoDoProprioEnvio(
+          supabase,
+          ctx.organization_id,
+          c.id,
+          message.id,
+          externalId,
+          externalId ? (adapter.echoExternalIds?.({ externalId, recipient: chatId }) ?? [externalId]) : [],
+        );
+        ({ data: updated, error: erroCarimbo } = await carimbar());
+      }
+
+      // Falhar aqui NÃO é motivo para marcar `failed`: a mensagem saiu, o
+      // cliente recebeu. Mas o silêncio de antes é o que tornou isto invisível
+      // por uma spec inteira — o desfecho fica no log, sempre.
+      if (erroCarimbo) {
+        console.error(
+          "[messages.send] mensagem entregue mas a linha não recebeu o external_id",
+          JSON.stringify({ message_id: message.id, external_id: externalId, code: erroCarimbo.code }),
+        );
+      }
       if (updated) message = updated as unknown as Message;
     } catch (err) {
       const msg = err instanceof Error ? err.message : adapter.codes.unknownError;
