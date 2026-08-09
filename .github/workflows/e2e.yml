@@ -240,7 +240,8 @@ jobs:
             webhooks.spec.ts \
             capacidades-do-agente.spec.ts \
             escopo-remocao.spec.ts \
-            origem-sem-debug.spec.ts
+            origem-sem-debug.spec.ts \
+            material-nada-em-silencio.spec.ts
         env:
           # Só o que NÃO vem do `.env.e2e`: isto é ajuste de CI, não config do
           # produto. CI = 1 IP para todos os specs, e o teto de produção
