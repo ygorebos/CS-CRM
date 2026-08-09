@@ -20,6 +20,8 @@ interface Espiao {
   lte: Array<[string, unknown]>;
   /** `.is(col, null)` — a leitura de divergências ABERTAS (FR-035). */
   is: Array<[string, unknown]>;
+  /** `.neq(col, val)` — a lista de lacunas só traz recusa NÃO resolvida (SC-013). */
+  neq: Array<[string, unknown]>;
   order: Array<[string, string]>;
   tabelas: string[];
 }
@@ -35,7 +37,7 @@ function fakeDb(
   porTabela: Record<string, unknown[]> = {},
   erros: Record<string, string> = {},
 ): Espiao {
-  const espiao: Espiao = { eq: [], gte: [], lte: [], is: [], order: [], tabelas: [] };
+  const espiao: Espiao = { eq: [], gte: [], lte: [], is: [], neq: [], order: [], tabelas: [] };
   from.mockImplementation((tabela: string) => {
     espiao.tabelas.push(tabela);
     const rows = porTabela[tabela] ?? [];
@@ -67,6 +69,10 @@ function fakeDb(
     // esconde o que ela devia medir.
     b.is = (col: string, val: unknown) => {
       espiao.is.push([col, val]);
+      return b;
+    };
+    b.neq = (col: string, val: unknown) => {
+      espiao.neq.push([col, val]);
       return b;
     };
     b.then = (resolve: (v: unknown) => void) =>
@@ -164,6 +170,21 @@ describe('GET /api/v1/ai/evolution', () => {
     const r = await GET(req('?from=2026-07-01&to=2026-07-03'));
     const body = await r.json();
     expect(body.data.outcome.handoff_rate).toBe(3 / 8);
+  });
+
+  it('a lista de lacunas NÃO traz recusa já resolvida (SC-013)', async () => {
+    // A lista termina num botão "Escrever esse material": cada linha é uma TAREFA. Sem este
+    // filtro, a lacuna que o corretor já cobriu — o indexador fecha o aviso ao gravar o
+    // material — continuaria pedindo trabalho feito, e a lista nunca esvaziaria. É a
+    // segunda metade de SC-013, e a que passa despercebida porque a primeira (a lacuna
+    // aparece) segue funcionando.
+    //
+    // `neq('resolved')` e não `eq('open')`: `ack` é "eu vi", não "resolvi" — a lacuna
+    // reconhecida continua sem material.
+    const espiao = fakeDb();
+    await GET(req('?from=2026-07-01&to=2026-07-03'));
+    expect(espiao.neq).toContainEqual(['status', 'resolved']);
+    expect(espiao.eq.map(([c, v]) => `${c}=${String(v)}`)).not.toContain('status=open');
   });
 
   it('assere os filtros que definem numerador e denominador', async () => {

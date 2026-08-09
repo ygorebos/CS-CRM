@@ -268,6 +268,20 @@ export async function GET(req: NextRequest): Promise<Response> {
       .select("created_at, body")
       .eq("organization_id", orgId)
       .eq("kind", KIND_RECUSA)
+      // ⚠️ SÓ AS QUE CONTINUAM ABERTAS — é o que SC-013 cobra: "a lacuna desaparece da
+      // lista depois que ele carrega o material correspondente". Esta lista não é relatório
+      // do que aconteceu; é a fila do que ainda falta escrever, e cada linha termina num
+      // botão ("Escrever esse material"). Lacuna já coberta pelo material que o corretor
+      // carregou continuaria aqui pedindo trabalho já feito.
+      //
+      // `neq('resolved')` e não `eq('open')` de propósito: `ack` é "eu vi", não "resolvi".
+      // A lacuna reconhecida continua sem material e continua produzindo recusa na próxima
+      // pergunta; sumir dela por ter sido LIDA seria esconder o problema pelo gesto errado.
+      //
+      // Medido em 2026-08-09: sem este filtro, indexar o material fechava o aviso na
+      // Central e a MESMA lacuna seguia na Evolução — que é a tela onde o corretor
+      // identifica o assunto (FR-028), e portanto a que SC-013 mede.
+      .neq("status", "resolved")
       .gte("created_at", fromIso)
       .lte("created_at", toIso)
       .order("created_at", { ascending: false })

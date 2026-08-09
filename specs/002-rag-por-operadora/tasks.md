@@ -382,7 +382,7 @@ agrupadas, com "não há nada" separado de "quase acertou".
 ### Tests for User Story 5 ⚠️
 
 - [X] T109 [P] [US5] Teste da agregação por escopo e por assunto em `lib/ai/evolution/aggregate.test.ts`, distinguindo "nada encontrado" de "encontrado insuficiente" (FR-029)
-- [ ] T110 [P] [US5] Spec E2E em `tests/e2e/lacunas-acionaveis.spec.ts` — carregar o material que cobre uma lacuna a faz sumir da lista (SC-013)
+- [X] T110 [P] [US5] Spec E2E em `tests/e2e/lacunas-acionaveis.spec.ts` — carregar o material que cobre uma lacuna a faz sumir da lista (SC-013) — **4 de 4 em ambiente fresco (2026-08-09)**, indexando de verdade (material entra pelo formulário, `event-log-drain` roda o `rag-indexer`, embedding do provedor). Achou DOIS defeitos: (1) nada fechava a lacuna quando o material chegava — a lista só esvaziava se o corretor clicasse "Marcar resolvido"; (2) a rota da Evolução lia as recusas sem filtrar `status`, então mesmo com o fechamento a MESMA lacuna seguia na tela onde o corretor identifica o assunto (FR-028). Sabotagem confirmada: removido o `.neq("status","resolved")`, o caso central reprova com "a lacuna coberta continuou na lista". Pulado onde não há chave de embedding (é o caso do CI hoje) — pular é honesto, dublar o embedding mediria o dublê
 
 ### Implementation for User Story 5
 
