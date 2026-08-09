@@ -1,6 +1,7 @@
-import { readFileSync } from "node:fs";
-
 import { test, expect } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
+
+import { loadEnvLocal, uniqueEmail } from "./helpers/auth";
 
 /**
  * O link de redefinição no formato que o servidor NÃO enxerga.
@@ -29,29 +30,32 @@ import { test, expect } from "@playwright/test";
  */
 
 /**
- * O `.env.e2e` é injetado no `webServer`, NÃO no processo que roda os testes —
- * então `process.env` chega vazio aqui. Sem esta leitura o `test.skip` abaixo
- * dispara sempre, e a suíte fica verde sem ter medido nada: é o falso verde que
- * a doutrina de medição nomeia, com o agravante de parecer cobertura.
+ * Em CI as duas variáveis vêm do ambiente do job (o workflow publica o
+ * `.env.e2e` no `$GITHUB_ENV`); numa máquina de desenvolvimento vêm do
+ * `.env.local`. É o mesmo idioma das outras specs de auth.
  */
-function doEnvDoE2E(chave: string): string {
-  if (process.env[chave]) return process.env[chave] as string;
-  try {
-    for (const linha of readFileSync(".env.e2e", "utf8").split("\n")) {
-      const limpa = linha.trim();
-      if (!limpa || limpa.startsWith("#")) continue;
-      const i = limpa.indexOf("=");
-      if (i > 0 && limpa.slice(0, i) === chave) return limpa.slice(i + 1);
-    }
-  } catch {
-    /* sem .env.e2e: o skip abaixo cuida, e diz o motivo */
-  }
-  return "";
-}
+const envLocal = loadEnvLocal();
+const URL_SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? envLocal.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const CHAVE_SERVICO =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? envLocal.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-const URL_SUPABASE = doEnvDoE2E("NEXT_PUBLIC_SUPABASE_URL");
-const CHAVE_SERVICO = doEnvDoE2E("SUPABASE_SERVICE_ROLE_KEY");
-const EMAIL = process.env.E2E_OWNER_EMAIL ?? "cotadorsimplificado@gmail.com";
+/**
+ * A conta é SEMEADA por esta spec, e não herdada.
+ *
+ * Medido no CI em 2026-08-09: presumir uma conta existente deu
+ * `404 user_not_found` — o banco da suíte é fresco e não conhece ninguém. Toda
+ * spec de auth deste repo semeia a própria conta pelo mesmo motivo; herdar
+ * transforma o caso num teste do estado do banco, não do produto.
+ */
+const EMAIL = uniqueEmail("fragmento");
+const SENHA = "SenhaDoFragmento!123";
+let idDoUsuario: string | null = null;
+
+function admin() {
+  return createClient(URL_SUPABASE, CHAVE_SERVICO, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
 
 /**
  * Pede ao GoTrue o mesmo link que ele poria no e-mail. Não envia e-mail.
@@ -87,6 +91,22 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
     !URL_SUPABASE || !CHAVE_SERVICO,
     "exige NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY",
   );
+
+  test.beforeAll(async () => {
+    const { data, error } = await admin().auth.admin.createUser({
+      email: EMAIL,
+      password: SENHA,
+      email_confirm: true,
+    });
+    if (error || !data.user) throw new Error(`seed createUser: ${error?.message}`);
+    idDoUsuario = data.user.id;
+  });
+
+  // Conta de teste que sobrevive à execução vira lixo que a próxima sessão
+  // encontra e não sabe de quem é.
+  test.afterAll(async () => {
+    if (idDoUsuario) await admin().auth.admin.deleteUser(idDoUsuario);
+  });
 
   test("o link padrão do GoTrue chega em /login/reset, não no erro", async ({ page, baseURL }) => {
     test.setTimeout(60_000);
