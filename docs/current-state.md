@@ -35,13 +35,13 @@ o projeto vinha sendo desenvolvido publicamente desde abril de 2026 sem tags.
 
 | Métrica | Valor |
 |---|---|
-| Arquivos TS/TSX em `app`+`lib`+`components`+`workers` | 987 |
-| Route handlers (`app/api/**/route.ts`) | 169 |
-| Migrations em `supabase/migrations/` | 81 arquivos, até `0092_stage_names_acentos` |
-| Testes unitários (`*.test.ts(x)`) | 221 arquivos |
-| Invariantes de banco (`tests/invariants/`) | 56 arquivos |
-| Specs E2E (`tests/e2e/`) | 19 |
-| Documentos `.md` em `docs/` | 119 (em 23 subpastas) |
+| Arquivos TS/TSX em `app`+`lib`+`components`+`workers` | 1219 |
+| Route handlers (`app/api/**/route.ts`) | 198 |
+| Migrations em `supabase/migrations/` | 127 arquivos, até `0134_escopo_removido` |
+| Testes unitários (`*.test.ts(x)`) | 346 arquivos |
+| Invariantes de banco (`tests/invariants/`) | 94 arquivos |
+| Specs E2E (`tests/e2e/`) | 38 |
+| Documentos `.md` em `docs/` | 148 (em 29 subpastas) |
 | Import cycles | **0** (graphify, medido em árvore anterior) |
 | `console.log` fora de `lib/logger.ts` | **0** |
 | `: any` / `as any` | 7 |
@@ -51,10 +51,20 @@ quase nenhum `any`. Os god nodes do grafo (`fail` 325 arestas, `createAdminClien
 `ok` 305, `audit` 290, `requireRole` 230) são *helpers canônicos* — indicam convenção
 sendo aplicada, não acoplamento acidental.
 
-**Doutrina de migrations está sendo cumprida** — CONFIRMADO: o apêndice idempotente de
-`baseline.sql` cobre até `migration 0092`, que é a última em `supabase/migrations/`. Os
-artefatos de schema andam juntos como a doutrina exige — o kit self-host recebe as
-mudanças. Esse é o invariante mais fácil de quebrar num projeto open-source e ele está de pé.
+**Doutrina de migrations está sendo cumprida** — CONFIRMADO em 2026-08-09: o apêndice
+idempotente de `baseline.sql` cobre até a **última** migration de `supabase/migrations/`, e
+o job `invariants` aplica o baseline em install **e** update a cada PR. Os artefatos de
+schema andam juntos como a doutrina exige. Esse é o invariante mais fácil de quebrar e ele
+está de pé.
+
+> ⚠️ **Não escreva o número da última migration aqui de novo.** A versão anterior deste
+> parágrafo cravava "até `migration 0092`" e usava a igualdade "última do apêndice == última
+> de `migrations/`" como prova. O literal envelheceu 42 migrations e a prova passou a
+> apontar para um fato falso — continuava verde por coincidência, e quem fosse auditar
+> encontraria uma diferença que não existe. Pior: lendo "até 0092", alguém conclui que o
+> `baseline.sql` está atrasado e "conserta" reaplicando à mão o que já está lá. Confira com
+> `ls supabase/migrations/ | tail -1` contra o último bloco `-- ---- ... (migration NNNN)`
+> do apêndice.
 
 ---
 
@@ -203,7 +213,7 @@ Dois HANDOFFs também migraram para `docs/handoffs/`. Restam 3 na raiz (`HANDOFF
 ### 4.9 Divergências de estado nos HANDOFFs 🟡
 
 `HANDOFF.md` afirma "Migration seguinte livre: **0058**" e lista pendência de aplicar `0057`
-no dev DB — mas o repo já tem migrations até **0092**. São 34 migrations de deriva. É
+no dev DB — mas o repo já tem migrations até **0134**. São 76 migrations de deriva. É
 consequência natural de trabalho em branches paralelas, mas ilustra a regra:
 **HANDOFF não é fonte da verdade de schema** — `supabase/migrations/` e `baseline.sql` são.
 **A CONFIRMAR:** se a pendência de dev DB de `0057` ainda existe.

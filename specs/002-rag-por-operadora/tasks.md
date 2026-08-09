@@ -25,7 +25,7 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
-## Estado em 2026-08-09 — 121 fechadas, 19 abertas
+## Estado em 2026-08-09 — 123 fechadas, 17 abertas
 
 A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
 disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
@@ -41,17 +41,17 @@ e a sabotagem T093.
 > do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
 > mais convincente de verde falso que esta spec produziu.
 
-**As 19 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+**As 17 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
 | ~~**Invariantes não escritos**~~ | ~~T075, T093, T102~~ | ✅ **FECHADO em 2026-08-09.** `tests/invariants/precedencia-de-camada.test.ts` (11 casos: precedência dentro do balde nos dois sentidos, isolamento entre tenants no mesmo escopo, `p_incluir_preteridos` e a divergência chegando à lista pelo caminho de produção) e `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` (8 casos: âncora sobrevive a reindexação e a recuração, ausência de FK em `chunk_id`/`material_id` como decisão vigiada, cascade de `message_id` pela LGPD, RLS). A classificação anterior — "bloqueio de ambiente" — estava errada, e a tabela já dizia isso |
-| **Prova de banco executada** | T121 | Feito de fato pelo CI: `invariants` verde no PR #12. Falta só registrar a evidência |
+| ~~**Prova de banco executada**~~ | ~~T121~~ | ✅ **FECHADO em 2026-08-09** — rodado localmente e registrado em `.superpowers/evidence/002-test-db-2026-08-09.md` |
 | **Prova pela tela** | T040, T041, T078, T096, T103, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
 | ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0134** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita |
 | **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
-| **Fechamento** | T005, T126, T127, T129 | Issue de alinhamento, docs de arquitetura, e o Living System Checklist — que só se responde com o resto medido |
+| **Fechamento** | T126, T127, T129 | Issue de alinhamento, docs de arquitetura, e o Living System Checklist — que só se responde com o resto medido |
 
 **Pendência transversal, que vale para tudo acima:** `lib/database.types.ts` não foi
 regenerado depois das migrations 0125, 0126 e 0131–0133. Exige `supabase db push` contra o banco, que
@@ -99,7 +99,7 @@ produto.
 - [X] T002 Atualizar `feat/002-rag-por-operadora` com a `main` após o merge da emenda (`git fetch origin && git merge origin/main`), conforme a higiene de branches
 - [X] T003 [P] Montar o ambiente fresco descrito em `quickstart.md` — Supabase local pg17, `baseline.sql` aplicado, `scripts/bootstrap-owner.ts`, WAHA + Redis via `docker compose`, `pnpm build && pnpm start`, e **`RESEND_API_KEY` ausente**
 - [X] T004 [P] Registrar a linha de jornada `[P0]` "a instalação já responde assistência" em `docs/testing/user-journey-map.md`, com o aviso de que ela **não é vigiada por gate** (o check `e2e` não é obrigatório e a spec irmã `vps-fresh-onboarding` está fora do CI — issue #63)
-- [ ] T005 [P] Abrir issue de alinhamento para a divergência já reportada: `docs/current-state.md` afirma "81 migrations até 0092" e o repositório tem até **0115**
+- [X] T005 [P] ~~Abrir issue de alinhamento~~ **Issue é impossível: o repositório tem issues DESABILITADAS** (`gh issue create` responde "the 'ygorebos/CS-CRM' repository has disabled issues"). Como a tarefa existia para agendar a correção, e a correção cabia numa sessão, ela foi FEITA em 2026-08-09 em vez de agendada: `docs/current-state.md` dizia "81 migrations até 0092" com o repo em **127 até 0134** — 46 de deriva, não 23. Corrigidas também as outras seis contagens da mesma tabela (todas envelhecidas) e o parágrafo que provava o cumprimento da doutrina de migrations a partir de um literal — agora ele manda conferir com `ls`, e diz por que o número não deve voltar
 
 ---
 
@@ -413,7 +413,7 @@ agrupadas, com "não há nada" separado de "quase acertou".
 - [X] T119 [US6] Confirmar em `tests/invariants/material-vencido-nao-ancora.test.ts` que `fn_buscar_lastro` corta material vencido (implementado em T047), inclusive quando o vencido era o **único** que responderia
 - [X] T120 [US6] Criar `workers/validade-de-material.ts`, que avisa o corretor antes do vencimento com nome do material e escopo, reusando a Central (FR-027)
 - [X] T136 [US6] Dar gatilho ao worker de T120: rota `app/api/v1/cron/validade-de-material/route.ts` e a linha diária no `crond` do `scheduler` em `docker-compose.prod.yml` — mesmo motivo de T135
-- [ ] T121 [US6] Rodar `pnpm test:db` e registrar evidência em `.superpowers/evidence/`
+- [X] T121 [US6] Rodar `pnpm test:db` e registrar evidência em `.superpowers/evidence/` — executado em 2026-08-09, **94 arquivos / 650 asserções**, install e update verdes. Evidência em `.superpowers/evidence/002-test-db-2026-08-09.md`
 
 **Checkpoint**: todas as histórias funcionam independentemente.
 
