@@ -9,6 +9,8 @@ export default async function LoginPage({
   searchParams,
 }: {
   searchParams: Promise<{ next?: string; reset?: string; error?: string }>;
+  // `error=link_expirado` vem de /auth/sessao, que lê o motivo no fragmento do
+  // link do GoTrue — o servidor não enxerga fragmento.
 }) {
   const { next, reset, error } = await searchParams;
   return (
@@ -32,6 +34,19 @@ export default async function LoginPage({
         >
           Link inválido ou expirado. Peça um novo em Recuperar senha ou refaça o
           cadastro.
+        </div>
+      )}
+      {error === "link_expirado" && (
+        <div
+          className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
+          Esse link já foi usado ou passou da validade. Peça outro em{" "}
+          <Link href="/login/forgot" className="underline underline-offset-4">
+            Esqueci minha senha
+          </Link>{" "}
+          e abra o e-mail <strong>mais recente</strong> — pedir um novo cancela
+          os anteriores.
         </div>
       )}
       {error === "provisionamento" && (
