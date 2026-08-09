@@ -118,8 +118,17 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
 
     await page.goto(link);
 
-    // O sinal de sucesso é o DESTINO. A tela intermediária de /auth/sessao pode
-    // nem ser vista — esperar que ela apareça mediria a velocidade da máquina.
+    // A tela de confirmação é OBRIGATÓRIA aqui: sem ela, `/auth/sessao` logava
+    // sozinho a partir de qualquer fragmento digitado (fixação de sessão,
+    // medida em 2026-08-09). Ela também tem que dizer DE QUEM é a conta — é o
+    // que dá à pessoa como perceber que o link não é dela.
+    await expect(page.getByRole("heading", { name: /Confirme que é você/i })).toBeVisible({
+      timeout: 30_000,
+    });
+    await expect(page.getByText(EMAIL, { exact: false })).toBeVisible();
+    await page.getByRole("button", { name: /Continuar/i }).click();
+
+    // O sinal de sucesso é o DESTINO, e ele só vem DEPOIS do clique.
     await expect(page).toHaveURL(/\/login\/reset/, { timeout: 30_000 });
 
     // Só agora, com o lugar ancorado, a asserção negativa significa algo.
@@ -152,5 +161,45 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
     await page.goto("/auth/sessao");
     await expect(page).toHaveURL(/\/login\?error=link_invalido/, { timeout: 15_000 });
     await expect(page.getByText(/Link inválido ou expirado/i)).toBeVisible();
+  });
+
+  /**
+   * Fixação de sessão / login-CSRF, medida em 2026-08-09 num navegador limpo: a
+   * primeira versão de `/auth/sessao` chamava `setSession` sozinha, então
+   * `#access_token=<token de outra conta>` deixava quem abrisse o link logado no
+   * tenant de quem o fabricou — sem digitar nada, sem ver de quem era a conta.
+   *
+   * O que vigia isto é a AUSÊNCIA do login automático: a URL não pode sair de
+   * `/auth/sessao` por conta própria. Esperar a tela de confirmação aparecer
+   * também serve, mas só a ausência prova que nada foi estabelecido.
+   */
+  test("token no fragmento não loga sozinho — exige confirmação nominal", async ({ page }) => {
+    const { data, error } = await admin().auth.admin.generateLink({
+      type: "magiclink",
+      email: EMAIL,
+    });
+    if (error) throw new Error(`generateLink magiclink: ${error.message}`);
+    const propriedades = data.properties as { access_token?: string; refresh_token?: string } | null;
+    // `generate_link` não devolve par de tokens; fabricamos o fragmento a partir
+    // de uma sessão real — que é exatamente o que um atacante teria: a dele.
+    const sessao = await admin().auth.signInWithPassword({ email: EMAIL, password: SENHA });
+    const acesso = propriedades?.access_token ?? sessao.data.session?.access_token;
+    const atualizacao = propriedades?.refresh_token ?? sessao.data.session?.refresh_token;
+    expect(acesso, "precisa de um access_token para fabricar o link").toBeTruthy();
+
+    await page.goto(`/auth/sessao#access_token=${acesso}&refresh_token=${atualizacao}&type=magiclink`);
+
+    // Nada de auto-login: a tela para e pergunta.
+    await expect(page.getByRole("heading", { name: /Confirme que é você/i })).toBeVisible({
+      timeout: 20_000,
+    });
+    await expect(page).toHaveURL(/\/auth\/sessao/);
+
+    // E o token não fica no histórico do navegador.
+    expect(page.url()).not.toContain("access_token");
+
+    // Sem clicar, a sessão não existe: rota protegida devolve ao login.
+    await page.goto("/app/inbox");
+    await expect(page).toHaveURL(/\/login/, { timeout: 20_000 });
   });
 });

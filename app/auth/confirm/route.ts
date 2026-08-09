@@ -60,13 +60,12 @@ export async function GET(request: NextRequest) {
     // fragmento próprio — comportamento de browser, coberto por
     // `tests/e2e/recuperacao-de-senha-por-fragmento.spec.ts`.
     //
-    // A auditoria existe porque a ausência dela é o que tornou este caminho
-    // invisível: o desfecho aparecia na tela e não deixava rastro nenhum.
-    await audit({
-      action: "auth.email_link_sem_query",
-      metadata: { type, reason: "sem_token_hash_na_query" },
-      requestId,
-    });
+    // NÃO se audita aqui. Este ramo é alcançável por qualquer GET anônimo —
+    // varredura, robô, link colado pela metade — e `api_audit_log` é
+    // append-only com retenção de 5 anos e sem teto de escrita. Medido em
+    // 2026-08-09: 5 requisições anônimas a `/auth/confirm` = 5 linhas. Quem
+    // audita é `concluirLinkDeFragmento`, do outro lado, onde já se sabe se
+    // havia token de verdade e de quem ele era.
     return redirectTo("/auth/sessao");
   }
 
