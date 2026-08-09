@@ -79,9 +79,10 @@ export const MEDIA_SIGNED_URL_TTL_S = 60 * 60;
  * ─── Por que o filtro por `sent_via` saiu (medido em 2026-08-09) ────────────
  *
  * Até aqui o escopo era "mesma conversa E nascido de `external_device`" — o
- * carimbo do eco na era do WAHA. Com a spec 004 o eco passou a ser escrito pelo
- * GATEWAY, que carimba `sent_via = 'crm'`. O filtro deixou de casar, o eco
- * sobreviveu, e o desfecho medido na instância de desenvolvimento foi:
+ * carimbo que o eco recebia quando o transporte anterior o escrevia. Com a spec
+ * 004 quem escreve o eco é o GATEWAY, e ele carimba `sent_via = 'crm'`. O filtro
+ * deixou de casar, o eco sobreviveu, e o desfecho medido na instância de
+ * desenvolvimento foi:
  *
  *   409 · 23505 · duplicate key value violates unique constraint
  *                 "messages_org_external_id_unique"
