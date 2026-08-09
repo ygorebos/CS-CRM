@@ -14,12 +14,19 @@ import { apiClient } from "@/lib/api/client";
 import type { RotuloDoEscopo } from "@/lib/vocabulary/knowledge-scope";
 
 import {
+  ADICIONAR_ACAO,
+  ADICIONAR_AJUDA,
+  ADICIONAR_CANCELAR,
+  ADICIONAR_TITULO,
   CAMINHOS_DO_CATALOGO,
   CANCELAR_REMOCAO,
+  CODIGO_ROTULO,
   CONFIRMAR_REMOCAO,
   LEGENDA_DE_ORIGEM,
   LIMIAR_DA_BUSCA,
   LISTA_TRUNCADA,
+  NOME_REPETIDO,
+  NOME_ROTULO,
   ORIGEM_CATALOGO,
   SEM_RESULTADO,
   SUBTITULO,
@@ -27,10 +34,13 @@ import {
   VAZIO_TITULO,
   acaoDeMaterial,
   avisoDeAlternancia,
+  avisoDeCriacao,
   avisoDeRemocao,
   explicacaoDoEstado,
   filtrarEscopos,
+  nomeJaExiste,
   perguntaDeRemocao,
+  podeAdicionar,
   podeRemover,
   rotuloDaOrigem,
   rotuloDeRemocao,
@@ -77,6 +87,11 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
   const [pendentes, setPendentes] = useState<ReadonlySet<string>>(new Set());
   /** Qual linha está pedindo confirmação de remoção. Uma por vez, e some ao trocar. */
   const [confirmando, setConfirmando] = useState<string | null>(null);
+  /** O formulário de adicionar está aberto? Fechado por padrão — a lista é o assunto. */
+  const [adicionando, setAdicionando] = useState(false);
+  const [nome, setNome] = useState("");
+  const [codigo, setCodigo] = useState("");
+  const [salvando, setSalvando] = useState(false);
 
   const visiveis = useMemo(() => filtrarEscopos(escopos, termo), [escopos, termo]);
   const ligados = escopos.filter((e) => e.is_active).length;
@@ -112,6 +127,43 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
   }
 
   /**
+   * Adicionar pelo nome (FR-002).
+   *
+   * Nasce LIGADA, e é o contrário do espelho do catálogo (que nasce desligado por A-20).
+   * Os dois casos não são iguais: o espelho aparece sem ninguém pedir, e ligá-lo é uma
+   * escolha; este nome o corretor acabou de digitar, e criá-lo desligado seria pedir dois
+   * gestos para uma decisão que ele já tomou.
+   *
+   * Não é otimista: a linha só entra na lista depois do 200. Aqui o custo de mentir é
+   * maior que no interruptor — o corretor vai carregar material para um nome que pode não
+   * existir, e descobriria isso na tela seguinte.
+   */
+  async function adicionar() {
+    const limpo = nome.trim();
+    if (!podeAdicionar(limpo) || salvando) return;
+    if (nomeJaExiste(escopos, limpo)) {
+      toast.error(NOME_REPETIDO);
+      return;
+    }
+    setSalvando(true);
+    try {
+      const resposta = await apiClient.post<{ data: EscopoDoTenant }>(
+        "/api/v1/knowledge-scopes",
+        { display_name: limpo, official_code: codigo.trim() || null },
+      );
+      setEscopos((atual) => [resposta.data, ...atual]);
+      setNome("");
+      setCodigo("");
+      setAdicionando(false);
+      toast.success(avisoDeCriacao(resposta.data.display_name));
+    } catch (erro) {
+      showApiError(erro);
+    } finally {
+      setSalvando(false);
+    }
+  }
+
+  /**
    * Remover (T099). Ao contrário do interruptor, aqui NÃO é otimista: a linha só sai da
    * lista depois do 200. Sumir antes e voltar em caso de erro faria o corretor achar que
    * removeu — e a próxima coisa que ele faz é fechar a tela.
@@ -140,7 +192,14 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
   return (
     <div className="flex h-full flex-col gap-6 p-6">
       <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-semibold tracking-tight">{rotulo.plural}</h1>
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <h1 className="text-2xl font-semibold tracking-tight">{rotulo.plural}</h1>
+          {!adicionando && (
+            <Button onClick={() => setAdicionando(true)}>
+              {ADICIONAR_ACAO} {rotulo.singular.toLocaleLowerCase("pt-BR")}
+            </Button>
+          )}
+        </div>
         <p className="max-w-3xl text-sm text-text-muted">{SUBTITULO}</p>
         {escopos.length > 0 && (
           <p className="text-sm text-text-muted">
@@ -152,16 +211,87 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
         )}
       </header>
 
+      {/*
+        O formulário é INLINE, e não um diálogo, pelo mesmo motivo que o interruptor não
+        tem confirmação: SC-003 cronometra do login ao primeiro material buscável. Um modal
+        acrescenta abrir, esperar a animação e fechar a cada nome — e o corretor que está
+        cadastrando o que vende cadastra vários seguidos.
+      */}
+      {adicionando && (
+        <form
+          className="flex flex-col gap-3 rounded-lg border border-border bg-surface p-4"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void adicionar();
+          }}
+        >
+          <div>
+            <p className="text-base font-medium">{ADICIONAR_TITULO}</p>
+            <p className="mt-1 max-w-2xl text-sm text-text-muted">{ADICIONAR_AJUDA}</p>
+          </div>
+          <div className="flex flex-col gap-3 sm:flex-row">
+            <label className="flex-1 text-sm">
+              <span className="mb-1 block font-medium">{NOME_ROTULO}</span>
+              <Input
+                id="escopo-nome"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                maxLength={120}
+                autoFocus
+              />
+            </label>
+            <label className="flex-1 text-sm">
+              <span className="mb-1 block font-medium">{CODIGO_ROTULO}</span>
+              <Input
+                id="escopo-codigo"
+                value={codigo}
+                onChange={(e) => setCodigo(e.target.value)}
+                maxLength={40}
+              />
+            </label>
+          </div>
+          <div className="flex gap-2">
+            <Button type="submit" disabled={!podeAdicionar(nome) || salvando}>
+              {salvando ? "Adicionando…" : ADICIONAR_ACAO}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={salvando}
+              onClick={() => {
+                setAdicionando(false);
+                setNome("");
+                setCodigo("");
+              }}
+            >
+              {ADICIONAR_CANCELAR}
+            </Button>
+          </div>
+        </form>
+      )}
+
       {escopos.length === 0 ? (
         <div className="rounded-lg border border-border bg-surface p-6">
           <p className="text-base font-medium">{VAZIO_TITULO}</p>
           <p className="mt-2 max-w-2xl text-sm text-text-muted">{VAZIO_TEXTO}</p>
-          <Link
-            href="/app/ai/knowledge/sources"
-            className="mt-4 inline-block text-sm font-medium text-accent underline underline-offset-4"
-          >
-            Ir para Conhecimento
-          </Link>
+          {/*
+            O primeiro passo é AQUI, e por isso o botão vem antes do link. A versão
+            anterior só mandava para Conhecimento — que, sem nenhum nome cadastrado, é
+            uma tela que devolve o corretor para cá.
+          */}
+          <div className="mt-4 flex flex-wrap items-center gap-4">
+            {!adicionando && (
+              <Button onClick={() => setAdicionando(true)}>
+                {ADICIONAR_ACAO} {rotulo.singular.toLocaleLowerCase("pt-BR")}
+              </Button>
+            )}
+            <Link
+              href="/app/ai/knowledge/sources"
+              className="text-sm font-medium text-accent underline underline-offset-4"
+            >
+              Ir para Conhecimento
+            </Link>
+          </div>
         </div>
       ) : (
         <>

@@ -316,7 +316,7 @@ sobrescrever um assunto de um escopo do catálogo prova as duas camadas e a prec
 - [X] T091 [US1] Exibir em `app/app/ai/knowledge/scopes/_client.tsx` quais escopos vieram do catálogo e quais são próprios, com os dois caminhos disponíveis ao corretor: desativar para si ou sobrepor com material próprio
 - [X] T092 [US1] Exigir papel de gestor ou superior e emitir `api_audit_log` em todas as mutações de `app/api/v1/knowledge-scopes/` (FR-032)
 - [X] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
-- [ ] T094 [US1] Cronometrar SC-003 (primeiro material próprio, do login ao primeiro trecho buscável, ≤5 min) e registrar evidência em `.superpowers/evidence/`
+- [X] T094 [US1] Cronometrar SC-003 (primeiro material próprio, do login ao primeiro trecho buscável, ≤5 min) e registrar evidência em `.superpowers/evidence/` — **6,9 s em 12 gestos de tela (2026-08-09)**, teto de 300 s, medido em `tests/e2e/primeiro-material-cronometrado.spec.ts` com os DOIS carimbos vindos do Postgres. Antes de medir foi preciso ABRIR A PORTA: não havia como criar a própria operadora pela tela — `POST /api/v1/knowledge-scopes` existia e passava nos testes dela, e nenhum botão chegava até a rota. O estado vazio ainda mandava "comece carregando um material em Conhecimento", que é a tela que exige um nome já ligado: dois becos apontando um para o outro. Sem isso, o "primeiro material PRÓPRIO" de SC-003 era inalcançável e o cronômetro nem começava
 
 **Checkpoint**: o corretor manda no que vale para ele.
 
@@ -341,7 +341,7 @@ durante todo o processo.
 - [X] T098 [US4] Garantir em `workers/rag-indexer.ts` que falha no processamento preserva o acervo anterior por inteiro, sem base parcial (FR-006)
 - [X] T099 [US4] Implementar remoção e desativação de escopo em `app/api/v1/knowledge-scopes/[id]/route.ts`, tornando o material inerte para respostas novas **imediatamente** e preservando a rastreabilidade das já dadas (FR-008)
 - [X] T100 [US4] Fazer `app/app/ai/knowledge/scopes/_client.tsx` listar N escopos sem limite fixo, com o estado de cada um (FR-003, US4 cenário 3)
-- [ ] T101 [US4] Cronometrar SC-004 (segundo material em ≤2 min, zero janela sem base) e registrar evidência em `.superpowers/evidence/`
+- [ ] T101 [US4] Cronometrar SC-004 (segundo material em ≤2 min, zero janela sem base) e registrar evidência em `.superpowers/evidence/` — **BLOQUEADO POR DEFEITO MEDIDO (2026-08-09), não por falta de instrumento.** O caso existe e está marcado `fixme` em `tests/e2e/primeiro-material-cronometrado.spec.ts`. Medido três vezes: o SEGUNDO material entra pela tela, a fonte nasce `ready` com o item gravado, o evento `knowledge_source.updated` é consumido e marcado `done` — e nenhum trecho é produzido para ele. `last_index_status` fica NULO e o material aparece "Preparando" para sempre; nada o reemite. Reemitir o MESMO evento à mão faz o indexador processar as duas fontes na hora (`fontes: 2, trechos_planejados: 2`), então o caminho funciona e o que falha é a rodada disparada pela criação. É o modo de falha que FR-004 proíbe pelo nome — material aceito e nunca indexado — e é mais grave que a lentidão que SC-004 cronometra: **consertar isto vem antes de medir o tempo**
 
 **Checkpoint**: escopos convivem, e nenhum vaza para o outro.
 

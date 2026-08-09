@@ -249,8 +249,14 @@ export const LEGENDA_DE_ORIGEM =
 
 export const VAZIO_TITULO = "Nada por aqui ainda";
 
+/**
+ * ⚠️ A versão anterior mandava "comece carregando um material em Conhecimento", e isso era
+ * um beco: a tela de Conhecimento só deixa carregar material PARA um nome já ligado, e o
+ * corretor sem nome nenhum voltava para cá. Medido em 2026-08-09, com a lista vazia. Agora
+ * o começo é aqui — digitar o nome do que ele vende — e o material vem depois.
+ */
 export const VAZIO_TEXTO =
-  "A instalação não trouxe nada pronto, e você também não adicionou nada. Comece carregando um material em Conhecimento — o que você carregar aparece aqui para ligar e desligar.";
+  "A instalação não trouxe nada pronto, e você também não adicionou nada. Comece pelo nome do que você vende: adicione aqui e depois carregue o material.";
 
 export const SEM_RESULTADO = "Nenhum resultado para o que você digitou.";
 
@@ -263,6 +269,57 @@ export const SEM_RESULTADO = "Nenhum resultado para o que você digitou.";
  */
 export const LISTA_TRUNCADA =
   "A lista ficou grande demais para mostrar de uma vez. O que está aqui são os primeiros, em ordem alfabética — avise o suporte se faltar algum.";
+
+// ---------------------------------------------------------------------------
+// Adicionar pelo nome (FR-002 — a porta que faltava)
+// ---------------------------------------------------------------------------
+
+/**
+ * O que basta para criar: o nome. Nada mais.
+ *
+ * FR-002 diz que criar custa informar o nome, e a rota já cumpria — o que não existia era
+ * a PORTA: `POST /api/v1/knowledge-scopes` não tinha nenhum botão que chegasse até ela.
+ * Medido em 2026-08-09 varrendo a tela: o corretor conseguia ligar, desligar e remover o
+ * que a instalação trouxe, e não conseguia adicionar o que ele mesmo vende. Rota sem porta
+ * e tela inexistente dão no mesmo para quem usa.
+ *
+ * O código oficial fica de FORA do que é exigido, pela mesma razão que a rota o deixa
+ * opcional: pedi-lo transformaria "digite o nome" em "vá procurar o registro na ANS", que
+ * é exatamente o passo que o requisito existe para não haver.
+ */
+export function podeAdicionar(nome: string): boolean {
+  const limpo = nome.trim();
+  return limpo.length > 0 && limpo.length <= 120;
+}
+
+/** O nome já usado por outra linha da lista — o 409 da rota, dito antes de gastar a ida. */
+export function nomeJaExiste(escopos: readonly EscopoDoTenant[], nome: string): boolean {
+  const alvo = nome.trim().toLocaleLowerCase("pt-BR");
+  return escopos.some((e) => e.display_name.trim().toLocaleLowerCase("pt-BR") === alvo);
+}
+
+/**
+ * O que o corretor lê depois de adicionar.
+ *
+ * Diz o estado E o próximo passo, porque o nome sozinho não responde nada a cliente
+ * nenhum: sem material, ligar não muda o que o agente sabe. Falar do NOME e não do rótulo
+ * evita a concordância de gênero que quebraria numa instalação que chama isto de
+ * "Convênio" ou "Fornecedor" (FR-033).
+ */
+export function avisoDeCriacao(nome: string): string {
+  return `${nome} foi adicionada e já está ligada. Agora carregue um material para o agente ter o que responder.`;
+}
+
+export const ADICIONAR_TITULO = "Adicionar pelo nome";
+
+export const ADICIONAR_AJUDA =
+  "Digite como você chama no dia a dia. O código oficial é opcional — serve só para você diferenciar dois nomes parecidos.";
+
+export const NOME_ROTULO = "Nome";
+export const CODIGO_ROTULO = "Código oficial (opcional)";
+export const ADICIONAR_ACAO = "Adicionar";
+export const ADICIONAR_CANCELAR = "Cancelar";
+export const NOME_REPETIDO = "Você já tem uma com esse nome.";
 
 /**
  * Toda frase que esta tela mostra, num lugar só — é o que o teste de jargão varre.
@@ -277,6 +334,13 @@ export const TEXTO_FIXO_DA_TELA: readonly string[] = [
   VAZIO_TEXTO,
   SEM_RESULTADO,
   LISTA_TRUNCADA,
+  ADICIONAR_TITULO,
+  ADICIONAR_AJUDA,
+  NOME_ROTULO,
+  CODIGO_ROTULO,
+  ADICIONAR_ACAO,
+  ADICIONAR_CANCELAR,
+  NOME_REPETIDO,
 ];
 
 // ---------------------------------------------------------------------------
