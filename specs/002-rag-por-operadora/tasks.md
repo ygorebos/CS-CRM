@@ -25,7 +25,7 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
-## Estado em 2026-08-09 — 126 fechadas, 14 abertas
+## Estado em 2026-08-09 — 127 fechadas, 13 abertas
 
 A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
 disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
@@ -41,13 +41,13 @@ e a sabotagem T093.
 > do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
 > mais convincente de verde falso que esta spec produziu.
 
-**As 14 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+**As 13 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
 | ~~**Invariantes não escritos**~~ | ~~T075, T093, T102~~ | ✅ **FECHADO em 2026-08-09.** `tests/invariants/precedencia-de-camada.test.ts` (11 casos: precedência dentro do balde nos dois sentidos, isolamento entre tenants no mesmo escopo, `p_incluir_preteridos` e a divergência chegando à lista pelo caminho de produção) e `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` (8 casos: âncora sobrevive a reindexação e a recuração, ausência de FK em `chunk_id`/`material_id` como decisão vigiada, cascade de `message_id` pela LGPD, RLS). A classificação anterior — "bloqueio de ambiente" — estava errada, e a tabela já dizia isso |
 | ~~**Prova de banco executada**~~ | ~~T121~~ | ✅ **FECHADO em 2026-08-09** — rodado localmente e registrado em `.superpowers/evidence/002-test-db-2026-08-09.md` |
-| **Prova pela tela** | T040, T041, T078, T096, T103, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
+| **Prova pela tela** | T040, T041, T078, T096, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
 | ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0134** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita. **Provado PELA TELA** em 2026-08-09: `tests/e2e/escopo-remocao.spec.ts`, 5 de 5 em ambiente fresco — e a execução achou um defeito que nenhum teste de unidade pegaria (a página é Server Component e lê o banco direto; com o filtro só na rota, a operadora removida sumia e VOLTAVA ao recarregar) |
 | **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
@@ -358,7 +358,7 @@ sozinha na tela, com o debug desligado.
 ### Tests for User Story 3 ⚠️
 
 - [X] T102 [P] [US3] Invariante de rastreabilidade histórica em `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` — resposta antiga continua apontando para o conteúdo que valia na época, depois de o acervo ser reconstruído (FR-023)
-- [ ] T103 [P] [US3] Spec E2E em `tests/e2e/origem-sem-debug.spec.ts` — chegar ao texto do trecho em no máximo 3 interações de tela, com o modo de depuração **desligado** (SC-008)
+- [X] T103 [P] [US3] Spec E2E em `tests/e2e/origem-sem-debug.spec.ts` — chegar ao texto do trecho em no máximo 3 interações de tela, com o modo de depuração **desligado** (SC-008) — **3 de 3 em ambiente fresco (2026-08-09)**: o texto do trecho está a **2** interações, com o teto de 3 afirmado numa contagem explícita, e a origem aparece sem nenhum interruptor de depuração ligado
 
 ### Implementation for User Story 3
 
