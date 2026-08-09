@@ -335,26 +335,81 @@ test.describe("conectar número pelo gateway, conta nova e estado vazio (SC-006)
   });
 
   test("o QR não é refeito no escuro: o pedido segue a validade (FR-031)", async () => {
+    // Observar agendamento leva tempo de relógio: 6 s para o estado assentar e
+    // 20 s de janela. O teto padrão de 30 s da suíte mata o caso no meio da
+    // espera — e a falha lê como "travou" quando é o cronômetro do Playwright.
+    test.setTimeout(90_000);
     const page = pagina;
-    // A regressão que este caso impede: voltar ao refresh cego de 15 s. Com a
-    // validade declarada, entre dois pedidos tem de haver MAIS que o intervalo
-    // antigo quando o material vale mais que isso.
+    // A regressão que este caso impede é o refresh CEGO — intervalo fixo, igual
+    // para material que vale 40 s e para material que vence em 5.
+    //
+    // Duas asserções erradas antes desta, ambas medidas:
+    //
+    //  1. "mais de 10 s entre dois pedidos" reprovava o comportamento CERTO:
+    //     diálogo reaberto com material no fim da validade deve pedir em 3 s.
+    //  2. comparar o 2º pedido com a validade do 1º também erra, porque nem todo
+    //     pedido vem do relógio: a transição `STARTING → SCAN_QR_CODE` re-dispara
+    //     a busca. Medido — pedidos em [0, 3138] ms com validade declarada de
+    //     ~40 s. Não é laço; é reação a mudança de estado, e é desejável.
+    //
+    // O que sobra, e é o que a FR-031 promete de fato: com o estado JÁ estável e
+    // material que vale bem mais que a janela de observação, nenhum pedido novo
+    // pode sair. Um refresh fixo de 15 s produziria pelo menos um — é exatamente
+    // essa a diferença entre seguir a validade e adivinhar.
+    const JANELA_MS = 20_000;
+    const MARGEM_DA_TELA_MS = 3_000;
+
+    let ultimaValidade: number | null = null;
+    let ultimaChegada = 0;
     const pedidos: number[] = [];
     page.on("request", (r) => {
       if (r.url().includes("/pairing")) pedidos.push(Date.now());
     });
+    page.on("response", async (r) => {
+      if (!r.url().includes("/pairing") || !r.ok()) return;
+      try {
+        const corpo = (await r.json()) as { data?: { expires_at?: string | null } };
+        const bruto = corpo.data?.expires_at ?? null;
+        const t = bruto ? new Date(bruto).getTime() : NaN;
+        ultimaValidade = Number.isFinite(t) ? t : null;
+        ultimaChegada = Date.now();
+      } catch {
+        // Corpo ilegível não é o que este caso mede.
+      }
+    });
 
     await page.getByRole("button", { name: /conectar (novo )?(whatsapp|n[úu]mero)/i }).click();
     await expect(page.getByRole("img", { name: /QR/i })).toBeVisible({ timeout: TETO_DO_QR_MS });
-    await page.waitForTimeout(20_000);
+
+    // Deixa a transição de estado acontecer ANTES de começar a medir. O que se
+    // quer observar é o agendamento, e ele só existe depois que o estado parou.
+    await page.waitForTimeout(6_000);
 
     expect(pedidos.length, "nenhum pedido de pareamento saiu").toBeGreaterThan(0);
-    if (pedidos.length >= 2) {
-      const intervalo = pedidos[1]! - pedidos[0]!;
+    expect(
+      ultimaValidade,
+      "o material veio SEM validade declarada — é o refresh cego por outro caminho",
+    ).not.toBeNull();
+
+    const valeMs = ultimaValidade! - ultimaChegada;
+    const antesDaJanela = pedidos.length;
+    await page.waitForTimeout(JANELA_MS);
+    const durante = pedidos.length - antesDaJanela;
+
+    if (valeMs - MARGEM_DA_TELA_MS > JANELA_MS) {
       expect(
-        intervalo,
-        "Dois pedidos com menos de 10 s entre eles é o refresh cego de volta.",
-      ).toBeGreaterThan(10_000);
+        durante,
+        `O material ainda valia ${valeMs} ms, mas saíram ${durante} pedido(s) em ` +
+          `${JANELA_MS} ms. Pedir material que ainda vale é o refresh cego.`,
+      ).toBe(0);
+    } else {
+      // Validade curta: aí pedir DENTRO da janela é o certo, e não pedir é que
+      // seria defeito — o corretor ficaria com um código morto na tela.
+      expect(
+        durante,
+        `O material vencia em ${valeMs} ms, dentro da janela de ${JANELA_MS} ms, ` +
+          "e nenhum pedido novo saiu — o QR morre na tela.",
+      ).toBeGreaterThan(0);
     }
   });
 
