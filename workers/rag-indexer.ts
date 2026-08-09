@@ -820,11 +820,38 @@ export async function processRagIndexer(row: EventRow): Promise<HandlerResult> {
     return { consumer_key: consumerKey, status: "error", detail };
   }
 
-  // Debounce key scoped to (org, agent, event_type) to coalesce bursts.
+  // Debounce por (org, agente, tipo de evento) para juntar rajadas.
+  //
+  // ═══ COALESCER NÃO É DESCARTAR — E ERA (medido em 2026-08-09) ═══
+  //
+  // A versão anterior devolvia `skipped` aqui. `skipped` marca o evento como CONSUMIDO: o
+  // segundo material carregado dentro dos 30 s do primeiro era engolido pela janela e
+  // **nunca era indexado**. A fonte ficava `ready` com o item gravado, `last_index_status`
+  // NULO, e a tela dizia "Preparando" para sempre — material aceito e descartado em
+  // silêncio, que é o modo de falha que FR-004 proíbe pelo nome. Nada o reemitia: só o
+  // botão de reindexar à mão, que o corretor não tem por que saber que existe.
+  //
+  // O defeito passava despercebido porque tem CARA de otimização, porque some com um
+  // material só, e porque desaparece inteiro em ambiente sem Redis — sem ele o debounce cai
+  // no mapa em memória do processo, e cada `next start` começa com a janela limpa. Foi
+  // preciso subir o Redis do ambiente de teste para ele aparecer.
+  //
+  // `retry` é o que a palavra "coalescer" sempre quis dizer: a rajada vira UMA reconstrução
+  // agora e mais UMA depois da janela, em vez de uma reconstrução e N sumiços. O drain
+  // reagenda sem contar tentativa (ver `HandlerResult.retry_at`), então isto não gasta o
+  // orçamento de falhas do evento — ele não falhou, ele chegou cedo demais.
   const debounceKey = `rag:debounce:${row.organization_id}:${agentId}:${row.event_type}`;
   const acquired = await acquireDebounce(debounceKey, DEBOUNCE_TTL_SEC);
   if (!acquired) {
-    return { consumer_key: consumerKey, status: "skipped", detail: "debounced" };
+    // Um segundo depois da janela: cedo demais e ele volta a bater na mesma trava, gastando
+    // uma volta do drain para nada.
+    const retryAt = new Date(Date.now() + (DEBOUNCE_TTL_SEC + 1) * 1000).toISOString();
+    return {
+      consumer_key: consumerKey,
+      status: "retry",
+      retry_at: retryAt,
+      detail: "debounced",
+    };
   }
 
   let versionId: string | undefined;

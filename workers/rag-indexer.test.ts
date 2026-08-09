@@ -901,3 +901,57 @@ describe("rag-indexer · material que não é par pergunta/resposta (T077, FR-00
     expect(h.ingestChamado).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// A janela de debounce COALESCE, não descarta
+// ---------------------------------------------------------------------------
+
+describe("rag-indexer · rajada dentro da janela é reagendada, nunca engolida", () => {
+  /**
+   * ═══ O DEFEITO QUE ISTO CONGELA (medido em 2026-08-09, pela tela) ═══
+   *
+   * O debounce devolvia `skipped`, e `skipped` marca o evento como CONSUMIDO. O segundo
+   * material carregado dentro dos 30 s do primeiro era engolido pela janela e **nunca era
+   * indexado**: fonte `ready`, item gravado, `last_index_status` NULO, e a tela dizendo
+   * "Preparando" para sempre. Nada o reemitia — só o botão de reindexar à mão, que o
+   * corretor não tem por que saber que existe. É material aceito e descartado em silêncio,
+   * o modo de falha que FR-004 proíbe pelo nome.
+   *
+   * Três coisas o escondiam: tem cara de otimização, some com um material só, e **desaparece
+   * inteiro em ambiente sem Redis** — sem ele o debounce cai no mapa em memória do processo,
+   * e cada `next start` começa com a janela limpa. Foi preciso subir o Redis do ambiente de
+   * teste para o defeito aparecer.
+   */
+  it("devolve retry com horário, e NÃO skipped — skipped daria o evento por consumido", async () => {
+    h.debounce = false;
+    const chamadas = preparar({ fontes: [fonteComEscopo("fonte-a", ESCOPO_A)], itens: [] });
+
+    const r = await processRagIndexer(evento());
+
+    expect(r.status).toBe("retry");
+    expect(r.detail).toBe("debounced");
+    // Sem `retry_at` o drain aplica o backoff de ERRO — que cresce a cada volta e trata
+    // "chegou cedo" como "falhou". O horário aqui é o que mantém a rajada barata.
+    expect(r.retry_at, "retry sem horário cai no backoff de erro").toBeTruthy();
+    // Depois da janela, não antes: reagendar para já faz o evento bater na mesma trava e
+    // gastar uma volta do drain para nada.
+    const daquiA = new Date(r.retry_at!).getTime() - Date.now();
+    expect(daquiA).toBeGreaterThan(29_000);
+    expect(daquiA).toBeLessThan(60_000);
+    // E nada foi reconstruído nesta passada — é isso que a janela existe para evitar.
+    expect(trechosDe(chamadas)).toEqual([]);
+  });
+
+  it("com a janela livre, a mesma rodada indexa — o controle que prova que o caso acima mede a janela", async () => {
+    h.debounce = true;
+    const chamadas = preparar({
+      fontes: [fonteComEscopo("fonte-a", ESCOPO_A)],
+      itens: [{ knowledge_source_id: "fonte-a", question: "p", answer: "r", tags: [], locale: "pt-BR" }],
+    });
+
+    const r = await processRagIndexer(evento());
+
+    expect(r.status).toBe("ok");
+    expect(trechosDe(chamadas).length).toBeGreaterThan(0);
+  });
+});

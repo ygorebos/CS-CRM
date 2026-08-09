@@ -257,24 +257,20 @@ test.describe("do login ao primeiro trecho buscável (SC-003 e SC-004)", () => {
   });
 
   /**
-   * ⚠️ SC-004 AINDA NÃO FOI ATINGIDO, e este caso fica marcado para não mentir o contrário.
+   * ⚠️ ESTE CASO ACHOU O DEFEITO QUE O DEBOUNCE ESCONDIA (2026-08-09).
    *
-   * Medido em 2026-08-09, três execuções: o SEGUNDO material entra pela tela, a fonte nasce
-   * `ready` com o item gravado, o evento `knowledge_source.updated` é consumido e marcado
-   * `done` — e nenhum trecho é produzido para ele. `last_index_status` fica NULO, o material
-   * aparece "Preparando" para sempre, e nada o reemite. Reemitir o MESMO evento à mão faz o
-   * indexador processar as duas fontes na hora ("fontes: 2, trechos_planejados: 2"), então o
-   * caminho funciona: o que falha é a rodada disparada pela criação.
+   * Enquanto o `rag-indexer` devolvia `skipped` na janela de debounce, o SEGUNDO material
+   * carregado dentro de 30 s do primeiro era engolido: fonte `ready`, item gravado,
+   * `last_index_status` NULO, tela dizendo "Preparando" para sempre. Nada o reemitia.
+   * Medido três vezes aqui, com o instrumento esperando 4 minutos — o dobro do teto — para
+   * não confundir "estourou o tempo" com "nunca aconteceu".
    *
-   * É o modo de falha que FR-004 proíbe pelo nome — material aceito e nunca indexado — e é
-   * pior que a lentidão que SC-004 cronometra. Não é defeito do teste: o instrumento aqui
-   * espera 4 minutos, o dobro do teto, justamente para não confundir "estourou o tempo" com
-   * "nunca aconteceu".
-   *
-   * Fica `fixme` em vez de removido porque ele é a prova: no dia em que a causa for
-   * corrigida, tirar a marca é o que confirma o conserto.
+   * O conserto foi trocar `skipped` por `retry` com horário: coalescer é juntar a rajada em
+   * uma reconstrução agora e outra depois da janela, nunca descartar o que chegou cedo.
+   * `workers/rag-indexer.test.ts` vigia isso do lado da unidade; este caso vigia do lado do
+   * corretor — e é ele que responde "o segundo material passou a responder?".
    */
-  test.fixme("SC-004 — segundo material em ≤2 min, e zero janela sem base", async ({ page }) => {
+  test("SC-004 — segundo material em ≤2 min, e zero janela sem base", async ({ page }) => {
     test.setTimeout(240_000);
 
     // A pergunta que o PRIMEIRO material responde, embeddada uma vez. É ela que mede a
