@@ -25,17 +25,27 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
-## Estado em 2026-08-08 — 116 fechadas, 24 abertas
+## Estado em 2026-08-09 — 120 fechadas, 20 abertas
 
-A sessão desta data fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
-disjuntos, conforme a seção "Trabalho em paralelo" da constituição). **A confirmação por
-sabotagem não foi delegada** — ela é o que separa teste que vigia de teste que acompanha.
+A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
+disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
+atualizou a branch com a `main` (ver "Ordem das migrations" — a faixa cedeu pela segunda
+vez) e fechou os três que a tabela abaixo chamava de "invariantes não escritos": T075, T102
+e a sabotagem T093.
 
-**As 24 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+> **O que a sabotagem ensinou, e vale para toda próxima.** T093 manda inverter o desempate
+> "em `supabase/migrations/<ts>_0123_busca_de_lastro.sql`". Sabotar aquele arquivo não prova
+> nada: `scripts/test-db.sh` aplica **só o `baseline.sql`**, e a forma vigente da
+> `fn_buscar_lastro` é a do `create or replace` da **0132**. A sabotagem foi feita no bloco
+> do apêndice — 5 dos 11 casos ficaram vermelhos, e são exatamente os que medem o sentido
+> do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
+> mais convincente de verde falso que esta spec produziu.
+
+**As 20 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
-| **Invariantes não escritos** | T075, T093, T102 | ⚠️ **NÃO é bloqueio de ambiente** — foi assim que esta tabela os classificou primeiro, e estava errado. O job `invariants` do PR #12 passou em 2m39s, provando as migrations 0125–0128 em install e update. Dá para escrever o invariante e deixar o CI provar; o que não dá é ITERAR rápido sem Postgres local |
+| ~~**Invariantes não escritos**~~ | ~~T075, T093, T102~~ | ✅ **FECHADO em 2026-08-09.** `tests/invariants/precedencia-de-camada.test.ts` (11 casos: precedência dentro do balde nos dois sentidos, isolamento entre tenants no mesmo escopo, `p_incluir_preteridos` e a divergência chegando à lista pelo caminho de produção) e `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` (8 casos: âncora sobrevive a reindexação e a recuração, ausência de FK em `chunk_id`/`material_id` como decisão vigiada, cascade de `message_id` pela LGPD, RLS). A classificação anterior — "bloqueio de ambiente" — estava errada, e a tabela já dizia isso |
 | **Prova de banco executada** | T121 | Feito de fato pelo CI: `invariants` verde no PR #12. Falta só registrar a evidência |
 | **Prova pela tela** | T040, T041, T078, T096, T103, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
@@ -283,7 +293,7 @@ sobrescrever um assunto de um escopo do catálogo prova as duas camadas e a prec
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T075 [P] [US1] Invariante de precedência de camada em `tests/invariants/precedencia-de-camada.test.ts` — material do tenant vence o do catálogo **no mesmo balde**, e não vence fora dele (SC-019, FR-035). Cobrir também a **segunda metade de FR-035**: o desempate grava a divergência, e ela chega à lista do corretor (SC-016)
+- [X] T075 [P] [US1] Invariante de precedência de camada em `tests/invariants/precedencia-de-camada.test.ts` — material do tenant vence o do catálogo **no mesmo balde**, e não vence fora dele (SC-019, FR-035). Cobrir também a **segunda metade de FR-035**: o desempate grava a divergência, e ela chega à lista do corretor (SC-016)
 - [X] T076 [P] [US1] Teste do ingest de PDF em `lib/ai/rag/ingest/policy.test.ts` — o texto extraído **persiste** e vira item indexável, em vez de ser usado só para validar
 - [X] T077 [P] [US1] Teste do indexador aceitando material que não é par pergunta/resposta em `workers/rag-indexer.test.ts`
 - [ ] T078 [P] [US1] Spec E2E do lote de materiais inválidos em `tests/e2e/material-nada-em-silencio.spec.ts` — 100% terminam em estado explícito, zero em "salvo sem conteúdo buscável" (SC-014)
@@ -305,7 +315,7 @@ sobrescrever um assunto de um escopo do catálogo prova as duas camadas e a prec
 - [X] T090 [US1] Substituir os 4 slots fixos por lista de N materiais por escopo em `app/app/ai/knowledge/sources/_client.tsx` (hoje `:22` e `:56-68`), com estado inequívoco por material e contagem de trechos (FR-005), e nenhum material aceito pode ficar sem virar trecho buscável (FR-004)
 - [X] T091 [US1] Exibir em `app/app/ai/knowledge/scopes/_client.tsx` quais escopos vieram do catálogo e quais são próprios, com os dois caminhos disponíveis ao corretor: desativar para si ou sobrepor com material próprio
 - [X] T092 [US1] Exigir papel de gestor ou superior e emitir `api_audit_log` em todas as mutações de `app/api/v1/knowledge-scopes/` (FR-032)
-- [ ] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
+- [X] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
 - [ ] T094 [US1] Cronometrar SC-003 (primeiro material próprio, do login ao primeiro trecho buscável, ≤5 min) e registrar evidência em `.superpowers/evidence/`
 
 **Checkpoint**: o corretor manda no que vale para ele.
@@ -347,7 +357,7 @@ sozinha na tela, com o debug desligado.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T102 [P] [US3] Invariante de rastreabilidade histórica em `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` — resposta antiga continua apontando para o conteúdo que valia na época, depois de o acervo ser reconstruído (FR-023)
+- [X] T102 [P] [US3] Invariante de rastreabilidade histórica em `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` — resposta antiga continua apontando para o conteúdo que valia na época, depois de o acervo ser reconstruído (FR-023)
 - [ ] T103 [P] [US3] Spec E2E em `tests/e2e/origem-sem-debug.spec.ts` — chegar ao texto do trecho em no máximo 3 interações de tela, com o modo de depuração **desligado** (SC-008)
 
 ### Implementation for User Story 3
