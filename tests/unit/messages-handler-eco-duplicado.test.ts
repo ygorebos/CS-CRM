@@ -259,15 +259,48 @@ describe('o que a correção NÃO pode apagar', () => {
     expect(messages.find((m) => m.id === 'outro-1'), 'apagou linha de outra conversa').toBeDefined();
   });
 
-  it('linha do CRM (não-webhook) com o mesmo id não é tocada', async () => {
-    // Só o eco nasce com `sent_via: external_device`. Uma linha nossa com o
-    // mesmo id seria outra coisa — e apagá-la seria perder envio de verdade.
+  it('linha do CRM com OUTRO id não é tocada, mesmo na mesma conversa', async () => {
+    // A proteção que continua valendo: o que salva uma linha legítima é o ID
+    // ser outro, não quem a escreveu.
     wahaRespondendo(BARE);
-    const doCrm = ecoDoWebhook({ id: 'crm-1', sent_via: 'ai' });
+    const doCrm = ecoDoWebhook({
+      id: 'crm-1',
+      sent_via: 'ai',
+      external_id: 'true_5531999998888@c.us_3EB0OUTROIDNOSSO01',
+      body: 'resposta do agente',
+    });
     const { supabase, messages } = makeSupabase([doCrm]);
 
     await sendMessageHandler(supabase, ctx, input);
 
-    expect(messages.find((m) => m.id === 'crm-1'), 'apagou uma linha que não era eco de dispositivo').toBeDefined();
+    expect(messages.find((m) => m.id === 'crm-1'), 'apagou uma linha com id diferente').toBeDefined();
+  });
+
+  /**
+   * ⭐ A PREMISSA QUE ENVELHECEU. Este caso existia como "linha do CRM com o
+   * mesmo id não é tocada", apoiado em "só o eco nasce com `external_device`".
+   *
+   * Com a spec 004 isso deixou de ser verdade: o eco passou a ser escrito pelo
+   * GATEWAY, que carimba `sent_via = 'crm'`. O filtro por `external_device`
+   * então nunca alcançava o eco, ele ficava com o `external_id`, e o carimbo
+   * deste envio batia em `messages_org_external_id_unique` — linha `queued`
+   * permanente e mensagem duplicada na conversa. Medido em 2026-08-09.
+   *
+   * E a premissa antiga era impossível de qualquer forma: o índice único por
+   * `(organization_id, external_id)` garante que só UMA linha da organização
+   * carrega aquele id. Se ela não é a nossa, é o eco — não existe terceira
+   * hipótese.
+   */
+  it('eco escrito pelo GATEWAY (sent_via=crm) com o mesmo id é removido', async () => {
+    wahaRespondendo(BARE);
+    const ecoDoGateway = ecoDoWebhook({ id: 'gw-1', sent_via: 'crm' });
+    const { supabase, messages } = makeSupabase([ecoDoGateway]);
+
+    await sendMessageHandler(supabase, ctx, input);
+
+    expect(
+      messages.find((m) => m.id === 'gw-1'),
+      'o eco do gateway sobreviveu — ele segura o external_id e trava a linha do CRM em queued',
+    ).toBeUndefined();
   });
 });
