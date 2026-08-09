@@ -302,3 +302,42 @@ de envio inteira. Tudo abaixo dela está provado por teste; a jornada em si, nã
 
 **Config nova no deploy:** `GATEWAY_ADMIN_TOKEN` (diferente do interno de propósito — ver
 `docs/migracao-para-o-gateway.md`).
+
+## A jornada de mensagem percorrida de verdade (spec 004) — 2026-08-09
+
+A jornada que a seção acima declarava "não percorrida por uma pessoa" foi percorrida. Ela estava
+**quebrada nas duas pontas**, e nenhum dos dois defeitos aparecia em teste: 3174 asserções unitárias
+e os invariantes estavam verdes o tempo todo.
+
+### Recebimento: a mensagem morria no gateway, com HTTP 200 — ✅ CONSERTADO
+
+`UazapiWebhook` resolvia a conexão só pelo RPC do Supabase **do Cotador**, enquanto na variante CRM
+a conexão mora em `internal/registro` (disco do gateway). Dois armazéns diferentes: o pacote
+`registro` era usado apenas pelo provisionamento, e o caminho de entrada nunca foi ligado a ele.
+O provedor recebia 200 e considerava entregue; o CRM nunca via a mensagem.
+
+Conserto em `gateway_go`, PR [#1](https://github.com/ygorebos/beckend-multiatendimento/pull/1)
+(`Registro.PorToken` + desvio por variante). Provado com mensagem real: depois do conserto o gateway
+gravou conversa e mensagem no CRM; antes não produzia linha nenhuma.
+
+### Envio: trocar de número emudecia a caixa inteira — ✅ CONSERTADO
+
+Excluir o número na Central grava `archived_at` na sessão e **não mexe nas conversas**. As 16
+conversas da organização continuaram apontando para a sessão arquivada, e todo envio passou a
+falhar com `channel_archived`. Sem caminho de volta pela tela — e contrariando a frase que o próprio
+produto mostra ao reconectar ("Conecte um número para voltar a atender").
+
+Conserto em `lib/channels/adocao.ts`: a conversa é reposta no canal vivo antes da recusa, **só**
+quando há exatamente um (com dois, escolher é adivinhar a identidade e mandar o histórico pelo
+número errado). Auditado como `channel.conversation_adopted`.
+
+### Aberto — não bloqueia atendimento, mas custa
+
+| O quê | Onde | Efeito |
+|---|---|---|
+| `GET /v1/connections/{id}` não devolve `phone_number` nem `last_seen_at`, que o contrato §5 promete | `gateway_go`, `ObservarConexao` | `channel_sessions.phone_number` fica nulo, e o índice `channel_sessions_phone_per_org_unique` nunca dispara — a trava contra número duplicado existe e está **desarmada por falta do dado** |
+| `/instance/status` devolve `profileName`, `profilePicUrl`, `isBusiness`, `owner`, `jid` e o gateway descarta tudo | idem | `display_name` nunca é preenchido, por nenhum caminho — nem pelo do WAHA, que lê `me.pushName` no tipo e joga fora |
+| Instâncias uazapi órfãs em `created`, nunca pareadas | registro do gateway | Custam por unidade, sem reaper |
+| `main` **não está protegida** no GitHub (`gh api .../protection` → "Branch not protected") | repositório | Os checks que a doutrina chama de obrigatórios não seguram merge nenhum |
+
+O desenho das três primeiras está em `specs/005-virada-de-chave/spec.md`.

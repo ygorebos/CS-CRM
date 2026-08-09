@@ -218,6 +218,61 @@ receber; reverter; enviar e receber de novo.
 
 ---
 
+## Adendo de 2026-08-09 — o que a jornada real revelou
+
+A jornada de mensagem foi percorrida na instância de desenvolvimento e estava quebrada nas duas
+pontas (registro em `docs/current-state.md`). Os dois defeitos foram consertados. O que sobrou são
+três lacunas de **identidade da conexão**, todas com a mesma raiz: o gateway busca o material do
+provedor, usa um campo e descarta o resto.
+
+Medido: `GET /instance/status` da uazapi devolve `owner`, `profileName`, `profilePicUrl`,
+`isBusiness`, `status.jid`, `lastDisconnect` e `lastDisconnectReason`. `ObservarConexao` lê **só**
+`status`. Nenhum webhook participa disso — o dado está na resposta síncrona que o gateway já faz a
+cada polling.
+
+### US6 — o corretor vê de quem é o número que acabou de conectar
+
+Ao conectar, a Central mostra o número, o nome do perfil e a foto — como o WAHA já mostrava.
+
+**Por que no gateway, e não no CRM:** anti-pattern 15 proíbe o CRM de ler payload cru de provedor;
+o contrato `gateway-provisioning-v1.md` §5 **já promete** `phone_number` e `last_seen_at`; e
+`lib/gateway/provisionamento.ts:271` **já lê** `corpo.phone_number`. O CRM está pronto e esperando
+— é dívida do gateway, não feature nova.
+
+- **FR-050**: `GET /v1/connections/{id}` devolve `phone_number` e `last_seen_at`, como o §5 exige.
+- **FR-051**: O contrato §5 ganha `display_name`, `profile_pic_url` e `is_business`; o CRM persiste
+  `display_name` (coluna que existe e que **nenhum** caminho preenche hoje — nem o do WAHA, que lê
+  `me.pushName` no tipo e joga fora).
+- **SC-008**: Conectando um número novo, a Central mostra número e nome sem recarregar a página.
+
+### US7 — reconectar o mesmo número não cria instância nova
+
+**A trava já existe e está desarmada.** `channel_sessions_phone_per_org_unique` é
+`(organization_id, phone_number)`, e `phone_number` fica nulo porque o gateway não o manda: NULL não
+colide. A rota de envio **já trata** o `23505` devolvendo `phone_number_conflict: true`
+(`channel-sessions/[id]/route.ts:257`), e `/reconnect` **já** repareia a MESMA conexão sem
+provisionar outra. Cumprir a FR-050 arma tudo isso de uma vez.
+
+- **FR-052**: Conectar um número que a organização já tem recusa com desempate **declarado** — hoje
+  o conflito é detectado e o que fazer com ele não está escrito.
+- **FR-053**: A Central oferece "reconectar este número" antes de "conectar novo", quando o número
+  já existe na organização.
+- **SC-009**: Conectar duas vezes o mesmo telefone produz **uma** instância no provedor.
+
+### US8 — instância paga que ninguém usa não fica viva
+
+Medido: 3 instâncias uazapi vivas no registro, 1 referenciada pelo CRM; duas em `created`, nunca
+pareadas. Cada uma custa por unidade.
+
+- **FR-054**: Instância em `created` sem pareamento por mais de N minutos é desprovisionada, e o
+  descarte vira registro — nunca silêncio.
+- **FR-055**: `DELETE /v1/connections/{id}` só devolve 204 depois de **conferir** que a instância
+  sumiu do provedor. Hoje devolve 204 sem verificar.
+- **SC-010**: Depois de uma rodada do reaper, o inventário do provedor e o registro do gateway
+  batem.
+
+---
+
 ## Fora de escopo
 
 - **Ligar o gateway em produção** (variáveis, publicar o fork `feat/004-escrita-crm`, subir com
