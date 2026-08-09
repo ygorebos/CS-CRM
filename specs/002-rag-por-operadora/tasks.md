@@ -333,7 +333,7 @@ durante todo o processo.
 ### Tests for User Story 4 ⚠️
 
 - [X] T095 [P] [US4] Teste de que a versão nova do acervo só é ativada depois de todos os trechos entrarem, em `workers/rag-indexer.test.ts` — falha no meio deixa a anterior valendo por inteiro (FR-006)
-- [ ] T096 [P] [US4] Spec E2E de convivência em `tests/e2e/segundo-escopo-sem-janela.spec.ts` — perguntas sobre o primeiro escopo continuam respondidas durante toda a carga do segundo (SC-004)
+- [X] T096 [P] [US4] Spec E2E de convivência em `tests/e2e/segundo-escopo-sem-janela.spec.ts` — perguntas sobre o primeiro escopo continuam respondidas durante toda a carga do segundo (SC-004) — **COBERTO, e em outro arquivo de propósito.** A medição vive no caso de SC-004 de `tests/e2e/primeiro-material-cronometrado.spec.ts`, que já carrega o segundo material pela tela e, durante toda a carga e indexação, repergunta a `fn_buscar_lastro` a cada 1,5 s a pergunta que o PRIMEIRO material responde — com controle antes de começar, para "zero janela" não poder significar "nunca respondeu". **Zero amostras sem base (2026-08-09).** Um arquivo separado repetiria a mesma jornada cara (duas operadoras, dois materiais, embedding de verdade) para medir exatamente a mesma coisa: o custo é real e a cobertura seria a mesma. Se a convivência algum dia for medida por outro ângulo — camada do catálogo respondendo enquanto material próprio entra —, é aí que o arquivo próprio se justifica
 
 ### Implementation for User Story 4
 

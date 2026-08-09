@@ -404,3 +404,62 @@ apagado.
 conserto do gateway, pousando na conversa certa. As seis que existem são
 anteriores e foram repontadas pela 0131. A prova depende do dono responder com a
 tela aberta — `.superpowers/vigia-resposta.mjs` faz a medição em um comando.
+
+## RAG por operadora (spec 002) — 2026-08-09, noite
+
+134 de 140 tarefas fechadas na branch `feat/002-rag-prova-e-remocao` (PR #15). O que segue são
+os **defeitos de produto** que a execução achou — nenhum deles aparecia nas 3.700 asserções de
+unidade, e todos foram achados pela mesma via: usar o produto como o corretor usa, num ambiente
+com as dependências reais de pé.
+
+### Quatro defeitos, e o que cada um ensina
+
+1. **Escopo removido voltava ao recarregar.** A página de Operadoras é Server Component e lê o
+   banco direto; o filtro `deleted_at is null` estava só na rota. Sumia no clique e voltava no
+   F5. *Só a tela pega: teste de rota mede a rota.*
+
+2. **A lacuna não se fechava quando o material chegava** (SC-013), e — depois de consertado — a
+   lista da **Evolução** continuava mostrando a lacuna coberta, porque lia `agent_inbox_items`
+   sem filtrar `status`. Duas metades do mesmo critério; consertar uma e parar ali passaria por
+   pronto. *A lista onde o corretor lê é a que conta.*
+
+3. **Não havia porta para criar a própria operadora.** `POST /api/v1/knowledge-scopes` existia,
+   cumpria FR-002 e passava nos testes dela — e nenhum botão chegava até a rota. O estado vazio
+   ainda mandava "comece carregando um material em Conhecimento", que é a tela que exige um nome
+   já ligado: dois becos apontando um para o outro. *Rota sem porta e tela inexistente são a
+   mesma coisa para quem usa.*
+
+4. **O segundo material carregado em 30 s do primeiro NUNCA era indexado.** O `rag-indexer`
+   devolvia `skipped` na janela de debounce, e `skipped` marca o evento como consumido: fonte
+   `ready`, item gravado, `last_index_status` nulo, tela dizendo "Preparando" para sempre, nada
+   reemitindo. É o modo de falha que FR-004 proíbe pelo nome. Conserto: `retry` com `retry_at`.
+   *Coalescer é juntar a rajada, nunca descartar o que chegou cedo.*
+
+### O que o ambiente ensinou (custou quatro execuções vermelhas)
+
+O defeito 4 **só aparece com Redis de pé**. Sem ele o debounce cai no mapa em memória do
+processo, e cada `next start` começa com a janela limpa — o bug fica invisível exatamente no
+ambiente em que quase todo mundo testa. E a ausência do Redis, antes disso, derrubava o
+`rag-indexer` com um `fetch failed` genérico que aparecia três asserções depois, como "os avisos
+não fecharam", apontando para o lugar errado do produto.
+
+Os comandos de subir Redis + `serverless-redis-http` para o e2e estão no cabeçalho de
+`tests/e2e/lacunas-acionaveis.spec.ts`.
+
+### Medições registradas (`.superpowers/evidence/002-t094-t101/medicao.json`)
+
+| Critério | Medido | Teto | Gestos de tela |
+|---|---|---|---|
+| SC-003 (primeiro material próprio, do login ao primeiro trecho) | **14,7 s** | 300 s | 12 |
+| SC-004 (segundo material) | **44 s**, zero amostras sem base | 120 s | 11 |
+
+Os dois carimbos vêm do Postgres, não do laço do teste. Os **gestos** entram na medição junto com
+o tempo: é a parte que não depende da máquina, e um caminho que cresce em passos reprova mesmo
+que o hardware melhore.
+
+### Aberto (6 tarefas)
+
+`T040` e `T041` (specs de curadoria e de instalação nascendo sabendo), `T128` (quickstart de ponta
+a ponta), `T131` (bateria de 20 perguntas para SC-001/SC-002), `T139` (SC-010 sem deploy, pelas
+DUAS pontas — corretor e administrador de plataforma) e `T074` (sequência completa de gates com
+evidência visual).
