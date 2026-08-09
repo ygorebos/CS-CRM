@@ -261,4 +261,10 @@ export type AuditAction =
   | "knowledge_scope.updated"
   | "knowledge_scope.activated"
   | "knowledge_scope.deactivated"
+  // Remoção do escopo PRÓPRIO (T099, a outra metade de FR-008). Separada de
+  // `deactivated` porque as consequências diferem: desativar é reversível num clique e o
+  // material segue listado; remover arquiva o acervo daquele escopo e desfaz o
+  // agrupamento. Quem for investigar "sumiu a operadora e os materiais dela" precisa
+  // achar ESTA linha, com a contagem de materiais arquivados no metadata.
+  | "knowledge_scope.deleted"
   | "knowledge_scope.material_added";

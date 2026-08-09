@@ -25,7 +25,7 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
-## Estado em 2026-08-09 — 120 fechadas, 20 abertas
+## Estado em 2026-08-09 — 121 fechadas, 19 abertas
 
 A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
 disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
@@ -41,7 +41,7 @@ e a sabotagem T093.
 > do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
 > mais convincente de verde falso que esta spec produziu.
 
-**As 20 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+**As 19 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
@@ -49,7 +49,7 @@ e a sabotagem T093.
 | **Prova de banco executada** | T121 | Feito de fato pelo CI: `invariants` verde no PR #12. Falta só registrar a evidência |
 | **Prova pela tela** | T040, T041, T078, T096, T103, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
-| **Escopo restante** | T099 | FR-008 está pela METADE: desativar existe (`PATCH {is_active}`, a trava 4 que a busca lê ao vivo), remover **não** — não há `DELETE` na rota |
+| ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0134** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita |
 | **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
 | **Fechamento** | T005, T126, T127, T129 | Issue de alinhamento, docs de arquitetura, e o Living System Checklist — que só se responde com o resto medido |
 
@@ -339,7 +339,7 @@ durante todo o processo.
 
 - [X] T097 [US4] Garantir em `workers/rag-indexer.ts` que carregar material **não** desativa, apaga ou substitui material não relacionado (FR-003)
 - [X] T098 [US4] Garantir em `workers/rag-indexer.ts` que falha no processamento preserva o acervo anterior por inteiro, sem base parcial (FR-006)
-- [ ] T099 [US4] Implementar remoção e desativação de escopo em `app/api/v1/knowledge-scopes/[id]/route.ts`, tornando o material inerte para respostas novas **imediatamente** e preservando a rastreabilidade das já dadas (FR-008)
+- [X] T099 [US4] Implementar remoção e desativação de escopo em `app/api/v1/knowledge-scopes/[id]/route.ts`, tornando o material inerte para respostas novas **imediatamente** e preservando a rastreabilidade das já dadas (FR-008)
 - [X] T100 [US4] Fazer `app/app/ai/knowledge/scopes/_client.tsx` listar N escopos sem limite fixo, com o estado de cada um (FR-003, US4 cenário 3)
 - [ ] T101 [US4] Cronometrar SC-004 (segundo material em ≤2 min, zero janela sem base) e registrar evidência em `.superpowers/evidence/`
 
@@ -472,6 +472,7 @@ com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 | 0131 | F4 | onde mora o texto de um documento (`ai_source_passages`) — era 0127 |
 | 0132 | F4 | âncora legível do documento, forward-fix de `fn_buscar_lastro` — era 0128 |
 | 0133 | — | lastro de fábrica no agente (default de `ai_agents.guardrails`) — era 0129 |
+| 0134 | F4 | remoção lógica do escopo (`deleted_at`), e `escopo_ativo` passa a exigi-lo (T099) |
 
 As colunas de escopo saíram da 0124 e foram para a **0118**: a `fn_buscar_lastro` da 0123 as lê, e
 duas fases depois é tarde — a função não criaria, ou criaria sem filtro nenhum do lado do tenant.

@@ -216,6 +216,7 @@ export async function POST(req: NextRequest, { params }: Rota): Promise<Response
       .select("id")
       .eq("id", declaracao.id)
       .eq("organization_id", org.orgId)
+      .is("deleted_at", null)
       .maybeSingle();
     if (erroDoEscopo) {
       logger.error("[knowledge-scopes/materials] leitura do escopo falhou", {

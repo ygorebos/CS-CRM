@@ -1,7 +1,7 @@
 /**
- * PATCH /api/v1/knowledge-scopes/{id} — renomear e, sobretudo, LIGAR/DESLIGAR um escopo.
+ * PATCH e DELETE /api/v1/knowledge-scopes/{id} — as DUAS metades de FR-008.
  *
- * Spec 002 (RAG por operadora), T067/T087. Contrato em
+ * Spec 002 (RAG por operadora), T067/T087 (PATCH) e T099 (DELETE). Contrato em
  * `specs/002-rag-por-operadora/contracts/rotas-http.md`.
  *
  * ## Esta rota É a trava 4 (FR-008)
@@ -33,6 +33,7 @@ import {
   ACAO_ATIVADO,
   ACAO_ATUALIZADO,
   ACAO_DESATIVADO,
+  ACAO_REMOVIDO,
   COLUNAS_DO_ESCOPO,
   TETO_DE_ESCRITA,
   acharColisaoDeNome,
@@ -107,6 +108,8 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
     .select(COLUNAS_DO_ESCOPO)
     .eq("id", id)
     .eq("organization_id", org.orgId)
+    // Escopo removido (0134) é 404 daqui em diante: nem se renomeia, nem se liga de volta.
+    .is("deleted_at", null)
     .maybeSingle();
   if (erroDeLeitura) {
     return fail("internal_error", "Erro ao carregar o escopo de conhecimento.", 500, {
@@ -146,7 +149,10 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
       .from("knowledge_scopes")
       .select("id, display_name, catalog_scope_id")
       .eq("organization_id", org.orgId)
-      .neq("id", id);
+      .neq("id", id)
+      // Nome de escopo removido volta a ficar livre — senão um engano de digitação
+      // reservaria aquele nome para sempre.
+      .is("deleted_at", null);
     if (erroDosNomes) {
       return fail("internal_error", "Erro ao verificar os escopos existentes.", 500, {
         requestId,
@@ -228,4 +234,158 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
     requestId,
     headers: teto.headers,
   });
+}
+
+/**
+ * DELETE /api/v1/knowledge-scopes/{id} — a metade de FR-008 que faltava (T099).
+ *
+ * ## Por que "remover" precisa existir se "desativar" já torna inerte
+ *
+ * Desativar é reversível e mantém o agrupamento na tela: é o gesto certo para "esta
+ * operadora não vale agora". Remover é para o escopo que **nunca deveria ter sido criado**
+ * — erro de digitação, teste, operadora com que o corretor não trabalha mais. Sem remover,
+ * a lista do corretor acumula lixo desligado para sempre, e ele deixa de conseguir ler nela
+ * quais operadoras realmente atende. FR-008 nomeia as duas operações; só uma existia.
+ *
+ * ## Remoção LÓGICA, e a razão é do banco (migration 0134)
+ *
+ * `delete from knowledge_scopes` **não roda** quando existe material no balde. A FK de
+ * `ai_knowledge_sources.scope_id` é `on delete set null` e a constraint
+ * `ai_knowledge_sources_scope_xor_all` (0118) exige balde OU "vale para todos" — nunca
+ * nenhum dos dois. Medido em 2026-08-09: o `delete` ergue a violação. Soltar o ponteiro com
+ * `applies_to_all = true` faria o material da operadora **removida** responder a todo
+ * mundo, sobre tudo — o oposto de FR-008, e invisível na tela. Daí `deleted_at`.
+ *
+ * ## Espelho do catálogo NÃO se remove, e a recusa é honesta
+ *
+ * `fn_sincronizar_escopos_do_catalogo` recria o espelho na próxima sincronização. Uma
+ * remoção que "funciona" e volta sozinha é pior que um 403: o corretor conclui que o
+ * sistema está quebrado, e ninguém liga o retorno à sincronização. Para espelho, o gesto
+ * com efeito real é `PATCH { is_active: false }` — e é o que a mensagem manda fazer.
+ *
+ * ## Duas travas para a inércia, de propósito
+ *
+ * A rota escreve `is_active = false` **e** `deleted_at`; a CTE `escopo_ativo` exige as duas
+ * coisas. Só `deleted_at` bastaria hoje — mas uma trava só seria um
+ * `update ... set is_active = true` entre o corretor e o material que ele acha que removeu,
+ * e esse UPDATE existe: é o PATCH logo acima.
+ *
+ * ## O acervo é arquivado, não apagado
+ *
+ * Remover fica reversível por nós — numa instância única não há de onde restaurar o que foi
+ * destruído. Arquivar ANTES de marcar o escopo também importa: depois de `deleted_at`, a
+ * listagem por escopo deixa de ser um caminho natural até aquelas fontes.
+ *
+ * ## O que sobrevive de propósito
+ *
+ * `message_groundings` não tem FK para escopo nem para trecho, e carrega a cópia congelada
+ * da origem (`source_ref`): a resposta já dada continua explicável depois de a operadora
+ * sumir da lista — é a segunda exigência literal de FR-008, e é o que
+ * `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` vigia.
+ */
+export async function DELETE(_req: NextRequest, { params }: Rota): Promise<Response> {
+  const requestId = randomUUID();
+  const authz = await requireRole("manager", { requestId, resource: "knowledge_scopes" });
+  if (!authz.ok) return authz.response;
+  const { user, org } = authz;
+
+  const { id } = await params;
+  if (!FORMA_DE_UUID.test(id)) {
+    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, { requestId });
+  }
+
+  const teto = await aplicarTetoDaOrganizacao(org.orgId, TETO_DE_ESCRITA, requestId);
+  if (teto.excedido) return teto.excedido;
+
+  const supabase = await createClient();
+
+  const { data: atualBruto, error: erroDeLeitura } = await supabase
+    .from("knowledge_scopes")
+    .select(COLUNAS_DO_ESCOPO)
+    .eq("id", id)
+    .eq("organization_id", org.orgId)
+    .maybeSingle();
+  if (erroDeLeitura) {
+    return fail("internal_error", "Erro ao carregar o escopo de conhecimento.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
+  }
+  if (!atualBruto) {
+    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, {
+      requestId,
+      headers: teto.headers,
+    });
+  }
+  const alvo = atualBruto as unknown as LinhaDeEscopo;
+
+  if (alvo.catalog_scope_id !== null) {
+    const rotulo = await rotuloDoTenant(supabase, org.orgId);
+    return fail(
+      "escopo_do_catalogo_nao_editavel",
+      `${rotulo.singular} "${alvo.display_name}" vem do catálogo desta instalação e volta na próxima sincronização — remover não a faria sumir. Para deixá-la sem efeito nas respostas, desligue-a.`,
+      403,
+      { requestId, headers: teto.headers, details: { scope_id: alvo.id, action: "deactivate" } },
+    );
+  }
+
+  // ── 1. arquivar o acervo daquele balde, ANTES de o balde sumir ─────────────
+  const { data: arquivados, error: erroDeArquivo } = await supabase
+    .from("ai_knowledge_sources")
+    .update({ is_active: false, status: "archived" })
+    .eq("organization_id", org.orgId)
+    .eq("scope_id", id)
+    .select("id");
+  if (erroDeArquivo) {
+    return fail("internal_error", "Erro ao arquivar os materiais do escopo.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
+  }
+  const materiaisArquivados = (arquivados ?? []).length;
+
+  // ── 2. marcar o escopo como removido ──────────────────────────────────────
+  const { data: removido, error: erroDeDelete } = await supabase
+    .from("knowledge_scopes")
+    .update({ deleted_at: new Date().toISOString(), is_active: false })
+    .eq("id", id)
+    .eq("organization_id", org.orgId)
+    .is("deleted_at", null)
+    .select("id")
+    .maybeSingle();
+  if (erroDeDelete) {
+    return fail("internal_error", "Erro ao remover o escopo de conhecimento.", 500, {
+      requestId,
+      headers: teto.headers,
+    });
+  }
+  // UPDATE barrado pela RLS afeta zero linhas sem erro, e o `.is("deleted_at", null)` faz o
+  // mesmo numa segunda chamada. Devolver 200 aqui gravaria uma auditoria de remoção que não
+  // aconteceu, e contaria de novo os materiais já arquivados.
+  if (!removido) {
+    return fail("not_found", "Escopo de conhecimento não encontrado.", 404, {
+      requestId,
+      headers: teto.headers,
+    });
+  }
+
+  void audit({
+    action: ACAO_REMOVIDO,
+    actorUserId: user.id,
+    organizationId: org.orgId,
+    resourceType: "knowledge_scope",
+    resourceId: alvo.id,
+    requestId,
+    metadata: {
+      display_name: alvo.display_name,
+      official_code: alvo.official_code,
+      was_active: alvo.is_active,
+      materials_archived: materiaisArquivados,
+    },
+  });
+
+  return ok(
+    { id: alvo.id, deleted: true, materials_archived: materiaisArquivados },
+    { requestId, headers: teto.headers },
+  );
 }

@@ -190,6 +190,49 @@ export function rotuloDoInterruptor(escopo: EscopoDoTenant): string {
 }
 
 // ---------------------------------------------------------------------------
+// Remoção (T099 — a outra metade de FR-008)
+// ---------------------------------------------------------------------------
+
+/**
+ * Quem pode ser removido: só o que o corretor criou.
+ *
+ * O que veio do catálogo volta na próxima sincronização — a rota responde
+ * `403 escopo_do_catalogo_nao_editavel`, e oferecer o botão para depois recusar seria
+ * ensinar um caminho que não existe. Para esses, o gesto com efeito é o interruptor.
+ */
+export function podeRemover(escopo: EscopoDoTenant): boolean {
+  return escopo.origin === ORIGEM_PROPRIA;
+}
+
+/** O nome acessível do botão. */
+export function rotuloDeRemocao(escopo: EscopoDoTenant): string {
+  return `Remover ${escopo.display_name}`;
+}
+
+/**
+ * A pergunta de confirmação — e por que ELA tem dois passos, sendo que o interruptor não.
+ *
+ * SC-011 mede o gesto de LIGAR, que é o do primeiro dia e precisa ser um clique só.
+ * Remover é raro, mexe na lista inteira e não tem botão de desfazer na tela; um clique
+ * acidental ali custa mais do que o segundo clique economiza. A frase diz as três coisas
+ * que decidem: o que para, o que fica, e o que continua explicável.
+ */
+export function perguntaDeRemocao(nome: string): string {
+  return `Remover ${nome}? O agente para de responder sobre ela agora, o material carregado fica arquivado (não é apagado) e as respostas já dadas continuam mostrando de onde vieram.`;
+}
+
+export const CONFIRMAR_REMOCAO = "Sim, remover";
+export const CANCELAR_REMOCAO = "Cancelar";
+
+/** O aviso depois de remover, com o que aconteceu com o material. */
+export function avisoDeRemocao(nome: string, arquivados: number): string {
+  if (arquivados === 0) return `${nome} foi removida.`;
+  return arquivados === 1
+    ? `${nome} foi removida. 1 material foi arquivado.`
+    : `${nome} foi removida. ${arquivados} materiais foram arquivados.`;
+}
+
+// ---------------------------------------------------------------------------
 // Texto fixo da tela
 // ---------------------------------------------------------------------------
 

@@ -7,6 +7,7 @@ import { toast } from "sonner";
 import type { EscopoDoTenant } from "@/app/api/v1/knowledge-scopes/_escopos";
 import { showApiError } from "@/components/feedback/ApiErrorToast";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { apiClient } from "@/lib/api/client";
@@ -14,6 +15,8 @@ import type { RotuloDoEscopo } from "@/lib/vocabulary/knowledge-scope";
 
 import {
   CAMINHOS_DO_CATALOGO,
+  CANCELAR_REMOCAO,
+  CONFIRMAR_REMOCAO,
   LEGENDA_DE_ORIGEM,
   LIMIAR_DA_BUSCA,
   LISTA_TRUNCADA,
@@ -24,9 +27,13 @@ import {
   VAZIO_TITULO,
   acaoDeMaterial,
   avisoDeAlternancia,
+  avisoDeRemocao,
   explicacaoDoEstado,
   filtrarEscopos,
+  perguntaDeRemocao,
+  podeRemover,
   rotuloDaOrigem,
+  rotuloDeRemocao,
   rotuloDoInterruptor,
 } from "./_regras";
 
@@ -68,6 +75,8 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
   const [escopos, setEscopos] = useState<EscopoDoTenant[]>(escoposIniciais);
   const [termo, setTermo] = useState("");
   const [pendentes, setPendentes] = useState<ReadonlySet<string>>(new Set());
+  /** Qual linha está pedindo confirmação de remoção. Uma por vez, e some ao trocar. */
+  const [confirmando, setConfirmando] = useState<string | null>(null);
 
   const visiveis = useMemo(() => filtrarEscopos(escopos, termo), [escopos, termo]);
   const ligados = escopos.filter((e) => e.is_active).length;
@@ -92,6 +101,32 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
       else toast.info(aviso);
     } catch (erro) {
       setEscopos((atual) => atual.map((e) => (e.id === escopo.id ? anterior : e)));
+      showApiError(erro);
+    } finally {
+      setPendentes((atual) => {
+        const proximo = new Set(atual);
+        proximo.delete(escopo.id);
+        return proximo;
+      });
+    }
+  }
+
+  /**
+   * Remover (T099). Ao contrário do interruptor, aqui NÃO é otimista: a linha só sai da
+   * lista depois do 200. Sumir antes e voltar em caso de erro faria o corretor achar que
+   * removeu — e a próxima coisa que ele faz é fechar a tela.
+   */
+  async function remover(escopo: EscopoDoTenant) {
+    if (pendentes.has(escopo.id)) return;
+    setPendentes((atual) => new Set(atual).add(escopo.id));
+    try {
+      const resposta = await apiClient.delete<{
+        data: { id: string; deleted: boolean; materials_archived: number };
+      }>(`/api/v1/knowledge-scopes/${escopo.id}`);
+      setEscopos((atual) => atual.filter((e) => e.id !== escopo.id));
+      setConfirmando(null);
+      toast.success(avisoDeRemocao(escopo.display_name, resposta.data.materials_archived));
+    } catch (erro) {
       showApiError(erro);
     } finally {
       setPendentes((atual) => {
@@ -182,6 +217,37 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
                     >
                       {acaoDeMaterial(escopo).texto}
                     </Link>
+
+                    {/*
+                      T099 — a confirmação é INLINE, e não um `dialog`: a tela toda é uma
+                      lista, e um modal esconderia justamente o item sobre o qual a pergunta
+                      é feita. Ela também diz o que acontece com o material antes de o
+                      corretor decidir, não depois.
+                    */}
+                    {confirmando === escopo.id && (
+                      <div className="mt-3 rounded-md border border-border bg-surface-muted p-3">
+                        <p className="text-sm text-text">{perguntaDeRemocao(escopo.display_name)}</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <Button
+                            type="button"
+                            variant="destructive"
+                            size="sm"
+                            disabled={pendentes.has(escopo.id)}
+                            onClick={() => void remover(escopo)}
+                          >
+                            {CONFIRMAR_REMOCAO}
+                          </Button>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setConfirmando(null)}
+                          >
+                            {CANCELAR_REMOCAO}
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </div>
 
                   {/*
@@ -189,12 +255,31 @@ export function EscoposClient({ rotulo, escoposIniciais, truncado }: Props) {
                     daquela linha está no ar — para o segundo clique impaciente não virar
                     dois PATCH em sentidos opostos.
                   */}
-                  <Switch
-                    checked={escopo.is_active}
-                    disabled={pendentes.has(escopo.id)}
-                    onCheckedChange={(ligado) => void alternar(escopo, ligado)}
-                    aria-label={rotuloDoInterruptor(escopo)}
-                  />
+                  <div className="flex items-center gap-3">
+                    <Switch
+                      checked={escopo.is_active}
+                      disabled={pendentes.has(escopo.id)}
+                      onCheckedChange={(ligado) => void alternar(escopo, ligado)}
+                      aria-label={rotuloDoInterruptor(escopo)}
+                    />
+                    {/*
+                      Só no que o corretor criou: o espelho do catálogo volta na próxima
+                      sincronização, e a rota o recusa com 403. Botão que sempre falha
+                      ensina um caminho inexistente.
+                    */}
+                    {podeRemover(escopo) && (
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfirmando((atual) => (atual === escopo.id ? null : escopo.id))
+                        }
+                        aria-label={rotuloDeRemocao(escopo)}
+                        className="text-sm font-medium text-text-muted underline underline-offset-4 hover:text-text"
+                      >
+                        Remover
+                      </button>
+                    )}
+                  </div>
                 </li>
               ))}
             </ul>

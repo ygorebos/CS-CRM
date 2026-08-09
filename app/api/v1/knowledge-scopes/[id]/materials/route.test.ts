@@ -163,6 +163,11 @@ function fazerBanco(opcoes: { agenteExiste?: boolean; escopoExiste?: boolean; li
         chamada.filtros[coluna] = valor;
         return chain;
       },
+      // `.is("deleted_at", null)` — escopo removido (0134) não recebe material novo.
+      is: (coluna: string, valor: unknown) => {
+        chamada.filtros[coluna] = valor;
+        return chain;
+      },
       in: () => chain,
       order: () => chain,
       limit: () => chain,

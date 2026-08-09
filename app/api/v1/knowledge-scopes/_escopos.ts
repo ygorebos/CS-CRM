@@ -62,6 +62,8 @@ export const ACAO_ATUALIZADO: AuditAction = "knowledge_scope.updated";
 export const ACAO_ATIVADO: AuditAction = "knowledge_scope.activated";
 /** Trava 4 (FR-008): o material daquele escopo ficou inerte para este tenant. */
 export const ACAO_DESATIVADO: AuditAction = "knowledge_scope.deactivated";
+/** A outra metade de FR-008 (T099): o escopo próprio deixou de existir. */
+export const ACAO_REMOVIDO: AuditAction = "knowledge_scope.deleted";
 /**
  * Material próprio carregado (T088, FR-004).
  *

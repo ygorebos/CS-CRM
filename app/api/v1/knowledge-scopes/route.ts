@@ -81,6 +81,9 @@ export async function GET(req: NextRequest): Promise<Response> {
     // doutrina (CLAUDE.md, "toda query que cruza tabelas tenant-aware filtra
     // organization_id") e é o que segura a linha caso a policy mude de forma.
     .eq("organization_id", org.orgId)
+    // Escopo removido (0134) sai da lista. É o que "remover" significa para quem olha a
+    // tela — e a inércia na busca vem por outro caminho (`deleted_at` na CTE `escopo_ativo`).
+    .is("deleted_at", null)
     .order("created_at", { ascending: true })
     .order("id", { ascending: true })
     // +1 para saber que há próxima página sem um `count` que varre a tabela.
@@ -199,7 +202,9 @@ export async function POST(req: NextRequest): Promise<Response> {
   const { data: existentes, error: erroDeLeitura } = await supabase
     .from("knowledge_scopes")
     .select("id, display_name, catalog_scope_id, is_active")
-    .eq("organization_id", org.orgId);
+    .eq("organization_id", org.orgId)
+    // Nome de escopo removido volta a ficar livre.
+    .is("deleted_at", null);
   if (erroDeLeitura) {
     return fail("internal_error", "Erro ao verificar os escopos existentes.", 500, {
       requestId,

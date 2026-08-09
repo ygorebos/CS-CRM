@@ -57,6 +57,31 @@ Desligar um **espelho do catálogo** é a trava 4: torna o material daquela oper
 este tenant e não afeta nenhum outro (FR-008). `403 escopo_do_catalogo_nao_editavel` ao tentar
 mudar qualquer outro campo de um espelho.
 
+### `DELETE /api/v1/knowledge-scopes/{id}`
+
+Remove um escopo **próprio** (T099, a outra metade de FR-008). `200` com
+`{ "id", "deleted": true, "materials_archived": <n> }`.
+
+**A remoção é LÓGICA** (`deleted_at`, migration 0134), e não por preferência de estilo:
+`delete from knowledge_scopes` **não roda** quando existe material no balde — a FK é
+`on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` recusa fonte sem
+balde. Soltar o ponteiro com `applies_to_all = true` promoveria o material da operadora
+removida a responder a todo mundo. O acervo é **arquivado** (`is_active = false`,
+`status = 'archived'`), nunca apagado.
+
+Efeito imediato, sem job no meio: o escopo sai da lista, para de resolver na busca e não
+pode mais receber material nem vincular contato. As respostas já dadas continuam
+explicáveis — `message_groundings` não tem FK para escopo e carrega a cópia congelada da
+origem.
+
+`403 escopo_do_catalogo_nao_editavel` em espelho do catálogo: `fn_sincronizar_escopos_do_catalogo`
+o recria na próxima sincronização, então uma remoção que "funciona" e volta sozinha seria
+mentira. O gesto com efeito real ali é `PATCH { "is_active": false }`.
+
+`404` para id fora do formato, de outra organização, ou já removido. Mesmo teto de escrita
+do `PATCH` — baldes separados por método deixariam o teto da trava 4 contornável alternando
+os dois.
+
 ### `POST /api/v1/knowledge-scopes/{id}/materials`
 
 Carrega material próprio (FR-004, FR-007). `multipart/form-data` para arquivo, JSON para texto
