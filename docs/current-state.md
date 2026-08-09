@@ -341,3 +341,56 @@ número errado). Auditado como `channel.conversation_adopted`.
 | `main` **não está protegida** no GitHub (`gh api .../protection` → "Branch not protected") | repositório | Os checks que a doutrina chama de obrigatórios não seguram merge nenhum |
 
 O desenho das três primeiras está em `specs/005-virada-de-chave/spec.md`.
+
+## A jornada percorrida PELA TELA (spec 004) — 2026-08-09, tarde
+
+Com login real, senha real e número real. Os dois consertos da seção anterior
+tinham destravado a conexão; a jornada de mensagem revelou **mais dois defeitos**,
+ambos invisíveis para 3177 asserções unitárias e para os 555 invariantes.
+
+### Envio: só a PRIMEIRA de cada sequência saía — ✅ CONSERTADO
+
+De três mensagens seguidas, uma virava `sent`; as outras ficavam `queued` para
+sempre, com a mensagem **já entregue ao cliente**, e a conversa mostrava cada
+frase duas vezes.
+
+Quatro camadas mentiam ao mesmo tempo: a rota respondia `201`; `updated_at ==
+created_at` dizia que a linha nunca fora tocada; o log não tinha erro; e o erro
+do UPDATE era **descartado** (`const { data } =` sem `error`). Sob ele estava
+`23505` — o eco do próprio envio volta pelo gateway em ~200 ms e toma o
+`external_id` antes do carimbo. O removedor de eco não o alcançava: filtrava
+`sent_via = 'external_device'`, carimbo da era do WAHA, e o eco do gateway nasce
+`sent_via = 'crm'`.
+
+Conserto em `app/api/v1/messages/_handler.ts`: casar por `external_id` exato sem
+supor quem escreveu o eco; retentar o carimbo quando o 23505 acontece na janela
+entre a remoção e o UPDATE; e **nunca mais engolir o erro**.
+
+### Recebimento: as respostas do cliente iam para uma conversa fantasma — ✅ CONSERTADO
+
+O gateway classificava `558592431936@s.whatsapp.net` como `lid` — o JID chega
+COM domínio e a régua exigia só dígitos. O mesmo telefone passou a existir duas
+vezes (`phone:+55…` do CRM, `lid:55…` do gateway com `phone_number` NULL), em
+duas conversas.
+
+**Seis mensagens de entrada do dono estavam na conversa duplicada**, invisíveis
+na que ele tinha aberta. Ele respondeu às 13:59, 14:28, 14:47 e 14:54; o CRM
+mostrava silêncio. Causa consertada no gateway (`classificarContato`), dado
+reparado pela migration **0131** — genérica, sem hardcode de organização, nada
+apagado.
+
+### O que ficou provado, e como
+
+| Prova | Resultado |
+|---|---|
+| Login pela tela, conta real | entra |
+| Visualização do histórico | 8 de 8 mensagens na tela |
+| Rajada de 6 envios a cada 1,2 s | 6 com `external_id`, 0 duplicata, 0 fora da conversa |
+| Realtime (duas telas na mesma conversa) | a tela B recebe sem recarregar |
+| Respostas recuperadas pela 0131 | 6 de 6 visíveis na conversa certa |
+| Migration re-aplicada | 0 linhas em todos os passos |
+
+**O que NÃO foi provado:** uma mensagem de entrada NOVA, recebida depois do
+conserto do gateway, pousando na conversa certa. As seis que existem são
+anteriores e foram repontadas pela 0131. A prova depende do dono responder com a
+tela aberta — `.superpowers/vigia-resposta.mjs` faz a medição em um comando.
