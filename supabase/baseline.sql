@@ -10990,6 +10990,146 @@ revoke execute on function public.fn_gateway_update_message_status(text,text,tex
 revoke execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) from authenticated;
 grant  execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) to gateway_writer, service_role;
 
+
+-- ---- fusão do contato lid:<digitos> no phone:+<digitos> (migration 0131) ----
+-- Reparo de DADO, não de schema: num banco novo é no-op (não há contato), e na
+-- instância existente desfaz o contato duplicado que o gateway criava ao
+-- classificar `<numero>@s.whatsapp.net` como lid. Idempotente pelo passo final
+-- (`is_merged_into` preenchido tira o duplicado do conjunto), e genérico — o
+-- banco é compartilhado, então casar por organização é obrigatório e hardcode
+-- de organização é proibido. Detalhe e caminho de volta no cabeçalho da
+-- migration.
+
+-- ── 1. Mensagens da conversa duplicada vão para a conversa GÊMEA do canônico ─
+--    (`conversations` é única por (organization_id, contact_id,
+--     channel_session_id) quando não é grupo — repontar o contato direto
+--     colidiria com a gêmea.)
+with pares as (
+  select l.id as duplicado, t.id as canonico
+    from public.contacts l
+    join public.contacts t
+      on t.organization_id = l.organization_id
+     and t.wa_identity = 'phone:+' || substring(l.wa_identity from 5)
+     and t.is_merged_into is null
+   where l.wa_identity like 'lid:%'
+     and l.is_merged_into is null
+     and substring(l.wa_identity from 5) ~ '^\d{10,15}$'
+     and t.id <> l.id
+),
+gemeas as (
+  select cd.id as conversa_duplicada, cc.id as conversa_canonica, p.canonico
+    from pares p
+    join public.conversations cd on cd.contact_id = p.duplicado and cd.is_group = false
+    join public.conversations cc on cc.organization_id = cd.organization_id
+                                and cc.contact_id = p.canonico
+                                and cc.channel_session_id = cd.channel_session_id
+                                and cc.is_group = false
+)
+update public.messages m
+   set conversation_id = g.conversa_canonica,
+       contact_id      = g.canonico,
+       updated_at      = now()
+  from gemeas g
+ where m.conversation_id = g.conversa_duplicada;
+
+-- ── 2. Sem gêmea: a própria conversa duplicada passa a ser do canônico ──────
+with pares as (
+  select l.id as duplicado, t.id as canonico
+    from public.contacts l
+    join public.contacts t
+      on t.organization_id = l.organization_id
+     and t.wa_identity = 'phone:+' || substring(l.wa_identity from 5)
+     and t.is_merged_into is null
+   where l.wa_identity like 'lid:%'
+     and l.is_merged_into is null
+     and substring(l.wa_identity from 5) ~ '^\d{10,15}$'
+     and t.id <> l.id
+),
+orfas as (
+  select cd.id as conversa, p.canonico
+    from pares p
+    join public.conversations cd on cd.contact_id = p.duplicado and cd.is_group = false
+   where not exists (
+     select 1 from public.conversations cc
+      where cc.organization_id = cd.organization_id
+        and cc.contact_id = p.canonico
+        and cc.channel_session_id = cd.channel_session_id
+        and cc.is_group = false)
+)
+update public.conversations c
+   set contact_id = o.canonico,
+       updated_at = now()
+  from orfas o
+ where c.id = o.conversa;
+
+-- ── 3. As mensagens dessas conversas acompanham o contato ───────────────────
+update public.messages m
+   set contact_id = c.contact_id,
+       updated_at = now()
+  from public.conversations c
+ where m.conversation_id = c.id
+   and m.contact_id <> c.contact_id;
+
+-- ── 4. Atividades que apontam para o contato duplicado ──────────────────────
+with pares as (
+  select l.id as duplicado, t.id as canonico
+    from public.contacts l
+    join public.contacts t
+      on t.organization_id = l.organization_id
+     and t.wa_identity = 'phone:+' || substring(l.wa_identity from 5)
+     and t.is_merged_into is null
+   where l.wa_identity like 'lid:%'
+     and l.is_merged_into is null
+     and substring(l.wa_identity from 5) ~ '^\d{10,15}$'
+     and t.id <> l.id
+)
+update public.crm_lead_activities a
+   set contact_id = p.canonico
+  from pares p
+ where a.contact_id = p.duplicado;
+
+-- ── 5. Conversa duplicada que ficou vazia é FECHADA, nunca apagada ──────────
+with pares as (
+  select l.id as duplicado
+    from public.contacts l
+    join public.contacts t
+      on t.organization_id = l.organization_id
+     and t.wa_identity = 'phone:+' || substring(l.wa_identity from 5)
+     and t.is_merged_into is null
+   where l.wa_identity like 'lid:%'
+     and l.is_merged_into is null
+     and substring(l.wa_identity from 5) ~ '^\d{10,15}$'
+     and t.id <> l.id
+)
+update public.conversations c
+   set status = 'closed', updated_at = now()
+  from pares p
+ where c.contact_id = p.duplicado
+   and c.status <> 'closed'
+   and not exists (select 1 from public.messages m where m.conversation_id = c.id);
+
+-- ── 6. Por último: o contato duplicado aponta para o canônico ───────────────
+--    Depois disto ele sai do conjunto `lids`, e é o que torna a migration
+--    idempotente. Tem de ser o ÚLTIMO passo: os anteriores dependem de ele
+--    ainda estar com `is_merged_into is null`.
+with pares as (
+  select l.id as duplicado, t.id as canonico
+    from public.contacts l
+    join public.contacts t
+      on t.organization_id = l.organization_id
+     and t.wa_identity = 'phone:+' || substring(l.wa_identity from 5)
+     and t.is_merged_into is null
+   where l.wa_identity like 'lid:%'
+     and l.is_merged_into is null
+     and substring(l.wa_identity from 5) ~ '^\d{10,15}$'
+     and t.id <> l.id
+)
+update public.contacts c
+   set is_merged_into = p.canonico,
+       updated_at     = now()
+  from pares p
+ where c.id = p.duplicado;
+
 notify pgrst, 'reload schema';
 -- ---- onde mora o texto de um documento (migration 0132) ----
 --

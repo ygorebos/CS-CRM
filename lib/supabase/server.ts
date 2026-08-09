@@ -10,6 +10,31 @@ import { cookieSecure } from "@/lib/supabase/cookie-secure";
 import { cookies } from "next/headers";
 import { env } from "@/lib/env";
 
+/**
+ * O cookie de `code_verifier` do PKCE precisa de `SameSite=Lax`. O de sessão,
+ * não — ele continua `Strict`.
+ *
+ * ## Por que, medido em 2026-08-09
+ *
+ * O e-mail de redefinição chega assim: clique no link do Resend, que redireciona
+ * para `supabase.co/auth/v1/verify`, que redireciona para `/auth/confirm?code=…`.
+ * A última navegação vem de **outro site**. `SameSite=Strict` não viaja em
+ * navegação cross-site — medido com interceptação de requisição: **0 cookies**
+ * chegaram, o verifier entre eles. Sem verifier, `exchangeCodeForSession` não
+ * tem como fechar o PKCE e a redefinição de senha é impossível por construção.
+ *
+ * `Lax` viaja em navegação de topo por GET, que é exatamente o clique do e-mail.
+ *
+ * O afrouxamento é seguro e vale só para o verifier: ele é `httpOnly`, vale uma
+ * vez, e está preso ao `code` gerado no MESMO fluxo. Um `code` de terceiro com o
+ * verifier da vítima não casa — a troca falha. O cookie de SESSÃO, que é o que
+ * CSRF de verdade quer, permanece `Strict`.
+ */
+function ajustarSameSite(name: string, options: CookieOptions): CookieOptions {
+  if (!name.includes("code-verifier")) return options;
+  return { ...options, sameSite: "lax" };
+}
+
 export async function createClient() {
   const cookieStore = await cookies();
 
@@ -21,7 +46,7 @@ export async function createClient() {
       setAll(cookiesToSet: { name: string; value: string; options: CookieOptions }[]) {
         try {
           cookiesToSet.forEach(({ name, value, options }) => {
-            cookieStore.set(name, value, options);
+            cookieStore.set(name, value, ajustarSameSite(name, options));
           });
         } catch {
           // setAll pode ser chamado de Server Component; nesse caso, ignoramos.

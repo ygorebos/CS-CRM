@@ -7,6 +7,7 @@ import { forgotPasswordSchema, type ForgotPasswordInput } from "@/lib/auth/schem
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
+import { urlDeCallbackDeEmail } from "@/lib/auth/link-de-email";
 
 export type RequestPasswordResetResult =
   | { ok: true }
@@ -47,7 +48,10 @@ export async function requestPasswordReset(
 
   const supabase = await createClient();
   const { error } = await supabase.auth.resetPasswordForEmail(parsed.data.email, {
-    redirectTo: `${origin}/auth/confirm`,
+    // O carimbo `?type=` é NOSSO, não do GoTrue, e o endereço vem de UM lugar
+    // só — os templates de e-mail dependem de ele terminar com query. Ver
+    // `lib/auth/link-de-email.ts`.
+    redirectTo: urlDeCallbackDeEmail(origin, "recovery"),
   });
 
   if (error) {

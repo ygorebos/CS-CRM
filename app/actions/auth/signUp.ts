@@ -7,6 +7,7 @@ import { signupSchema, type SignupInput } from "@/lib/auth/schemas";
 import { audit, hashEmail } from "@/lib/audit";
 import { authRateLimited, AUTH_LIMITS } from "@/lib/auth/rate-limit";
 import { env } from "@/lib/env";
+import { urlDeCallbackDeEmail } from "@/lib/auth/link-de-email";
 
 export type SignUpResult =
   | { ok: true }
@@ -52,7 +53,9 @@ export async function signUp(input: SignupInput): Promise<SignUpResult> {
     email: parsed.data.email,
     password: parsed.data.password,
     options: {
-      emailRedirectTo: `${origin}/auth/confirm`,
+      // Mesmo motivo de requestPasswordReset, e o mesmo construtor: o endereço
+      // de volta tem UM dono (`lib/auth/link-de-email.ts`).
+      emailRedirectTo: urlDeCallbackDeEmail(origin, "signup"),
       data: { org_name: parsed.data.org_name },
     },
   });
