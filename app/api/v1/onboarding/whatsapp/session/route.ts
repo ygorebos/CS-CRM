@@ -3,14 +3,15 @@ import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
+import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import { criarConexaoDeCanal } from "@/lib/channels/criar-conexao";
 import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
 import {
   reactivateChannelSession,
   type ChannelReactivationActor,
 } from "@/lib/channels/reactivate";
 import { getWahaClient } from "@/lib/waha/client";
-import { provisionarSegredoDeWebhook } from "@/lib/webhooks/provisionar-segredo";
 import { createClient } from "@/lib/supabase/server";
 
 /**
@@ -93,34 +94,31 @@ async function ensureChannelSession(
     if (reErr) throw new Error(`channel_session_reactivate_failed: ${reErr.message}`);
     return existing.id;
   }
-  // Segredo REAL por conexão (ver lib/webhooks/provisionar-segredo.ts). Este é
-  // o caminho do onboarding — o do corretor —, e era ele que gravava o
-  // placeholder de um byte que faria a entrega do gateway recusar tudo.
-  const segredoCifrado = await provisionarSegredoDeWebhook(supabase);
-  if (!segredoCifrado) {
+  // CAMINHO ÚNICO com a Central de Conexões (T044 / FR-034). Antes daqui havia
+  // um insert próprio, e ele divergia em duas coisas que doíam:
+  //
+  //   - `ingest_path` não era definido, então a linha nascia com o default
+  //     `legacy`. Esta é A porta do usuário novo — quem se cadastra passa por
+  //     aqui e só por aqui —, então o corretor recém-chegado ficava fora do
+  //     gateway mesmo numa instalação que já virou a chave, sem nada na tela
+  //     dizendo isso;
+  //   - nenhuma auditoria `channel.connected`: um número entrava no ar sem
+  //     registrar quem o ligou, justamente na porta usada por 100% deles.
+  const criacao = await criarConexaoDeCanal(supabase, {
+    organizationId: orgId,
+    sessionName,
+    actorUserId: actor.userId,
+    requestId: actor.requestId ?? "",
+    origem: "onboarding",
+  });
+  if (!criacao.ok) {
     throw new Error(
-      "channel_session_secret_unavailable: cifra indisponível (GUC app.nuvemshop_oauth_key ausente)",
+      criacao.motivo === "sem_cifra"
+        ? "channel_session_secret_unavailable: cifra indisponível (GUC app.nuvemshop_oauth_key ausente)"
+        : `channel_session_insert_failed: ${criacao.detalhe}`,
     );
   }
-
-  const { data: created, error } = await supabase
-    .from("channel_sessions")
-    .insert({
-      organization_id: orgId,
-      waha_session_name: sessionName,
-      engine: "NOWEB",
-      webhook_path_token: crypto.randomUUID().replace(/-/g, ""),
-      webhook_secret_encrypted: segredoCifrado,
-      status: "STARTING",
-      last_status_change_at: new Date().toISOString(),
-      consecutive_health_fails: 0,
-      daily_message_limit: 250,
-      metadata: {},
-    })
-    .select("id")
-    .single();
-  if (error) throw new Error(`channel_session_insert_failed: ${error.message}`);
-  return created.id as string;
+  return criacao.conexao.id as string;
 }
 
 export async function GET() {
@@ -141,22 +139,63 @@ export async function GET() {
   }
 }
 
+/**
+ * Parear número é ato de ADMIN — nas duas portas (spec 004, T045 / FR-035).
+ *
+ * Medido em 2026-08-08: esta rota exigia apenas estar autenticado. Um `viewer`
+ * podia iniciar o pareamento de um número da organização e — pior —
+ * **RESSUSCITAR** um canal que o admin tinha excluído, porque
+ * `ensureChannelSession` reativa a linha arquivada quando o nome bate (e o nome
+ * é derivado do id da org, então bate sempre). Excluir um número é decisão de
+ * admin; desfazê-la não podia ser de qualquer um.
+ *
+ * A porta gêmea (`/api/v1/channel-sessions`) já exigia `admin` desde sempre —
+ * então isto não é regra nova, é a MESMA regra chegando na porta que ficou para
+ * trás. Migrar o pareamento para o gateway sem corrigir carregaria o furo para o
+ * caminho novo, onde ele passaria a valer também para o provisionamento de
+ * instância no provedor (que custa dinheiro).
+ *
+ * O `GET` continua aberto a qualquer membro de propósito: ele só LÊ o estado da
+ * conexão, que é o que a tela de onboarding mostra, e negá-lo transformaria a
+ * tela num erro para quem não pode parear — sem impedir nada.
+ */
 export async function POST(req: Request) {
   const requestId = randomUUID();
-  const user = await loadAuthUser();
-  if (!user) return fail("unauthenticated", "Sessão expirada", 401);
-  const activeOrg = await resolveActiveOrg(user);
-  if (!activeOrg) return fail("tenant_not_found", "Sem organização ativa", 404);
+  const authz = await requireRole("admin", {
+    requestId,
+    resource: "channel_sessions",
+    allowPlatformAdmin: true,
+  });
+  if (!authz.ok) return authz.response;
+  const { user, org: activeOrg } = authz;
   const waha = getWahaClient();
   if (!waha) return fail("waha_not_configured", "Suba o Docker (docker compose up -d waha) e tente novamente.", 503);
   const sessionName = defaultSessionName(activeOrg.orgId);
 
   // 1) Make sure we have a row in channel_sessions.
-  const channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName, {
-    userId: user.id,
-    requestId,
-    metadata: { provider: CHANNEL_PROVIDER_WAHA, origin: "onboarding" },
-  });
+  //
+  // O `try` não é decoração: `ensureChannelSession` LANÇA em três situações
+  // reais (cifra do segredo indisponível, insert recusado, reativação falha), e
+  // sem ele a exceção sobe crua — o corretor recebe 500 com pilha na primeira
+  // tela do produto, exatamente onde a primeira impressão se decide. Encontrado
+  // ao escrever o teste de papel da T045: o caso do `admin` estourava aqui.
+  let channelSessionId: string;
+  try {
+    channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName, {
+      userId: user.id,
+      requestId,
+      metadata: { provider: CHANNEL_PROVIDER_WAHA, origin: "onboarding" },
+    });
+  } catch (err) {
+    const detalhe = err instanceof Error ? err.message : String(err);
+    return fail(
+      "internal_error",
+      "Não consegui preparar a conexão deste número. Tente de novo em instantes; " +
+        "se continuar, avise o suporte com o código desta tela.",
+      500,
+      { requestId, details: { reason: detalhe.slice(0, 200) } },
+    );
+  }
 
   // 1b) `?restart=1` = pedido explícito de QR novo. O start sozinho não resolve
   // uma sessão FAILED: o WAHA responde 422 ("already exists") e o usuário fica

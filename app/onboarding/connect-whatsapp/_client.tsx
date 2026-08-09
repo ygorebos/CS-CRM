@@ -126,11 +126,15 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
     <div className="space-y-4 rounded-lg border bg-background p-6">
       {!wahaConfigured && (
         <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
-          <p className="font-medium">WAHA não está configurado.</p>
+          {/* SC-007 / T064: nem nome de provedor, nem comando de terminal. Esta
+              é a PRIMEIRA tela de quem acabou de se cadastrar; mandá-lo subir
+              container é pedir que ele resolva um problema nosso, e o nome do
+              serviço não significa nada para ele. O que resta é a única coisa
+              acionável: seguir sem o canal agora e voltar depois. */}
+          <p className="font-medium">O serviço de conexão está indisponível agora.</p>
           <p className="mt-1">
-            Suba o Docker (<code>docker compose up -d waha</code>) e recarregue, ou pule este passo
-            agora — você pode configurar WhatsApp depois em{" "}
-            <strong>Configurações → Canais</strong>.
+            Já estamos cuidando disso. Você pode pular este passo e conectar seu WhatsApp depois em{" "}
+            <strong>Configurações → Canais</strong> — nada do que você fizer aqui se perde.
           </p>
         </div>
       )}
@@ -162,7 +166,7 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
 
           {status === "STARTING" && (
             <p className="mt-3 text-xs text-muted-foreground">
-              Aguardando WAHA gerar o QR Code…
+              Preparando o código de conexão…
             </p>
           )}
 

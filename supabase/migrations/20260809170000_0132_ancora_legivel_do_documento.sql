@@ -1,4 +1,4 @@
--- 0128 — a âncora do documento chega ao corretor
+-- 0132 — a âncora do documento chega ao corretor
 --
 -- Spec 002 (RAG por operadora), fatia F4. Forward-fix de `fn_buscar_lastro` (0123 + 0124 +
 -- 0125), fechando a ponta solta que a T083/T084 deixou.
@@ -176,7 +176,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) is
-  'Migrations 0123 + 0124 + 0125 + 0128 (spec 002): busca de lastro nas duas camadas. Tenant '
+  'Migrations 0123 + 0124 + 0125 + 0132 (spec 002): busca de lastro nas duas camadas. Tenant '
   'e acervo derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou '
   'desligado devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora '
   '(FR-026). Precedência dentro do balde (research D7). No catálogo, por slug ancora só a '

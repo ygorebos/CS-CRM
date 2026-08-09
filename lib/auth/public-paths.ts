@@ -7,6 +7,12 @@ export const PUBLIC_PATHS: RegExp[] = [
   /^\/login(\/.*)?$/,
   /^\/signup$/,
   /^\/auth\/confirm$/,
+  // A outra metade do link de e-mail. `/auth/confirm` entrega aqui quando o
+  // GoTrue devolve os tokens no FRAGMENTO (template padrão) — e nesse instante
+  // a pessoa ainda não tem sessão, por definição: ela veio justamente redefinir
+  // a senha. Exigir login aqui manda quem esqueceu a senha para a tela de
+  // digitar a senha.
+  /^\/auth\/sessao$/,
   /^\/403$/,
   /^\/admin\/forbidden$/,
   /^\/404$/,

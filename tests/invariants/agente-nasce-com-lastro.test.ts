@@ -5,7 +5,7 @@ import { GUARDRAILS_DO_AGENTE_PADRAO } from "@/lib/ai/agents/guardrails-padrao";
 import { resolverExigenciaDeLastro } from "@/lib/agent-engine/guardrails/assistance-grounding";
 
 /**
- * Agente nasce com o guarda de lastro LIGADO — spec 002, FR-014 + FR-030 (migration 0129).
+ * Agente nasce com o guarda de lastro LIGADO — spec 002, FR-014 + FR-030 (migration 0133).
  *
  * ═══ O DEFEITO QUE ESTE ARQUIVO VIGIA ═══
  *
@@ -52,7 +52,7 @@ const pool = new pg.Pool({
 const ORG = "1a570000-0000-4000-8000-000000000129";
 
 /**
- * O `update` do apêndice do baseline, copiado VERBATIM da migration 0129.
+ * O `update` do apêndice do baseline, copiado VERBATIM da migration 0133.
  *
  * Copiar dói, e a alternativa dói mais: extrair para uma função no banco só para o teste
  * poder chamá-la coloca no schema de produção uma peça que só existe por causa do teste. O

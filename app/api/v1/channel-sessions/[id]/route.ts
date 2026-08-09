@@ -25,6 +25,17 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import {
+  CHANNEL_SESSION_REF_COLUMNS,
+  classificarRef,
+  type ChannelSessionRef,
+} from "@/lib/channels/session-ref";
+import {
+  apagarNoGateway,
+  ErroDoGateway,
+  observarNoGateway,
+  statusDeCanalPara,
+} from "@/lib/gateway/provisionamento";
 import { isChannelStatus } from "@/lib/schemas/channels";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
@@ -134,7 +145,13 @@ export async function GET(
   const supabase = await createClient();
   const { data: session } = await supabase
     .from("channel_sessions")
-    .select("id, provider, waha_session_name, display_name, phone_number, status")
+    // `CHANNEL_SESSION_REF_COLUMNS` e não a lista à mão: sem
+    // `gateway_connection_id` aqui, `classificarRef` devolveria "transporte" para
+    // um canal do gateway e o ramo de sincronismo abaixo nunca dispararia — o
+    // mesmo modo de falha que a T035 já tinha custado uma vez.
+    .select(
+      `id, ${CHANNEL_SESSION_REF_COLUMNS}, display_name, phone_number, status, last_health_check_at`,
+    )
     .eq("organization_id", activeOrg.orgId)
     .eq("id", id)
     .maybeSingle();
@@ -146,6 +163,50 @@ export async function GET(
       : null;
   const comImpacto = <T extends object>(corpo: T): T & { deletion_impact?: ChannelDeletionImpact } =>
     impact ? { ...corpo, deletion_impact: impact } : corpo;
+
+  // ── Canal do GATEWAY: o estado vivo vem DELE (spec 004, T063) ─────────────
+  //
+  // Encontrado executando a jornada inteira: a linha nascia `STARTING` e **nada**
+  // a movia para `SCAN_QR_CODE`. A tela espera esse estado para pedir o material
+  // de pareamento, então o corretor ficava em "Preparando o código…" para
+  // sempre — com a instância já criada e o QR já disponível do outro lado.
+  //
+  // Peça faltando entre peças corretas: a rota de pareamento já devolvia o QR
+  // (T040), `statusDeCanalPara` já traduzia o vocabulário (T042), a conexão já
+  // nascia tudo-ou-nada (T043). Faltava **quem pergunta**. É aqui, porque é esta
+  // rota que a tela já consulta a cada 3 s — um cron novo seria uma peça a mais
+  // para agendar e esquecer, e chegaria depois do corretor desistir.
+  const natureza = classificarRef(session as Partial<ChannelSessionRef>);
+  if (natureza?.via === "gateway") {
+    let estado = session.status as string;
+    let numero = session.phone_number as string | null;
+    try {
+      const vivo = await observarNoGateway(natureza.ref);
+      estado = statusDeCanalPara(vivo.status);
+      if (vivo.phoneNumber && !numero) numero = vivo.phoneNumber;
+    } catch {
+      // Gateway fora é problema conhecido e já alarmado pela sondagem do dreno
+      // (T037). Aqui basta não sobrescrever o estado do banco com ruído.
+    }
+
+    const agora = new Date().toISOString();
+    const remendo: Record<string, unknown> = { last_health_check_at: agora };
+    if (isChannelStatus(estado) && estado !== session.status) {
+      remendo.status = estado;
+      remendo.last_status_change_at = agora;
+    }
+    if (numero && numero !== session.phone_number) remendo.phone_number = numero;
+    await supabase
+      .from("channel_sessions")
+      .update(remendo)
+      .eq("organization_id", activeOrg.orgId)
+      .eq("id", id);
+
+    return ok(
+      comImpacto({ ...session, ...remendo, status: estado, phone_number: numero, waha_configured: true }),
+      { requestId },
+    );
+  }
 
   const waha = getWahaClient();
   // Canal oficial não tem sessão no transporte para consultar — `waha_session_name`
@@ -284,7 +345,7 @@ export async function DELETE(
   const supabase = await createClient();
   const { data: session } = await supabase
     .from("channel_sessions")
-    .select("id, provider, waha_session_name, display_name, phone_number")
+    .select(`id, ${CHANNEL_SESSION_REF_COLUMNS}, display_name, phone_number`)
     .eq("organization_id", activeOrg.orgId)
     .eq("id", id)
     .maybeSingle();
@@ -300,7 +361,32 @@ export async function DELETE(
     last_status_change_at: now,
   };
 
-  if (session.provider === CHANNEL_PROVIDER_WAHA) {
+  // Canal do GATEWAY: excluir é DESPROVISIONAR (spec 004, T046 / FR-036).
+  //
+  // Sem esta guarda ele caía no ramo do canal oficial abaixo — que só zera
+  // credencial e roda o token de webhook. A linha sumiria da tela e **a
+  // instância continuaria viva no provedor**: recebendo, sendo cobrada todo mês,
+  // e sem nenhum lado reconhecendo-a como sua. É a instância órfã da T043
+  // chegando pela porta de saída em vez da de entrada.
+  const natureza = classificarRef(session as Partial<ChannelSessionRef>);
+  if (natureza?.via === "gateway") {
+    // Não usa `apagarNoGatewaySemLancar` de propósito: lá o silêncio é certo
+    // (a compensação roda enquanto se trata outra falha). Aqui a exclusão É o
+    // pedido do usuário, e falhar calado deixaria a tela dizendo que o número
+    // saiu enquanto ele continua ligado e cobrando.
+    try {
+      await apagarNoGateway(natureza.ref);
+    } catch (err) {
+      const e = err instanceof ErroDoGateway ? err : null;
+      return fail(
+        "gateway_error",
+        e?.message ??
+          "não consegui desconectar este número no serviço de conexão — nada foi excluído",
+        e && e.status >= 500 ? 502 : 422,
+        { requestId, details: { codigo: e?.codigo ?? "desconhecido" } },
+      );
+    }
+  } else if (session.provider === CHANNEL_PROVIDER_WAHA) {
     const waha = getWahaClient();
     if (!waha) {
       return fail(

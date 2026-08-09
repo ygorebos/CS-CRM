@@ -10,8 +10,9 @@ audited_against: origin/main @ 789dfa6 (v1.0.0, 2026-07-27)
 
 # Índice da documentação — DeskcommCRM
 
-Mapa dos **119** arquivos `.md` de `docs/`, espalhados por **23** subpastas — régua:
-`git ls-files 'docs/**/*.md' | wc -l`. Existe porque a documentação cresceu sem ponto
+Mapa dos **136** arquivos `.md` em subpastas de `docs/`, espalhados por **17** subpastas, mais
+**11** na raiz de `docs/` — **147** no total. Réguas: `git ls-files 'docs/**/*.md' | wc -l` e
+`git ls-files 'docs/*.md' 'docs/**/*.md' | sort -u | wc -l`. Existe porque a documentação cresceu sem ponto
 de entrada: sem este índice, humano e agente não acham o que já foi decidido e
 reescrevem por cima.
 
@@ -34,6 +35,7 @@ de menor precedência e registre.
 | [`CONTRIBUTING.md`](../CONTRIBUTING.md) | Como contribuir |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Mudanças por versão (SemVer). **Quem roda VPS lê antes de `update.sh`** — mudança que exige ação manual aparece sob "⚠️ Requer atenção" |
 | [`docs/current-state.md`](current-state.md) | **O que está pronto, incompleto e quebrado hoje** |
+| [`docs/migracao-para-o-gateway.md`](migracao-para-o-gateway.md) | **O fio da meada da migração para o gateway** — as três frentes (recebimento, envio, conexão), o que bloqueia cada uma, e a inversão de doutrina que a v2.2.0 provocou. Leia antes de mexer em qualquer coisa de canal |
 
 ## 2. Produto e intenção
 

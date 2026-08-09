@@ -21,7 +21,7 @@
  *      para zerar a contagem que a tela mostra.
  *
  *   4. **Material que não é par pergunta/resposta também vira trecho** (T077/T084, FR-004).
- *      O manual da operadora entra por `ai_source_passages` (migration 0127). Aceitar o
+ *      O manual da operadora entra por `ai_source_passages` (migration 0131). Aceitar o
  *      arquivo e não indexá-lo é o silêncio que FR-004 proíbe: a tela diz "pronto" e a busca
  *      não acha nada. Falhar é permitido; falhar calado, não.
  *
@@ -119,7 +119,7 @@ interface Item {
   locale: string;
 }
 
-/** Uma linha de `ai_source_passages` (migration 0127) — texto de documento já gravado. */
+/** Uma linha de `ai_source_passages` (migration 0131) — texto de documento já gravado. */
 interface Passagem {
   knowledge_source_id: string;
   content: string;
@@ -609,7 +609,7 @@ describe("rag-indexer · carregar material não toca material não relacionado (
 describe("rag-indexer · material que não é par pergunta/resposta (T077, FR-004)", () => {
   it("aceita material que não é par pergunta/resposta e o torna buscável", async () => {
     // Era o `it.todo` bloqueado por T140/T084: não havia tabela onde o texto de um documento
-    // morasse. Com `ai_source_passages` (migration 0127) e o indexador lendo dela, a fonte
+    // morasse. Com `ai_source_passages` (migration 0131) e o indexador lendo dela, a fonte
     // que NÃO é par pergunta/resposta termina a rodada com trecho indexado — e não mais com
     // `skipped`.
     const chamadas = preparar({

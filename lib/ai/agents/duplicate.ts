@@ -149,11 +149,11 @@ export async function duplicateAgentWithVersion(
       config: src.config ?? {},
       // Guardrails da origem quando existem; AUSENTE quando não — nunca `null`.
       //
-      // A coluna é `not null default <rag_must_hit>` (migration 0129): omitir a chave faz o
+      // A coluna é `not null default <rag_must_hit>` (migration 0133): omitir a chave faz o
       // banco aplicar o default e a cópia nascer com o guarda de lastro ligado. Mandar `null`
       // explícito faria o oposto de duas formas ao mesmo tempo — viola o `not null` (500 no
       // botão "Duplicar") e, se um dia a coluna afrouxar, desarma o gate em silêncio, que é o
-      // defeito que a 0129 fechou. Só o SELECT deixar de trazer a coluna já bastaria para
+      // defeito que a 0133 fechou. Só o SELECT deixar de trazer a coluna já bastaria para
       // acontecer.
       ...(src.guardrails != null ? { guardrails: src.guardrails } : {}),
       active_kb_version_id: src.active_kb_version_id,

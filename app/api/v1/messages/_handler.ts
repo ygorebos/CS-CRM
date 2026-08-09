@@ -28,6 +28,21 @@ import type { Message } from "@/lib/types/messaging";
 type SB = SupabaseClient;
 
 /**
+ * Validade da referência de mídia entregue ao canal (spec 004, FR-024 / T038).
+ *
+ * Era **600 s**. Dez minutos cobrem o canal que baixa na hora e mais nada: com o
+ * gateway no caminho, a mensagem pode ficar na fila em disco esperando o CRM (ou
+ * o próprio gateway) voltar, e só então o provedor vai buscar o arquivo. Uma
+ * referência vencida no meio disso vira anexo que não abre no celular do cliente
+ * — e o CRM não fica sabendo, porque para ele o envio deu certo.
+ *
+ * Uma hora é o piso da FR-024: retentativa do gateway + busca do provedor, com
+ * margem para reinício. Não é teto — subir é seguro; descer abaixo de 3600
+ * quebra o requisito, e o teste vigia.
+ */
+export const MEDIA_SIGNED_URL_TTL_S = 60 * 60;
+
+/**
  * Remove a linha que o WEBHOOK criou para a mensagem que ESTE envio acabou de
  * mandar — o "eco do próprio envio".
  *
@@ -370,12 +385,22 @@ export async function sendMessageHandler(
       .maybeSingle();
     if (updated) message = updated as unknown as Message;
   } else if (!chatId) {
+    // Duas causas MUITO diferentes caem aqui, e até 2026-08-08 as duas saíam
+    // como "contato sem telefone" (spec 004, FR-025 / T039). Numa conversa de
+    // grupo isso é mentira: o grupo não tem telefone nenhum e nunca vai ter, e
+    // quem lê fica procurando um cadastro para consertar. O desfecho continua o
+    // MESMO — `failed`, o envio segue impedido —, só o motivo passa a ser
+    // verdadeiro. Canal que SABE endereçar grupo devolve o endereço em
+    // `resolveRecipient` e não chega aqui: nada mudou para ele.
+    const ehGrupo = c.is_group;
     const { data: updated } = await supabase
       .from("messages")
       .update({
         status: "failed",
-        error_code: "missing_phone_number",
-        error_message: "Contato sem telefone para envio WhatsApp.",
+        error_code: ehGrupo ? "group_send_unsupported" : "missing_phone_number",
+        error_message: ehGrupo
+          ? "Este canal não envia mensagem para conversa de grupo."
+          : "Contato sem telefone para envio WhatsApp.",
       })
       .eq("id", message.id)
       .select(MSG_COLS)
@@ -413,11 +438,11 @@ export async function sendMessageHandler(
           values: input.template_values ?? {},
         });
       } else if (input.media_storage_path) {
-        // Storage-first: signed URL curta só pro canal baixar (nunca base64).
+        // Storage-first: referência de endereço só pro canal baixar (nunca base64).
         const admin = createAdminClient();
         const { data: signed, error: signErr } = await admin.storage
           .from("whatsapp-media")
-          .createSignedUrl(input.media_storage_path, 600);
+          .createSignedUrl(input.media_storage_path, MEDIA_SIGNED_URL_TTL_S);
         if (signErr || !signed?.signedUrl) {
           throw new Error(`storage_sign_failed: ${signErr?.message ?? "no_url"}`);
         }

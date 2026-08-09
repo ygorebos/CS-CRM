@@ -1689,7 +1689,7 @@ export async function runAgentTurn(
             // instrutivo. E só quando o corretor ligou a exigência na tela — é o
             // guardrail `rag_must_hit`, que até esta fatia salvava e ninguém avaliava
             // (FR-015). TODO agente nasce com ela ligada, e não só o do onboarding: é o
-            // DEFAULT de `ai_agents.guardrails` (migration 0129). Desligar continua
+            // DEFAULT de `ai_agents.guardrails` (migration 0133). Desligar continua
             // possível, mas virou decisão explícita na tela.
             enforceAssistanceGrounding: agentConfig?.exigeLastro ?? false,
             groundings: ancorasDoCorpo,

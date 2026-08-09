@@ -36,6 +36,9 @@ aparece nos requisitos; tudo isso é decidido no `plan.md`.
 
 ## Conformidade com a constituição v1.1.0
 
+> Escrito contra a v1.1.0. A reavaliação contra a **v2.2.0** — que redefiniu III e IV e
+> acrescentou XIII e XIV — está no `plan.md`, seção "Reavaliação contra a v2.2.0".
+
 - [x] **Princípio I** — isolamento: FR-009, FR-010, FR-011, FR-018; SC-005 mede
 - [x] **Princípio II** — sistema vivo: FR-022 (cadeia viva), FR-027 (falta de gateway visível na
       tela), FR-015 (fila de descarte inspecionável)

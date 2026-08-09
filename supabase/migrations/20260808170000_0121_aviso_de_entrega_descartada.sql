@@ -1,4 +1,4 @@
--- 0118 — a entrega que morreu precisa APARECER (spec 001, T037)
+-- 0121 — a entrega que morreu precisa APARECER (spec 001, T037)
 --
 -- O dreno do recebimento (`/api/v1/cron/gateway-inbound-drain`) marca `dead` a
 -- entrega que esgotou as tentativas, que chegou sem dono ou cujo envelope não

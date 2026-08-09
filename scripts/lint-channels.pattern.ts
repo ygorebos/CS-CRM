@@ -60,3 +60,39 @@ export function nomeiaProvider(texto: string): boolean {
 
 /** Exportadas para o teste de fronteira poder vigiar cada uma isoladamente. */
 export const PADROES = { SEPARADO, PASCAL } as const;
+
+/**
+ * ─── Invariante 2: FORMA de payload de provedor (spec 004, T052 / FR-042) ───
+ *
+ * O invariante 1 pega o NOME do provider. Não pega o que é pior de achar depois:
+ * código lendo a FORMA crua da resposta dele sem citar o nome. `data.key.id`,
+ * `msg._serialized`, `resp.messageid` — nada ali diz "WAHA" ou "uazapi", e a
+ * catraca antiga passava batido.
+ *
+ * A doutrina (anti-pattern 15) proíbe código novo do CRM ler payload cru: só
+ * envelope na entrada, só o contrato do `ChannelAdapter` na saída. O caminho de
+ * RECEBIMENTO já tinha vigia — o envelope é obrigatório e há invariante para
+ * isso. O de ENVIO não tinha, e é justamente onde a forma crua reaparece: quem
+ * escrever um envio novo vai receber a resposta do canal e ficar tentado a
+ * cavar o id dela na mão, em vez de pedir ao adapter.
+ *
+ * ─── Por que a lista é CURTA, e por que isso é a decisão ────────────────────
+ *
+ * A primeira versão desta regra incluía `fromMe`, `chatId`, `pushName` e
+ * `participant`. Medido na main: 8 arquivos ofensores, e **nenhum deles lia
+ * payload cru** — `chatId` é o nome que o handler de envio dá ao destinatário
+ * resolvido PELO adapter, e `pushName` aparece em coluna e em prosa. Uma regra
+ * que reprova o código correto ensina a contorná-la, e vira a catraca com furo
+ * que a issue #118 já custou caro.
+ *
+ * Ficaram só as formas que NÃO têm outro dono possível: `_serialized` e
+ * `key.id` são estrutura do Baileys/WEBJS, `messageid` e `remoteJid` são campos
+ * da resposta do provedor. Nenhuma delas tem razão de existir fora de
+ * `lib/channels/`, `lib/waha/` e `lib/gateway/` — que são o transporte.
+ */
+const FORMA_CRUA = /(?<![a-zA-Z0-9_])(_serialized|messageid|remoteJid|jsonMessage|key\.id)(?![a-zA-Z0-9])/;
+
+/** Um trecho lê a FORMA crua de um payload de provedor? */
+export function leFormaCruaDeProvedor(texto: string): boolean {
+  return FORMA_CRUA.test(texto);
+}

@@ -8,7 +8,7 @@
  *
  * Duas origens de conteúdo alimentam a reconstrução (T084, FR-004): os pares
  * pergunta/resposta de `ai_faq_items` e o texto de documento de `ai_source_passages`
- * (migration 0127). Ler só a primeira era descartar em silêncio todo manual carregado.
+ * (migration 0131). Ler só a primeira era descartar em silêncio todo manual carregado.
  *
  * Regra que atravessa os dois caminhos (FR-006): a versão nova só é ATIVADA quando
  * **todos** os trechos planejados entraram. Falha no meio deixa a versão anterior valendo
@@ -66,7 +66,7 @@ interface Fonte {
   source_metadata?: Record<string, unknown> | null;
 }
 
-/** Uma passagem de documento (`ai_source_passages`, migration 0127). */
+/** Uma passagem de documento (`ai_source_passages`, migration 0131). */
 interface Passagem {
   knowledge_source_id: string;
   content: string;

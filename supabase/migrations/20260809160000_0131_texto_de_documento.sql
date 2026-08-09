@@ -1,4 +1,4 @@
--- 0127 — onde mora o texto de um documento
+-- 0131 — onde mora o texto de um documento
 --
 -- Spec 002 (RAG por operadora), fatia F4. Tarefa T140, e o que destrava T083/T084 — e com
 -- elas FR-004 inteiro.
@@ -87,7 +87,7 @@ create unique index if not exists ai_source_passages_fonte_posicao_key
   on public.ai_source_passages (knowledge_source_id, position);
 
 comment on table public.ai_source_passages is
-  'Migration 0127 (spec 002, F4 · T140): onde mora o texto extraído de documento que NÃO é '
+  'Migration 0131 (spec 002, F4 · T140): onde mora o texto extraído de documento que NÃO é '
   'par pergunta/resposta. Tabela própria em vez de afrouxar ai_faq_items.question: o motivo '
   'é significado, não destrutividade — aquela tabela quer dizer "par pergunta/resposta", e '
   'usá-la para passagem transferiria a cada leitor a obrigação de lembrar que question pode '

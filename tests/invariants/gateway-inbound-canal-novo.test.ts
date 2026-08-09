@@ -62,7 +62,7 @@ function semear(): void {
     values ('${ORG}', 'inv-t056', 'Org do T056', 'Org do T056')
     on conflict (id) do nothing;
   `);
-  // A conexão nasce com `provider = 'instagram'`: é o vocabulário que a 0116
+  // A conexão nasce com `provider = 'instagram'`: é o vocabulário que a 0119
   // acrescentou espelhando o `platform` do envelope. Sem ele, o canal novo
   // entraria como se fosse WhatsApp e a tela mentiria sobre a origem.
   sql(`

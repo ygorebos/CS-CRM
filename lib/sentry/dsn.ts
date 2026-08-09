@@ -16,9 +16,23 @@
 export const DEFAULT_SENTRY_DSN =
   "https://58fabf8ad54504863d404a3647ef3714@o4509908078559232.ingest.us.sentry.io/4509908083212288";
 
-export function resolveSentryDsn(value: string | undefined | null): string | undefined {
+/**
+ * Desligado devolve STRING VAZIA, nunca `undefined` — e a diferença não é estética.
+ *
+ * O SDK do Node faz `dsn: options.dsn ?? process.env.SENTRY_DSN`
+ * (`@sentry/node-core/build/cjs/sdk/index.js:127`; o de edge tem o equivalente em
+ * `@sentry/vercel-edge/build/cjs/index.js:3508`). Como `??` só cai no fallback em
+ * nullish, devolver `undefined` fazia o SDK reler a env crua — `SENTRY_DSN=off` —,
+ * tentar parseá-la como DSN e cuspir `Invalid Sentry Dsn: off` em todo boot.
+ * A telemetria acabava desligada, mas pelo caminho do erro: DSN inválido não monta
+ * transporte. String vazia não é nullish, então o fallback não dispara, e
+ * `if (options.dsn)` falso desliga do jeito documentado, em silêncio.
+ */
+export const SENTRY_DSN_DESLIGADO = "";
+
+export function resolveSentryDsn(value: string | undefined | null): string {
   const v = (value ?? "").trim().toLowerCase() === "off" ? "off" : (value ?? "").trim();
-  if (v === "off" || v === "false" || v === "0") return undefined;
+  if (v === "off" || v === "false" || v === "0") return SENTRY_DSN_DESLIGADO;
   return v.length > 0 ? v : DEFAULT_SENTRY_DSN;
 }
 

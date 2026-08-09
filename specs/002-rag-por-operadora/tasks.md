@@ -40,11 +40,11 @@ sabotagem não foi delegada** — ela é o que separa teste que vigia de teste q
 | **Prova pela tela** | T040, T041, T078, T096, T103, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
 | **Escopo restante** | T099 | FR-008 está pela METADE: desativar existe (`PATCH {is_active}`, a trava 4 que a busca lê ao vivo), remover **não** — não há `DELETE` na rota |
-| **Buraco fora da lista — FECHADO (migration 0129)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
+| **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
 | **Fechamento** | T005, T126, T127, T129 | Issue de alinhamento, docs de arquitetura, e o Living System Checklist — que só se responde com o resto medido |
 
 **Pendência transversal, que vale para tudo acima:** `lib/database.types.ts` não foi
-regenerado depois das migrations 0125–0129. Exige `supabase db push` contra o banco, que
+regenerado depois das migrations 0125, 0126 e 0131–0133. Exige `supabase db push` contra o banco, que
 esta sessão não fez. Nenhum caminho tipado depende das tabelas novas hoje — os acessos são
 por `pool.query` cru ou por client sem genérico —, mas o contrato tipado está atrasado.
 
@@ -448,7 +448,7 @@ Testes escritos e **vermelhos** antes da implementação · schema antes de runt
 tela · sabotagem confirmada antes do checkpoint · **um commit ao fim da fase** (constituição v2.1.0),
 com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 
-### Ordem das migrations (revista em 2026-08-08)
+### Ordem das migrations (revista em 2026-08-09)
 
 | Nº | Fatia | O quê |
 |---|---|---|
@@ -459,9 +459,21 @@ com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 | 0124 | F3 | adoção local do catálogo e inércia da versão semeada |
 | 0125 | F4 | registro de divergência de conteúdo |
 | 0126 | F5 | rastreabilidade, validade e lacunas |
+| 0131 | F4 | onde mora o texto de um documento (`ai_source_passages`) — era 0127 |
+| 0132 | F4 | âncora legível do documento, forward-fix de `fn_buscar_lastro` — era 0128 |
+| 0133 | — | lastro de fábrica no agente (default de `ai_agents.guardrails`) — era 0129 |
 
 As colunas de escopo saíram da 0124 e foram para a **0118**: a `fn_buscar_lastro` da 0123 as lê, e
 duas fases depois é tarde — a função não criaria, ou criaria sem filtro nenhum do lado do tenant.
+
+**A faixa cedeu duas vezes, e pelo mesmo motivo.** Primeiro 0119–0122, quando o merge da spec 001
+ocupou esses quatro números; renumerada para 0123–0126. Depois 0127–0129, quando o merge da spec
+004 já tinha publicado `0127_gateway_writer`, `0128_gateway_escrita`, `0129_aviso_gateway_fora` e
+`0130_aviso_divergencia_reconciliacao` na `main` — as três desta spec passaram a **0131–0133**, com
+carimbo de tempo reemitido depois do último da 004 para número e cronologia não se contradizerem.
+A sequência é compartilhada entre specs e **quem chega depois cede**: antes de criar a próxima,
+confira o último número real com `ls supabase/migrations/` **contra a `main`**, não contra a sua
+branch — foi olhar só para a própria branch que produziu as duas colisões.
 
 ### Parallel Opportunities
 

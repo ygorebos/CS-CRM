@@ -61,7 +61,7 @@ function erroDe(fn: () => unknown): string {
   throw new Error("o comando passou — a trava não existe neste banco");
 }
 
-describe("0116 · a costura do gateway chega ao clone", () => {
+describe("0119 · a costura do gateway chega ao clone", () => {
   it("uma conexão de canal do gateway pode existir sem sessão do caminho legado", () => {
     const org = novaOrg(`inv116-sessao-${Date.now()}`);
     const id = novaSessaoDeGateway(org, `a${Date.now()}`);

@@ -1,4 +1,4 @@
--- 0116 — recebimento unificado pelo gateway: vocabulário de canal e chave de corte.
+-- 0119 — recebimento unificado pelo gateway: vocabulário de canal e chave de corte.
 --
 -- Contexto (spec 001, constituição v1.2.0 "Por onde as mensagens entram"): o
 -- `gateway_go` passa a ser o receptor geral do tráfego de entrada. Ele recebe de

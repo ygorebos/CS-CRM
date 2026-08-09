@@ -107,6 +107,15 @@ export const DEFAULT_CHANNEL_PROVIDER: ChannelProvider = "waha";
  */
 export const CHANNEL_PROVIDER_WAHA: ChannelProvider = "waha";
 export const CHANNEL_PROVIDER_META: ChannelProvider = "meta_cloud";
+/**
+ * O canal que o provisionamento pelo gateway cria hoje (spec 004, T043).
+ *
+ * Um só, e nomeado, porque o gateway atende N plataformas mas a Central de
+ * Conexões só oferece esta — oferecer as outras antes de o envio delas existir
+ * criaria o "canal morto na mão do corretor" que a FR-014 nomeia (a matriz de
+ * `getAdapter` só tem envio para esta).
+ */
+export const CHANNEL_PROVIDER_GATEWAY_WHATSAPP: ChannelProvider = "whatsapp_uazapi";
 
 export function capabilitiesOf(provider: ChannelProvider): ChannelCapabilities {
   const caps = CHANNEL_CAPABILITIES[provider];

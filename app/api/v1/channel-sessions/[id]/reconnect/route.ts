@@ -38,6 +38,16 @@ import { audit } from "@/lib/audit";
 import { ok, fail } from "@/lib/api/wrappers";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
+import {
+  CHANNEL_SESSION_REF_COLUMNS,
+  classificarRef,
+  type ChannelSessionRef,
+} from "@/lib/channels/session-ref";
+import {
+  ErroDoGateway,
+  parearNoGateway,
+  statusDeCanalPara,
+} from "@/lib/gateway/provisionamento";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
 
@@ -81,14 +91,16 @@ export async function POST(
   // arquivado, e exigir a coluna aqui derrubaria a reconexão inteira — que é o
   // socorro de quem está com o número fora do ar.
   const { data: sessionRaw } = await queryTolerantToMissingArchived(
-    () => buscar(`id, waha_session_name, ${ARCHIVED_AT}`),
-    () => buscar("id, waha_session_name"),
+    () => buscar(`id, ${CHANNEL_SESSION_REF_COLUMNS}, ${ARCHIVED_AT}`),
+    () => buscar(`id, ${CHANNEL_SESSION_REF_COLUMNS}`),
   );
-  const session = sessionRaw as {
-    id: string;
-    waha_session_name: string | null;
-    archived_at?: string | null;
-  } | null;
+  const session = sessionRaw as
+    | (Partial<ChannelSessionRef> & {
+        id: string;
+        waha_session_name?: string | null;
+        archived_at?: string | null;
+      })
+    | null;
   if (!session) return fail("not_found", "Canal não encontrado.", 404, { requestId });
   if (session.archived_at) {
     return fail(
@@ -103,6 +115,50 @@ export async function POST(
   // aqui (era um cast) não fazia o valor existir: mandava `null` para o
   // transporte, que pedia `/api/sessions/null/stop` e devolvia erro de serviço —
   // culpando o WhatsApp por uma pergunta que nunca fez sentido.
+  // Canal do GATEWAY: reconectar é RE-PAREAR (spec 004, T046 / FR-036). Antes
+  // desta guarda ele caía no 422 de "canal oficial" logo abaixo — mensagem
+  // errada sobre um canal que TEM sessão, e um beco sem saída na tela: o
+  // corretor lia que precisava atualizar credencial de uma API que ele não usa.
+  const natureza = classificarRef(session);
+  if (natureza?.via === "gateway") {
+    try {
+      const material = await parearNoGateway(natureza.ref, { force });
+      const proximo = statusDeCanalPara(material.status);
+      await supabase
+        .from("channel_sessions")
+        .update({
+          status: proximo,
+          last_status_change_at: new Date().toISOString(),
+          consecutive_health_fails: 0,
+        })
+        .eq("organization_id", activeOrg.orgId)
+        .eq("id", id);
+
+      void audit({
+        action: "channel.reconnected",
+        actorUserId: user.id,
+        organizationId: activeOrg.orgId,
+        resourceType: "channel_session",
+        resourceId: id,
+        requestId,
+        metadata: { gateway_connection_id: natureza.ref, force },
+      });
+
+      // Mesmo desfecho de hoje (FR-036): a tela recebe o status novo e abre o
+      // diálogo de QR quando for o caso. O material em si vem da rota de
+      // pareamento — devolvê-lo aqui daria dois donos ao mesmo dado.
+      return ok({ id, status: proximo }, { requestId });
+    } catch (err) {
+      const e = err instanceof ErroDoGateway ? err : null;
+      return fail(
+        "gateway_error",
+        e?.message ?? "não consegui reconectar pelo gateway",
+        e && e.status >= 500 ? 502 : 422,
+        { requestId, details: { codigo: e?.codigo ?? "desconhecido" } },
+      );
+    }
+  }
+
   const nomeSessao = session.waha_session_name;
   if (!nomeSessao) {
     return fail(
