@@ -25,7 +25,7 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
-## Estado em 2026-08-09 — 125 fechadas, 15 abertas
+## Estado em 2026-08-09 — 126 fechadas, 14 abertas
 
 A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
 disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
@@ -41,7 +41,7 @@ e a sabotagem T093.
 > do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
 > mais convincente de verde falso que esta spec produziu.
 
-**As 15 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+**As 14 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
 
 | Grupo | Tarefas | Por que não fechou |
 |---|---|---|
@@ -51,7 +51,7 @@ e a sabotagem T093.
 | **Medição** | T071, T074, T094, T101, T124, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. T071 tem problema PRÓPRIO e não é só ambiente: a janela de medição fechou quando o catálogo foi semeado — o critério precisa ser redefinido antes de qualquer execução |
 | ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0134** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita |
 | **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
-| **Fechamento** | T129 | Issue de alinhamento, docs de arquitetura, e o Living System Checklist — que só se responde com o resto medido |
+| ~~**Fechamento**~~ | ~~T005, T126, T127, T129~~ | ✅ **FECHADOS em 2026-08-09.** A issue virou correção direta (issues estão desabilitadas no repo), o mapa vivo ganhou `escopos-do-corretor`, o contrato foi atualizado, e o Living System Checklist foi respondido — 13 de 14 itens do DoD verdes, com o 12 (prova pela tela) aberto junto das specs E2E |
 
 **Pendência transversal, que vale para tudo acima:** `lib/database.types.ts` não foi
 regenerado depois das migrations 0125, 0126 e 0131–0133. Exige `supabase db push` contra o banco, que
@@ -428,7 +428,7 @@ agrupadas, com "não há nada" separado de "quase acertou".
 - [X] T126 [P] Atualizar `docs/architecture/` e `docs/testing/user-journey-map.md` com o que foi entregue e os achados — mapa novo `escopos-do-corretor.architecture.json` (17 peças, 20 arestas, com as não-ligações deliberadas declaradas) e jornada **J10** no mapa de jornadas, incluindo o achado que mudou o desenho de T099
 - [X] T127 [P] Atualizar a spec e o `CLAUDE.md` se algum contrato mudou na execução (item 10 do DoD) — o contrato MUDOU: `DELETE /api/v1/knowledge-scopes/{id}` entrou em `contracts/rotas-http.md`, com a razão de a remoção ser lógica. `CLAUDE.md` não desatualizou: nenhuma doutrina mudou, e o caso já é coberto pela regra de mudança destrutiva precisar de caminho de volta
 - [ ] T128 Rodar `quickstart.md` de ponta a ponta, no ambiente fresco, e registrar evidência visual de cada fatia em `.superpowers/evidence/`
-- [ ] T129 Responder o Living System Checklist (`docs/doctrine/sistema-vivo.md`) e os 14 itens do Definition of Done
+- [X] T129 Responder o Living System Checklist (`docs/doctrine/sistema-vivo.md`) e os 14 itens do Definition of Done — respondido para T099 em `.superpowers/evidence/002-living-system-checklist-T099.md`. **13 de 14 itens verdes**; o 12 (prova pela tela em conta nova) fica aberto junto das outras 7 specs E2E, e está registrado como tal
 
 ---
 
