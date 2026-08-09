@@ -79,6 +79,11 @@ ler() { printf '%s\n' "$ENVOUT" | grep "^$1=" | cut -d= -f2- | tr -d '"'; }
 API_URL="$(ler API_URL)"
 ANON="$(ler ANON_KEY)"
 SERVICE="$(ler SERVICE_ROLE_KEY)"
+# A porta do Postgres vem do PRÓPRIO stack, não de um literal. `supabase/config.toml` é
+# versionado, mas quem roda duas frentes na mesma máquina troca as portas para não colidir
+# (constituição v2.3.1) — e com o literal `54322` o `.env.e2e` apontava para o banco da
+# OUTRA frente, ou para nenhum. Erro que aparece como "a suíte não vê o que o seed gravou".
+DB_URL="$(ler DB_URL)"
 
 if [ -z "$API_URL" ] || [ -z "$ANON" ] || [ -z "$SERVICE" ]; then
   echo "==> Não consegui ler as chaves do stack local (API_URL/ANON_KEY/SERVICE_ROLE_KEY)." >&2
@@ -104,14 +109,14 @@ cat > .env.e2e <<EOF
 NEXT_PUBLIC_SUPABASE_URL=$API_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON
 SUPABASE_SERVICE_ROLE_KEY=$SERVICE
-SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+SUPABASE_DB_URL=$DB_URL
 
 # Placeholders: 'next start' roda em NODE_ENV=production, e lib/env.ts exige
 # estas vars em produção. As specs não exercitam os serviços por trás delas.
 # Local e CI falham pelos mesmos motivos porque leem ESTE arquivo: o workflow
-# publica o `.env.e2e` no ambiente do job em vez de redigitar os valores. A
+# publica o \`.env.e2e\` no ambiente do job em vez de redigitar os valores. A
 # versão anterior desta linha prometia "valores iguais aos do CI" e eles não
-# eram iguais (`e2e-placeholder…` aqui, `ci-placeholder…` lá) — a promessa por
+# eram iguais (\`e2e-placeholder…\` aqui, \`ci-placeholder…\` lá) — a promessa por
 # coincidência durou até a primeira divergência, que custou 8 specs em 401.
 INTERNAL_SECRET=e2e-placeholder-nao-e-segredo
 # As três abaixo são chaves de CIFRA de verdade: o app exige 32 bytes e recusa
@@ -135,8 +140,8 @@ UPSTASH_REDIS_REST_URL=http://127.0.0.1:3998
 UPSTASH_REDIS_REST_TOKEN=e2e-placeholder-nao-e-segredo
 NEXT_TELEMETRY_DISABLED=1
 
-# A porta em que o Playwright sobe o app. NÃO é decoração: `/auth/confirm` monta
-# o redirect do link de e-mail a partir DELA, por recusar ler o `Host` da
+# A porta em que o Playwright sobe o app. NÃO é decoração: \`/auth/confirm\` monta
+# o redirect do link de e-mail a partir DELA, por recusar ler o \`Host\` da
 # requisição (open redirect). Errada aqui, todo fluxo que chega por e-mail —
 # confirmar cadastro, redefinir senha — cai numa porta vazia.
 # Vigiado por tests/unit/e2e-env-porta-do-app.test.ts.

@@ -112,9 +112,14 @@ export async function carregarEscoposDoTenant(
   tenantId: string,
 ): Promise<EscopoConhecido[]> {
   const { rows } = await db.query<LinhaDeEscopo>(
+    // `deleted_at is null` (T099 / migration 0134): o agente não pode reconhecer, na
+    // fala do cliente, uma operadora que o corretor removeu — casar o nome ali levaria a
+    // um balde que a busca não resolve, e a conversa terminaria em "vale para todos" sem
+    // ninguém entender por quê.
     `select id, display_name, official_code, is_active, catalog_scope_id
        from knowledge_scopes
       where organization_id = $1
+        and deleted_at is null
       order by display_name`,
     [tenantId],
   );
@@ -147,6 +152,7 @@ export async function carregarVinculoDoContato(
        left join knowledge_scopes ks
          on ks.id = c.knowledge_scope_id
         and ks.organization_id = c.organization_id
+        and ks.deleted_at is null
       where c.organization_id = $1 and c.id = $2`,
     [tenantId, contactId],
   );

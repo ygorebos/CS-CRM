@@ -43,9 +43,17 @@ pnpm exec next build
 #
 # O host vem do PRÓPRIO .env.local, então a guarda continua valendo se alguém
 # apontar aquele arquivo para outro projeto.
+HOST_ESPERADO="$(printf '%s' "$NEXT_PUBLIC_SUPABASE_URL" | sed -E 's#https?://##; s#/.*##')"
+
 if [ -f .env.local ]; then
   HOST_PROD="$(grep -E '^NEXT_PUBLIC_SUPABASE_URL=' .env.local | cut -d= -f2- | sed -E 's#https?://##; s#/.*##')"
-  if [ -n "$HOST_PROD" ] && [ "$HOST_PROD" != "127.0.0.1:54321" ]; then
+  # A comparação é contra o host do `.env.e2e` — o que ACABAMOS de buildar —, e não contra
+  # o literal `127.0.0.1:54321`. Com o literal, quem roda duas frentes na mesma máquina e
+  # troca as portas do stack local (constituição v2.3.1) via `supabase/config.toml` recebia
+  # "o bundle contém o host de produção (127.0.0.1:55721)" — sobre o PRÓPRIO stack local.
+  # Medido em 2026-08-09: o build reprovava com os dois arquivos apontando para o mesmo
+  # lugar, que é justamente o caso em que não há nada a guardar.
+  if [ -n "$HOST_PROD" ] && [ "$HOST_PROD" != "$HOST_ESPERADO" ]; then
     if grep -rqF "$HOST_PROD" .next/static 2>/dev/null; then
       echo "==> FALHOU: o bundle do browser contém o host de produção ($HOST_PROD)." >&2
       echo "    O build pegou o .env.local. NÃO rode a suíte — ela escreveria em produção." >&2
@@ -57,7 +65,7 @@ fi
 
 # Controle POSITIVO do mesmo grep: se a URL local também não aparecesse, o
 # "não achei produção" acima não valeria nada — seria um grep que não acha nada.
-HOST_LOCAL="$(printf '%s' "$NEXT_PUBLIC_SUPABASE_URL" | sed -E 's#https?://##; s#/.*##')"
+HOST_LOCAL="$HOST_ESPERADO"
 if grep -rqF "$HOST_LOCAL" .next/static 2>/dev/null; then
   echo "==> OK (controle): o host local ($HOST_LOCAL) ESTÁ no bundle — o grep está vivo."
 else

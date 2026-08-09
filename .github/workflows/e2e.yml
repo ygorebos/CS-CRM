@@ -238,7 +238,8 @@ jobs:
             followup-builder.spec.ts followup-queue.spec.ts \
             distribuicao-atendimento.spec.ts followup-journey.spec.ts \
             webhooks.spec.ts \
-            capacidades-do-agente.spec.ts
+            capacidades-do-agente.spec.ts \
+            escopo-remocao.spec.ts
         env:
           # Só o que NÃO vem do `.env.e2e`: isto é ajuste de CI, não config do
           # produto. CI = 1 IP para todos os specs, e o teto de produção

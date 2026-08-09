@@ -105,6 +105,10 @@ export default async function KnowledgeSourcesPage({
       .from("knowledge_scopes")
       .select(COLUNAS_DO_ESCOPO)
       .eq("organization_id", activeOrg.orgId)
+      // Mesmo motivo da tela de escopos (T099 / 0134): operadora removida não agrupa
+      // material novo. Sem isto, o corretor carregaria material para um balde que a
+      // busca já não resolve — e nada na tela diria por quê.
+      .is("deleted_at", null)
       .order("display_name", { ascending: true })
       .order("id", { ascending: true })
       .range(de, ate);
