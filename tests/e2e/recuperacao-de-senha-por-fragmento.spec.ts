@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+
 import { test, expect } from "@playwright/test";
 
 /**
@@ -26,13 +28,39 @@ import { test, expect } from "@playwright/test";
  * contenha o termo (doutrina de medição, regra 3).
  */
 
-const URL_SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const CHAVE_SERVICO = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const APP = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
+/**
+ * O `.env.e2e` é injetado no `webServer`, NÃO no processo que roda os testes —
+ * então `process.env` chega vazio aqui. Sem esta leitura o `test.skip` abaixo
+ * dispara sempre, e a suíte fica verde sem ter medido nada: é o falso verde que
+ * a doutrina de medição nomeia, com o agravante de parecer cobertura.
+ */
+function doEnvDoE2E(chave: string): string {
+  if (process.env[chave]) return process.env[chave] as string;
+  try {
+    for (const linha of readFileSync(".env.e2e", "utf8").split("\n")) {
+      const limpa = linha.trim();
+      if (!limpa || limpa.startsWith("#")) continue;
+      const i = limpa.indexOf("=");
+      if (i > 0 && limpa.slice(0, i) === chave) return limpa.slice(i + 1);
+    }
+  } catch {
+    /* sem .env.e2e: o skip abaixo cuida, e diz o motivo */
+  }
+  return "";
+}
+
+const URL_SUPABASE = doEnvDoE2E("NEXT_PUBLIC_SUPABASE_URL");
+const CHAVE_SERVICO = doEnvDoE2E("SUPABASE_SERVICE_ROLE_KEY");
 const EMAIL = process.env.E2E_OWNER_EMAIL ?? "cotadorsimplificado@gmail.com";
 
-/** Pede ao GoTrue o mesmo link que ele poria no e-mail. Não envia e-mail. */
-async function gerarLinkDeRecuperacao(): Promise<string> {
+/**
+ * Pede ao GoTrue o mesmo link que ele poria no e-mail. Não envia e-mail.
+ *
+ * `app` vem do `baseURL` do runner, e não de uma constante: no CI a porta é
+ * outra (3001), e um endereço fixo mandaria o `redirect_to` para um app que não
+ * existe — o caso reprovaria por motivo errado.
+ */
+async function gerarLinkDeRecuperacao(APP: string): Promise<string> {
   const resposta = await fetch(`${URL_SUPABASE}/auth/v1/admin/generate_link`, {
     method: "POST",
     headers: {
@@ -60,10 +88,10 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
     "exige NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY",
   );
 
-  test("o link padrão do GoTrue chega em /login/reset, não no erro", async ({ page }) => {
+  test("o link padrão do GoTrue chega em /login/reset, não no erro", async ({ page, baseURL }) => {
     test.setTimeout(60_000);
 
-    const link = await gerarLinkDeRecuperacao();
+    const link = await gerarLinkDeRecuperacao(baseURL!);
     // Confere a premissa ANTES de medir o desfecho: se o formato do link mudar,
     // este caso tem que dizer isso em vez de passar medindo outro caminho.
     expect(link).toContain("/auth/v1/verify");
@@ -89,7 +117,7 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
    */
   test("link recusado pelo GoTrue diz POR QUE, e não manda pedir outro à toa", async ({ page }) => {
     await page.goto(
-      `${APP}/auth/confirm#error=access_denied&error_code=otp_expired` +
+      `/auth/confirm#error=access_denied&error_code=otp_expired` +
         `&error_description=Email+link+is+invalid+or+has+expired&sb=`,
     );
 
@@ -101,7 +129,7 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
   });
 
   test("sem fragmento nenhum, /auth/sessao devolve ao erro honesto", async ({ page }) => {
-    await page.goto(`${APP}/auth/sessao`);
+    await page.goto("/auth/sessao");
     await expect(page).toHaveURL(/\/login\?error=link_invalido/, { timeout: 15_000 });
     await expect(page.getByText(/Link inválido ou expirado/i)).toBeVisible();
   });
