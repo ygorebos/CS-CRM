@@ -221,7 +221,7 @@ capaz de discordar da que ancorou a resposta. Ela passou a aceitar `p_incluir_pr
 `preterido_por_material`. As linhas preteridas **não consomem o `limit`** das vencedoras: caso
 contrário, ligar o registro reduziria em silêncio o lastro da resposta.
 
-### ✅ DECIDIDO — onde mora o texto de um documento (era T140; migration 0131)
+### ✅ DECIDIDO — onde mora o texto de um documento (era T140; migration 0132)
 
 **Decisão de 2026-08-08: a tabela nova `ai_source_passages`.** Foi a recomendação registrada abaixo,
 e a implementação confirmou o motivo — trocando, porém, qual dos dois argumentos pesa.

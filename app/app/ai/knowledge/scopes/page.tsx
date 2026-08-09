@@ -100,7 +100,7 @@ export default async function EscoposDeConhecimentoPage() {
       .from("knowledge_scopes")
       .select(COLUNAS_DO_ESCOPO)
       .eq("organization_id", activeOrg.orgId)
-      // Escopo removido (T099, migration 0134) sai da lista — e ESTE filtro é o que
+      // Escopo removido (T099, migration 0135) sai da lista — e ESTE filtro é o que
       // decide, não o da rota. Esta página é Server Component e lê o banco direto:
       // medido pela tela em 2026-08-09, com o filtro só na rota a operadora removida
       // sumia da lista e VOLTAVA ao recarregar. É o defeito que teste de unidade não

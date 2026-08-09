@@ -114,7 +114,7 @@ function fazerSupabase(linha: Record<string, unknown> = linhaEspelho): Chamada[]
         return chain;
       },
       eq: () => chain,
-      // `.is("deleted_at", null)` — o filtro que exclui escopo removido (0134).
+      // `.is("deleted_at", null)` — o filtro que exclui escopo removido (0135).
       is: () => chain,
       neq: () => chain,
       in: () => chain,

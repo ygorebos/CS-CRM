@@ -97,7 +97,7 @@ function fazerSupabase(): Chamada[] {
         return chain;
       },
       eq: () => chain,
-      // `.is("deleted_at", null)` — escopo removido (0134) sai da lista e libera o nome.
+      // `.is("deleted_at", null)` — escopo removido (0135) sai da lista e libera o nome.
       is: () => chain,
       neq: () => chain,
       in: () => chain,

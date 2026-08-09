@@ -93,7 +93,7 @@ function fazerSupabase(responder: Responder) {
         chamada.filtros[coluna] = valor;
         return chain;
       },
-      // `.is("deleted_at", null)` — escopo removido (0134) some da lista e do 409 de nome.
+      // `.is("deleted_at", null)` — escopo removido (0135) some da lista e do 409 de nome.
       is: (coluna: string, valor: unknown) => {
         chamada.filtros[coluna] = valor;
         return chain;

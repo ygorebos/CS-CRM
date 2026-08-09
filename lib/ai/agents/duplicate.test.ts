@@ -174,7 +174,7 @@ describe("duplicateAgentWithVersion", () => {
   });
 
   it("cópia de agente sem guardrails OMITE a coluna — nunca manda null", async () => {
-    // `ai_agents.guardrails` é `not null default <rag_must_hit>` (migration 0133). Mandar
+    // `ai_agents.guardrails` é `not null default <rag_must_hit>` (migration 0134). Mandar
     // `null` explícito viola o not null (500 no botão "Duplicar") e, no dia em que a coluna
     // afrouxar, faz a cópia nascer com o gate `assistance_grounding` desarmado — o defeito de
     // FR-014, voltando pela porta da duplicação. Omitir a chave é o que deixa o default agir.

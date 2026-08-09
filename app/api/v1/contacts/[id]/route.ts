@@ -125,7 +125,7 @@ async function exigirEscopoDaOrganizacao(
     .select("id")
     .eq("id", scopeId)
     .eq("organization_id", alvo.orgId)
-    // Escopo removido (0134) não vincula contato novo: o vínculo apontaria para um balde
+    // Escopo removido (0135) não vincula contato novo: o vínculo apontaria para um balde
     // que a busca já não resolve, e o cliente cairia em "vale para todos" sem nada dizer.
     .is("deleted_at", null)
     .maybeSingle();

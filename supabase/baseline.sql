@@ -10991,7 +10991,7 @@ revoke execute on function public.fn_gateway_update_message_status(text,text,tex
 grant  execute on function public.fn_gateway_update_message_status(text,text,text,timestamptz,text,text) to gateway_writer, service_role;
 
 notify pgrst, 'reload schema';
--- ---- onde mora o texto de um documento (migration 0131) ----
+-- ---- onde mora o texto de um documento (migration 0132) ----
 --
 -- Ver o cabeçalho de supabase/migrations/20260808230000_0127_texto_de_documento.sql para o porquê.
 
@@ -11045,7 +11045,7 @@ create unique index if not exists ai_source_passages_fonte_posicao_key
   on public.ai_source_passages (knowledge_source_id, position);
 
 comment on table public.ai_source_passages is
-  'Migration 0131 (spec 002, F4 · T140): onde mora o texto extraído de documento que NÃO é '
+  'Migration 0132 (spec 002, F4 · T140): onde mora o texto extraído de documento que NÃO é '
   'par pergunta/resposta. Tabela própria em vez de afrouxar ai_faq_items.question: o motivo '
   'é significado, não destrutividade — aquela tabela quer dizer "par pergunta/resposta", e '
   'usá-la para passagem transferiria a cada leitor a obrigação de lembrar que question pode '
@@ -11068,7 +11068,7 @@ revoke all on public.ai_source_passages from anon;
 notify pgrst, 'reload schema';
 
 
--- ---- a âncora do documento chega ao corretor (migration 0132) ----
+-- ---- a âncora do documento chega ao corretor (migration 0133) ----
 --
 -- Forward-fix: a T083 grava section_title no metadata do trecho, e a busca montava
 -- source_ref só da linha da fonte. Dado gravado e invisível é pior que ausente — parece
@@ -11220,7 +11220,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) is
-  'Migrations 0123 + 0124 + 0125 + 0132 (spec 002): busca de lastro nas duas camadas. Tenant '
+  'Migrations 0123 + 0124 + 0125 + 0133 (spec 002): busca de lastro nas duas camadas. Tenant '
   'e acervo derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou '
   'desligado devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora '
   '(FR-026). Precedência dentro do balde (research D7). No catálogo, por slug ancora só a '
@@ -11236,7 +11236,7 @@ grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, in
 
 notify pgrst, 'reload schema';
 
--- ---- lastro de fábrica no agente (migration 0133) ----
+-- ---- lastro de fábrica no agente (migration 0134) ----
 --
 -- `ai_agents.guardrails` era `default '[]'`, e lista vazia desarma o gate
 -- `assistance_grounding`. Resultado: todo agente que não fosse o do onboarding nascia
@@ -11263,14 +11263,14 @@ update public.ai_agents
 
 comment on column public.ai_agents.guardrails is
   'Guardrails do agente (lib/ai/guardrails-schema.ts). O DEFAULT carrega rag_must_hit '
-  '(migration 0133, spec 002 · FR-014/FR-030): recusar afirmação de assistência sem material '
+  '(migration 0134, spec 002 · FR-014/FR-030): recusar afirmação de assistência sem material '
   'que a sustente é comportamento de FÁBRICA, não opção avançada. O default é cópia declarada '
   'de GUARDRAILS_DO_AGENTE_PADRAO (lib/ai/agents/guardrails-padrao.ts), vigiada por '
   'tests/invariants/agente-nasce-com-lastro.test.ts. Lista vazia desarma o gate '
   'assistance_grounding — o que agora só acontece por decisão explícita na tela.';
 
 
--- ---- remoção lógica do escopo próprio (migration 0134) ----
+-- ---- remoção lógica do escopo próprio (migration 0135) ----
 --
 -- Ver o cabeçalho de supabase/migrations/20260809190000_0134_escopo_removido.sql para o
 -- porquê de NÃO ser um `delete`: a FK é `on delete set null` e a constraint
@@ -11439,7 +11439,7 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) is
-  'Migrations 0123 + 0124 + 0125 + 0132 + 0134 (spec 002): busca de lastro nas duas camadas. Tenant '
+  'Migrations 0123 + 0124 + 0125 + 0133 + 0135 (spec 002): busca de lastro nas duas camadas. Tenant '
   'e acervo derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou '
   'desligado devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora '
   '(FR-026). Precedência dentro do balde (research D7). No catálogo, por slug ancora só a '
@@ -11447,7 +11447,7 @@ comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, 
   'desempate rejeitou, marcadas — elas NUNCA ancoram resposta (FR-035). Na camada do tenant, '
   'source_ref carrega a âncora DENTRO do documento (section_title, page_number) quando o '
   'formato a informa — é o que FR-022 pede: chegar ao trecho, não ao manual inteiro. Escopo '
-  'REMOVIDO (deleted_at preenchido) não resolve, mesmo que alguém reative is_active (0134).';
+  'REMOVIDO (deleted_at preenchido) não resolve, mesmo que alguém reative is_active (0135).';
 
 -- `create or replace` preserva os grants, mas repetir é barato e protege contra a ordem em
 -- que os apêndices do baseline são aplicados num banco novo (doutrina de migrations, item 9).
@@ -11455,3 +11455,26 @@ revoke execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, in
 grant  execute on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) to service_role;
 
 notify pgrst, 'reload schema';
+
+
+-- ---- a lacuna sabe de qual operadora (migration 0136) ----
+--
+-- Ver o cabeçalho de supabase/migrations/20260809210000_0136_lacuna_sabe_de_qual_operadora.sql:
+-- sem este ponteiro, fechar a lacuna quando o material chega exigiria casar o nome da
+-- operadora por string dentro do corpo do aviso.
+
+alter table public.agent_inbox_items
+  add column if not exists knowledge_scope_id uuid references public.knowledge_scopes(id) on delete set null;
+
+comment on column public.agent_inbox_items.knowledge_scope_id is
+  'Spec 002, T110 / SC-013: de qual operadora é a lacuna. Preenchido pela escalação de '
+  'recusa sem lastro quando o vínculo do contato resolve um escopo; NULO quando o agente '
+  'não identificou a operadora — e nulo NUNCA é fechado por chegada de material, porque '
+  'não há como saber qual material cobriria. Antes desta coluna a operadora vivia só como '
+  'texto dentro de `body`, e fechar a lacuna exigiria casar nome por string.';
+
+-- A leitura quente é "as lacunas abertas DESTA operadora", que é o que o fechamento
+-- automático pergunta a cada material indexado.
+create index if not exists agent_inbox_items_escopo_aberto_idx
+  on public.agent_inbox_items (organization_id, knowledge_scope_id, status)
+  where knowledge_scope_id is not null;

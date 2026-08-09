@@ -77,7 +77,7 @@
       "col": 6,
       "type": "table",
       "label": "knowledge_scopes",
-      "sublabel": "is_active · catalog_scope_id (espelho) · deleted_at (0134)"
+      "sublabel": "is_active · catalog_scope_id (espelho) · deleted_at (0135)"
     },
     {
       "id": "fontes",
@@ -132,7 +132,7 @@
       "lane": "busca",
       "col": 8,
       "type": "function",
-      "label": "fn_buscar_lastro (0123→0134)",
+      "label": "fn_buscar_lastro (0123→0135)",
       "sublabel": "security definer · tenant derivado do agente, nunca do chamador"
     },
     {
@@ -183,7 +183,7 @@
         "a FK de ai_knowledge_sources.scope_id é `on delete set null`; a constraint da 0118 exige balde OU 'vale para todos' — apagar deixaria a fonte sem nenhum dos dois",
         "soltar o ponteiro com applies_to_all=true faria o material da operadora REMOVIDA responder a todo mundo, sobre tudo: o oposto de FR-008, e invisível na tela",
         "FK para cascade apagaria o acervo do corretor — irreversível numa instância única",
-        "daí `deleted_at` (0134), com o acervo ARQUIVADO e a rastreabilidade intacta"
+        "daí `deleted_at` (0135), com o acervo ARQUIVADO e a rastreabilidade intacta"
       ]
     },
     {

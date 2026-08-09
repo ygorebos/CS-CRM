@@ -229,7 +229,7 @@ export async function createDefaultAgent(formData: FormData): Promise<CreateAgen
         is_default: true,
         is_active: true,
         created_by: ctx.userId,
-        // Redundante com o default da coluna desde a migration 0133 — e fica. Aqui o
+        // Redundante com o default da coluna desde a migration 0134 — e fica. Aqui o
         // explícito documenta a intenção do onboarding, e o `update` do caminho de reúso
         // (acima) PRECISA da constante: default de coluna não alcança `update`, então
         // apagá-la de lá devolveria o agente reaproveitado sem exigência de lastro.

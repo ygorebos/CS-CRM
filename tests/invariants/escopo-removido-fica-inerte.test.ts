@@ -18,7 +18,7 @@ import pg from "pg";
  * `ai_knowledge_sources.scope_id` é `on delete set null` e a constraint
  * `ai_knowledge_sources_scope_xor_all` (0118) exige balde OU "vale para todos" — apagar o
  * escopo deixaria a fonte sem nenhum dos dois. O caso "`delete` de verdade é IMPOSSÍVEL"
- * congela essa medição: é onde a razão da remoção lógica (0134) fica escrita, e é o que
+ * congela essa medição: é onde a razão da remoção lógica (0135) fica escrita, e é o que
  * ficará vermelho no dia em que a constraint mudar e a decisão puder ser revista.
  *
  * ═══ O DEFEITO QUE ESTE ARQUIVO EXISTE PARA PEGAR ═══

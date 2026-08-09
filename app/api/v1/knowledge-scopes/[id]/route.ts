@@ -108,7 +108,7 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
     .select(COLUNAS_DO_ESCOPO)
     .eq("id", id)
     .eq("organization_id", org.orgId)
-    // Escopo removido (0134) é 404 daqui em diante: nem se renomeia, nem se liga de volta.
+    // Escopo removido (0135) é 404 daqui em diante: nem se renomeia, nem se liga de volta.
     .is("deleted_at", null)
     .maybeSingle();
   if (erroDeLeitura) {
@@ -247,7 +247,7 @@ export async function PATCH(req: NextRequest, { params }: Rota): Promise<Respons
  * a lista do corretor acumula lixo desligado para sempre, e ele deixa de conseguir ler nela
  * quais operadoras realmente atende. FR-008 nomeia as duas operações; só uma existia.
  *
- * ## Remoção LÓGICA, e a razão é do banco (migration 0134)
+ * ## Remoção LÓGICA, e a razão é do banco (migration 0135)
  *
  * `delete from knowledge_scopes` **não roda** quando existe material no balde. A FK de
  * `ai_knowledge_sources.scope_id` é `on delete set null` e a constraint

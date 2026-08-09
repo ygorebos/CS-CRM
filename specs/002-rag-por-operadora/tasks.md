@@ -36,7 +36,7 @@ e a sabotagem T093.
 > **O que a sabotagem ensinou, e vale para toda próxima.** T093 manda inverter o desempate
 > "em `supabase/migrations/<ts>_0123_busca_de_lastro.sql`". Sabotar aquele arquivo não prova
 > nada: `scripts/test-db.sh` aplica **só o `baseline.sql`**, e a forma vigente da
-> `fn_buscar_lastro` é a do `create or replace` da **0132**. A sabotagem foi feita no bloco
+> `fn_buscar_lastro` é a do `create or replace` da **0133**. A sabotagem foi feita no bloco
 > do apêndice — 5 dos 11 casos ficaram vermelhos, e são exatamente os que medem o sentido
 > do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
 > mais convincente de verde falso que esta spec produziu.
@@ -49,12 +49,12 @@ e a sabotagem T093.
 | ~~**Prova de banco executada**~~ | ~~T121~~ | ✅ **FECHADO em 2026-08-09** — rodado localmente e registrado em `.superpowers/evidence/002-test-db-2026-08-09.md` |
 | **Prova pela tela** | T040, T041, T096, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
 | **Medição** | T074, T094, T101, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. **T071 e T124 FECHADAS em 2026-08-09**: a janela original de T071 ("antes da semeadura") tinha fechado de vez, e o critério foi redefinido para o que SC-006 realmente mede — a DIFERENÇA. Duas organizações medidas ao mesmo tempo (1 operadora × 20), laço intercalado. O desenho sequencial anterior deu −26,9%, −6,1% e **+70,1%** em três execuções sem mudar o produto: media o escalonador do host, não a escala |
-| ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0134** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita. **Provado PELA TELA** em 2026-08-09: `tests/e2e/escopo-remocao.spec.ts`, 5 de 5 em ambiente fresco — e a execução achou um defeito que nenhum teste de unidade pegaria (a página é Server Component e lê o banco direto; com o filtro só na rota, a operadora removida sumia e VOLTAVA ao recarregar) |
-| **Buraco fora da lista — FECHADO (migration 0133)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
+| ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0135** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita. **Provado PELA TELA** em 2026-08-09: `tests/e2e/escopo-remocao.spec.ts`, 5 de 5 em ambiente fresco — e a execução achou um defeito que nenhum teste de unidade pegaria (a página é Server Component e lê o banco direto; com o filtro só na rota, a operadora removida sumia e VOLTAVA ao recarregar) |
+| **Buraco fora da lista — FECHADO (migration 0134)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
 | ~~**Fechamento**~~ | ~~T005, T126, T127, T129~~ | ✅ **FECHADOS em 2026-08-09.** A issue virou correção direta (issues estão desabilitadas no repo), o mapa vivo ganhou `escopos-do-corretor`, o contrato foi atualizado, e o Living System Checklist foi respondido — 13 de 14 itens do DoD verdes, com o 12 (prova pela tela) aberto junto das specs E2E |
 
 **Pendência transversal, que vale para tudo acima:** `lib/database.types.ts` não foi
-regenerado depois das migrations 0125, 0126 e 0131–0133. Exige `supabase db push` contra o banco, que
+regenerado depois das migrations 0125, 0126 e 0132–0134. Exige `supabase db push` contra o banco, que
 esta sessão não fez. Nenhum caminho tipado depende das tabelas novas hoje — os acessos são
 por `pool.query` cru ou por client sem genérico —, mas o contrato tipado está atrasado.
 
@@ -99,7 +99,7 @@ produto.
 - [X] T002 Atualizar `feat/002-rag-por-operadora` com a `main` após o merge da emenda (`git fetch origin && git merge origin/main`), conforme a higiene de branches
 - [X] T003 [P] Montar o ambiente fresco descrito em `quickstart.md` — Supabase local pg17, `baseline.sql` aplicado, `scripts/bootstrap-owner.ts`, WAHA + Redis via `docker compose`, `pnpm build && pnpm start`, e **`RESEND_API_KEY` ausente**
 - [X] T004 [P] Registrar a linha de jornada `[P0]` "a instalação já responde assistência" em `docs/testing/user-journey-map.md`, com o aviso de que ela **não é vigiada por gate** (o check `e2e` não é obrigatório e a spec irmã `vps-fresh-onboarding` está fora do CI — issue #63)
-- [X] T005 [P] ~~Abrir issue de alinhamento~~ **Issue é impossível: o repositório tem issues DESABILITADAS** (`gh issue create` responde "the 'ygorebos/CS-CRM' repository has disabled issues"). Como a tarefa existia para agendar a correção, e a correção cabia numa sessão, ela foi FEITA em 2026-08-09 em vez de agendada: `docs/current-state.md` dizia "81 migrations até 0092" com o repo em **127 até 0134** — 46 de deriva, não 23. Corrigidas também as outras seis contagens da mesma tabela (todas envelhecidas) e o parágrafo que provava o cumprimento da doutrina de migrations a partir de um literal — agora ele manda conferir com `ls`, e diz por que o número não deve voltar
+- [X] T005 [P] ~~Abrir issue de alinhamento~~ **Issue é impossível: o repositório tem issues DESABILITADAS** (`gh issue create` responde "the 'ygorebos/CS-CRM' repository has disabled issues"). Como a tarefa existia para agendar a correção, e a correção cabia numa sessão, ela foi FEITA em 2026-08-09 em vez de agendada: `docs/current-state.md` dizia "81 migrations até 0092" com o repo em **127 até 0135** — 46 de deriva, não 23. Corrigidas também as outras seis contagens da mesma tabela (todas envelhecidas) e o parágrafo que provava o cumprimento da doutrina de migrations a partir de um literal — agora ele manda conferir com `ls`, e diz por que o número não deve voltar
 
 ---
 
@@ -469,10 +469,10 @@ com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 | 0124 | F3 | adoção local do catálogo e inércia da versão semeada |
 | 0125 | F4 | registro de divergência de conteúdo |
 | 0126 | F5 | rastreabilidade, validade e lacunas |
-| 0131 | F4 | onde mora o texto de um documento (`ai_source_passages`) — era 0127 |
-| 0132 | F4 | âncora legível do documento, forward-fix de `fn_buscar_lastro` — era 0128 |
-| 0133 | — | lastro de fábrica no agente (default de `ai_agents.guardrails`) — era 0129 |
-| 0134 | F4 | remoção lógica do escopo (`deleted_at`), e `escopo_ativo` passa a exigi-lo (T099) |
+| 0132 | F4 | onde mora o texto de um documento (`ai_source_passages`) — era 0127 |
+| 0133 | F4 | âncora legível do documento, forward-fix de `fn_buscar_lastro` — era 0128 |
+| 0134 | — | lastro de fábrica no agente (default de `ai_agents.guardrails`) — era 0129 |
+| 0135 | F4 | remoção lógica do escopo (`deleted_at`), e `escopo_ativo` passa a exigi-lo (T099) |
 
 As colunas de escopo saíram da 0124 e foram para a **0118**: a `fn_buscar_lastro` da 0123 as lê, e
 duas fases depois é tarde — a função não criaria, ou criaria sem filtro nenhum do lado do tenant.
@@ -480,7 +480,7 @@ duas fases depois é tarde — a função não criaria, ou criaria sem filtro ne
 **A faixa cedeu duas vezes, e pelo mesmo motivo.** Primeiro 0119–0122, quando o merge da spec 001
 ocupou esses quatro números; renumerada para 0123–0126. Depois 0127–0129, quando o merge da spec
 004 já tinha publicado `0127_gateway_writer`, `0128_gateway_escrita`, `0129_aviso_gateway_fora` e
-`0130_aviso_divergencia_reconciliacao` na `main` — as três desta spec passaram a **0131–0133**, com
+`0130_aviso_divergencia_reconciliacao` na `main` — as três desta spec passaram a **0132–0134**, com
 carimbo de tempo reemitido depois do último da 004 para número e cronologia não se contradizerem.
 A sequência é compartilhada entre specs e **quem chega depois cede**: antes de criar a próxima,
 confira o último número real com `ls supabase/migrations/` **contra a `main`**, não contra a sua

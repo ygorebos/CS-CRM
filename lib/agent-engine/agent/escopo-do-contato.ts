@@ -112,7 +112,7 @@ export async function carregarEscoposDoTenant(
   tenantId: string,
 ): Promise<EscopoConhecido[]> {
   const { rows } = await db.query<LinhaDeEscopo>(
-    // `deleted_at is null` (T099 / migration 0134): o agente não pode reconhecer, na
+    // `deleted_at is null` (T099 / migration 0135): o agente não pode reconhecer, na
     // fala do cliente, uma operadora que o corretor removeu — casar o nome ali levaria a
     // um balde que a busca não resolve, e a conversa terminaria em "vale para todos" sem
     // ninguém entender por quê.

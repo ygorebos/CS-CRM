@@ -81,7 +81,7 @@ export async function GET(req: NextRequest): Promise<Response> {
     // doutrina (CLAUDE.md, "toda query que cruza tabelas tenant-aware filtra
     // organization_id") e é o que segura a linha caso a policy mude de forma.
     .eq("organization_id", org.orgId)
-    // Escopo removido (0134) sai da lista. É o que "remover" significa para quem olha a
+    // Escopo removido (0135) sai da lista. É o que "remover" significa para quem olha a
     // tela — e a inércia na busca vem por outro caminho (`deleted_at` na CTE `escopo_ativo`).
     .is("deleted_at", null)
     .order("created_at", { ascending: true })

@@ -2,7 +2,7 @@
  * Ingestão de documento de política (PDF/Markdown) para o RAG.
  *
  * O texto é extraído, dividido em passagens (~400 tokens ≈ 1600 chars, com ~50 tokens ≈ 200
- * chars de sobreposição) e **gravado em `ai_source_passages`** (migration 0131). A
+ * chars de sobreposição) e **gravado em `ai_source_passages`** (migration 0132). A
  * vetorização NÃO acontece aqui: quem embeda, versiona e ativa é o `rag-indexer`, que lê
  * essas passagens.
  *
@@ -213,7 +213,7 @@ async function resolverFonte(
  * REPROCESSAR SUBSTITUI, NÃO EMPILHA. São duas metades, e faltar uma delas ainda dobra
  * material:
  *   1. `upsert` com conflito em `(knowledge_source_id, position)` — o índice único da
- *      migration 0131 — sobrescreve as posições que já existiam;
+ *      migration 0132 — sobrescreve as posições que já existiam;
  *   2. o corte das posições que sobraram, quando o documento novo é MENOR que o anterior.
  *      Sem ele, o final do manual velho continuaria buscável dentro da fonte nova.
  *

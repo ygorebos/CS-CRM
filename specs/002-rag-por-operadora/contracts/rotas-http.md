@@ -62,7 +62,7 @@ mudar qualquer outro campo de um espelho.
 Remove um escopo **próprio** (T099, a outra metade de FR-008). `200` com
 `{ "id", "deleted": true, "materials_archived": <n> }`.
 
-**A remoção é LÓGICA** (`deleted_at`, migration 0134), e não por preferência de estilo:
+**A remoção é LÓGICA** (`deleted_at`, migration 0135), e não por preferência de estilo:
 `delete from knowledge_scopes` **não roda** quando existe material no balde — a FK é
 `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` recusa fonte sem
 balde. Soltar o ponteiro com `applies_to_all = true` promoveria o material da operadora

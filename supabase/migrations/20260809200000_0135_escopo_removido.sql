@@ -1,34 +1,61 @@
--- 0132 — a âncora do documento chega ao corretor
+-- 0135 — remover a operadora, sem apagar o acervo nem promovê-lo a "vale para todos"
 --
--- Spec 002 (RAG por operadora), fatia F4. Forward-fix de `fn_buscar_lastro` (0123 + 0124 +
--- 0125), fechando a ponta solta que a T083/T084 deixou.
+-- Spec 002 (RAG por operadora), T099 — a metade de FR-008 que faltava: "remover ou
+-- desativar uma operadora DEVE tornar o material dela inerte para respostas novas
+-- IMEDIATAMENTE, preservando a rastreabilidade das respostas já dadas".
 --
--- ═══ O DEFEITO ═══
+-- ═══ POR QUE NÃO É UM `DELETE` DE VERDADE ═══
 --
--- A T083 passou a gravar `section_title` (e `page_number`, quando o formato diz) no
--- `metadata` do trecho — é o que faz a citação virar *"seu manual, Carências"* em vez de
--- *"trecho 47"*, e é literalmente o que FR-022 pede: o corretor **chega ao trecho**.
+-- Foi essa a primeira implementação, e ela NÃO RODA. Medido em 2026-08-09, num Postgres
+-- descartável: `delete from knowledge_scopes` onde existe material daquele balde ergue
 --
--- Só que `fn_buscar_lastro` monta `source_ref` a partir da linha da FONTE (`title`,
--- `scope`, `updated_at`, `source_type`) e nunca olha `ai_chunks.metadata`. Resultado: o
--- dado está gravado, correto, e **invisível** — o painel de citação mostra o título do
--- manual inteiro, e o corretor abre um PDF de oitenta páginas para conferir uma frase.
+--     new row for relation "ai_knowledge_sources" violates check constraint
+--     "ai_knowledge_sources_scope_xor_all"
 --
--- Gravado-e-invisível é pior que ausente: parece feito. O teste do ingest fica verde
--- provando a gravação, e o requisito continua descumprido do lado de quem usa.
+-- porque a FK é `on delete set null` e a constraint da 0118 exige
+-- `(applies_to_all and scope_id is null) or (not applies_to_all and scope_id is not null)`.
+-- Escopo apagado deixaria a fonte com `scope_id` nulo e `applies_to_all = false` — estado
+-- que a própria 0118 declarou impossível, e com razão: fonte sem balde não é alcançável
+-- por busca nenhuma nem visível em tela nenhuma.
 --
--- ═══ POR QUE SÓ A CAMADA DO TENANT ═══
+-- As saídas que existiam, e por que nenhuma serve:
 --
--- `catalog_chunks` não tem a coluna: o catálogo curado é escrito pela plataforma, material
--- a material, e não passa pelo ingest de documento. Inventar as chaves lá seria devolver
--- `null` com cara de campo.
+--   · **`applies_to_all = true` ao soltar o ponteiro.** O material da operadora REMOVIDA
+--     passaria a responder a todo mundo, sobre tudo. É o oposto exato de FR-008, e não
+--     aparece em tela: some da lista e volta na resposta.
+--   · **FK para `cascade`.** Apagaria o acervo do corretor junto com o rótulo. Destrutivo,
+--     irreversível, e numa instância única não há de onde restaurar.
+--   · **Recusar remoção enquanto houver material.** Honesto, mas deixa FR-008 pela metade:
+--     o escopo criado por engano, já com material dentro, fica na lista para sempre.
 --
--- ═══ `jsonb_strip_nulls`, e por que ele importa aqui ═══
+-- ═══ O QUE ESTA MIGRATION FAZ ═══
 --
--- `page_number` é nulo em todo PDF hoje (o extrator concatena as páginas numa string só, e
--- recuperar a fronteira depois seria adivinhação). Sem o `strip`, toda citação carregaria
--- `"page_number": null` e a tela teria de decidir se aquilo significa "página 1", "sem
--- página" ou "não medido". Chave ausente não tem essa ambiguidade.
+-- `deleted_at`. O escopo sai da lista do corretor e para de resolver na busca; o material
+-- continua no banco, arquivado, e o ponteiro dele continua válido — a constraint segue
+-- satisfeita porque `scope_id` nunca fica nulo. A rastreabilidade das respostas já dadas
+-- não depende disto: `message_groundings` não tem FK para escopo e carrega a cópia
+-- congelada da origem.
+--
+-- A inércia tem DUAS causas independentes de propósito. A rota escreve `is_active = false`
+-- junto, e a CTE `escopo_ativo` passa a exigir `deleted_at is null` também: reativar por
+-- fora (`update ... set is_active = true`) não ressuscita escopo removido. Uma trava só
+-- seria uma linha de UPDATE entre o corretor e o material que ele acha que apagou.
+
+alter table public.knowledge_scopes
+  add column if not exists deleted_at timestamptz;
+
+comment on column public.knowledge_scopes.deleted_at is
+  'Remoção lógica do escopo próprio (spec 002, T099 / FR-008). Preenchido = fora da lista '
+  'do corretor e sem resolver na busca. Não é `delete` porque a FK para '
+  'ai_knowledge_sources é `on delete set null` e a constraint scope_xor_all recusa fonte '
+  'sem balde — apagar de verdade deixaria o acervo inalcançável ou o promoveria a "vale '
+  'para todos". Espelho do catálogo NUNCA é removido por aqui: a sincronização o recria.';
+
+-- A leitura quente é "os escopos vivos desta organização". O índice antigo
+-- (organization_id, is_active) continua servindo a busca; este serve a lista.
+create index if not exists knowledge_scopes_org_vivos_idx
+  on public.knowledge_scopes (organization_id, created_at)
+  where deleted_at is null;
 
 create or replace function public.fn_buscar_lastro(
   p_agent_id            uuid,
@@ -64,6 +91,7 @@ as $$
       join agente g on g.organization_id = ks.organization_id
      where ks.id = p_scope_id
        and ks.is_active
+       and ks.deleted_at is null
   ),
   material_vigente as (
     select distinct on (cm.slug) cm.id, cm.slug, cm.title, cm.version,
@@ -176,14 +204,15 @@ as $$
 $$;
 
 comment on function public.fn_buscar_lastro(uuid, uuid, public.vector, integer, real, boolean) is
-  'Migrations 0123 + 0124 + 0125 + 0132 (spec 002): busca de lastro nas duas camadas. Tenant '
+  'Migrations 0123 + 0124 + 0125 + 0133 + 0135 (spec 002): busca de lastro nas duas camadas. Tenant '
   'e acervo derivados de p_agent_id, nunca do chamador (FR-019). Escopo desconhecido ou '
   'desligado devolve só "vale para todos" (FR-017, trava 4). Material vencido não ancora '
   '(FR-026). Precedência dentro do balde (research D7). No catálogo, por slug ancora só a '
   'MAIOR versão não-inerte (FR-037). p_incluir_preteridos=true acrescenta as linhas que o '
   'desempate rejeitou, marcadas — elas NUNCA ancoram resposta (FR-035). Na camada do tenant, '
   'source_ref carrega a âncora DENTRO do documento (section_title, page_number) quando o '
-  'formato a informa — é o que FR-022 pede: chegar ao trecho, não ao manual inteiro.';
+  'formato a informa — é o que FR-022 pede: chegar ao trecho, não ao manual inteiro. Escopo '
+  'REMOVIDO (deleted_at preenchido) não resolve, mesmo que alguém reative is_active (0135).';
 
 -- `create or replace` preserva os grants, mas repetir é barato e protege contra a ordem em
 -- que os apêndices do baseline são aplicados num banco novo (doutrina de migrations, item 9).

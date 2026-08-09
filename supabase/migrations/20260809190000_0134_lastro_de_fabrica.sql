@@ -1,4 +1,4 @@
--- 0133 — o agente nasce com o guarda de lastro ligado
+-- 0134 — o agente nasce com o guarda de lastro ligado
 --
 -- Spec 002 (RAG por operadora), FR-014 + FR-030. Fecha um buraco achado na revisão da
 -- spec, que NENHUMA tarefa cobria.
@@ -66,7 +66,7 @@ update public.ai_agents
 
 comment on column public.ai_agents.guardrails is
   'Guardrails do agente (lib/ai/guardrails-schema.ts). O DEFAULT carrega rag_must_hit '
-  '(migration 0133, spec 002 · FR-014/FR-030): recusar afirmação de assistência sem material '
+  '(migration 0134, spec 002 · FR-014/FR-030): recusar afirmação de assistência sem material '
   'que a sustente é comportamento de FÁBRICA, não opção avançada. O default é cópia declarada '
   'de GUARDRAILS_DO_AGENTE_PADRAO (lib/ai/agents/guardrails-padrao.ts), vigiada por '
   'tests/invariants/agente-nasce-com-lastro.test.ts. Lista vazia desarma o gate '
