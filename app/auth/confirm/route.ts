@@ -47,7 +47,27 @@ export async function GET(request: NextRequest) {
     NextResponse.redirect(new URL(path, env.NEXT_PUBLIC_APP_URL));
 
   if (!tokenHash || !type) {
-    return redirectTo("/login?error=link_invalido");
+    // NÃO é necessariamente link inválido — e tratá-lo como tal custou uma
+    // sessão inteira de diagnóstico em 2026-08-09. Com o template PADRÃO do
+    // GoTrue (`{{ .ConfirmationURL }}`), o clique passa por
+    // `…/auth/v1/verify`, que consome o token e devolve 303 para
+    // `…/auth/confirm#access_token=…`. Fragmento não sobe na requisição: daqui
+    // os dois parâmetros parecem simplesmente ausentes.
+    //
+    // Quem enxerga o fragmento é o browser. `/auth/sessao` é uma página cliente
+    // que o lê e estabelece a sessão; se não houver nada lá, ela mesma manda
+    // para o erro. O fragmento sobrevive ao redirect porque o destino não tem
+    // fragmento próprio — comportamento de browser, coberto por
+    // `tests/e2e/recuperacao-de-senha-por-fragmento.spec.ts`.
+    //
+    // A auditoria existe porque a ausência dela é o que tornou este caminho
+    // invisível: o desfecho aparecia na tela e não deixava rastro nenhum.
+    await audit({
+      action: "auth.email_link_sem_query",
+      metadata: { type, reason: "sem_token_hash_na_query" },
+      requestId,
+    });
+    return redirectTo("/auth/sessao");
   }
 
   const supabase = await createClient();

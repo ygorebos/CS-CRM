@@ -196,6 +196,10 @@ export type AuditAction =
   | "auth.signup_confirmed"
   | "auth.signup_provision_failed"
   | "auth.email_link_rejected"
+  // O link chegou sem `token_hash` na query. NÃO é rejeição: é o formato de
+  // fragmento do template padrão do GoTrue, que só o browser enxerga. Ação
+  // própria porque confundir os dois foi o que escondeu o defeito de 2026-08-09.
+  | "auth.email_link_sem_query"
   | "auth.password_reset_requested"
   | "auth.password_reset_request_failed"
   | "auth.password_reset_completed"
