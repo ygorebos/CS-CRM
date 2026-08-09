@@ -125,6 +125,12 @@ AI_CRED_AES_KEY=$CHAVE_AI
 WAHA_API_BASE_URL=http://127.0.0.1:3999
 WAHA_API_KEY=e2e-placeholder-nao-e-segredo
 WAHA_WEBHOOK_BASE_URL=http://127.0.0.1:$PORTA_APP
+
+# Explícito, e não por ausência: a suíte tem spec que EXIGE o segundo fator
+# (reset-password-mfa). Como o app sobe em http://localhost, a dispensa de MFA
+# passaria a ser possível — e bastaria alguém ligar a chave para a spec virar
+# falso verde sem que nada do produto mudasse.
+MFA_DISPENSADA_LOCAL=false
 UPSTASH_REDIS_REST_URL=http://127.0.0.1:3998
 UPSTASH_REDIS_REST_TOKEN=e2e-placeholder-nao-e-segredo
 NEXT_TELEMETRY_DISABLED=1

@@ -1,4 +1,7 @@
 import { test, expect } from "@playwright/test";
+import { createClient } from "@supabase/supabase-js";
+
+import { loadEnvLocal, uniqueEmail } from "./helpers/auth";
 
 /**
  * O link de redefinição no formato que o servidor NÃO enxerga.
@@ -26,13 +29,42 @@ import { test, expect } from "@playwright/test";
  * contenha o termo (doutrina de medição, regra 3).
  */
 
-const URL_SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-const CHAVE_SERVICO = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-const APP = process.env.PLAYWRIGHT_BASE_URL ?? "http://localhost:3000";
-const EMAIL = process.env.E2E_OWNER_EMAIL ?? "cotadorsimplificado@gmail.com";
+/**
+ * Em CI as duas variáveis vêm do ambiente do job (o workflow publica o
+ * `.env.e2e` no `$GITHUB_ENV`); numa máquina de desenvolvimento vêm do
+ * `.env.local`. É o mesmo idioma das outras specs de auth.
+ */
+const envLocal = loadEnvLocal();
+const URL_SUPABASE = process.env.NEXT_PUBLIC_SUPABASE_URL ?? envLocal.NEXT_PUBLIC_SUPABASE_URL ?? "";
+const CHAVE_SERVICO =
+  process.env.SUPABASE_SERVICE_ROLE_KEY ?? envLocal.SUPABASE_SERVICE_ROLE_KEY ?? "";
 
-/** Pede ao GoTrue o mesmo link que ele poria no e-mail. Não envia e-mail. */
-async function gerarLinkDeRecuperacao(): Promise<string> {
+/**
+ * A conta é SEMEADA por esta spec, e não herdada.
+ *
+ * Medido no CI em 2026-08-09: presumir uma conta existente deu
+ * `404 user_not_found` — o banco da suíte é fresco e não conhece ninguém. Toda
+ * spec de auth deste repo semeia a própria conta pelo mesmo motivo; herdar
+ * transforma o caso num teste do estado do banco, não do produto.
+ */
+const EMAIL = uniqueEmail("fragmento");
+const SENHA = "SenhaDoFragmento!123";
+let idDoUsuario: string | null = null;
+
+function admin() {
+  return createClient(URL_SUPABASE, CHAVE_SERVICO, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+}
+
+/**
+ * Pede ao GoTrue o mesmo link que ele poria no e-mail. Não envia e-mail.
+ *
+ * `app` vem do `baseURL` do runner, e não de uma constante: no CI a porta é
+ * outra (3001), e um endereço fixo mandaria o `redirect_to` para um app que não
+ * existe — o caso reprovaria por motivo errado.
+ */
+async function gerarLinkDeRecuperacao(APP: string): Promise<string> {
   const resposta = await fetch(`${URL_SUPABASE}/auth/v1/admin/generate_link`, {
     method: "POST",
     headers: {
@@ -60,10 +92,26 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
     "exige NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY",
   );
 
-  test("o link padrão do GoTrue chega em /login/reset, não no erro", async ({ page }) => {
+  test.beforeAll(async () => {
+    const { data, error } = await admin().auth.admin.createUser({
+      email: EMAIL,
+      password: SENHA,
+      email_confirm: true,
+    });
+    if (error || !data.user) throw new Error(`seed createUser: ${error?.message}`);
+    idDoUsuario = data.user.id;
+  });
+
+  // Conta de teste que sobrevive à execução vira lixo que a próxima sessão
+  // encontra e não sabe de quem é.
+  test.afterAll(async () => {
+    if (idDoUsuario) await admin().auth.admin.deleteUser(idDoUsuario);
+  });
+
+  test("o link padrão do GoTrue chega em /login/reset, não no erro", async ({ page, baseURL }) => {
     test.setTimeout(60_000);
 
-    const link = await gerarLinkDeRecuperacao();
+    const link = await gerarLinkDeRecuperacao(baseURL!);
     // Confere a premissa ANTES de medir o desfecho: se o formato do link mudar,
     // este caso tem que dizer isso em vez de passar medindo outro caminho.
     expect(link).toContain("/auth/v1/verify");
@@ -89,7 +137,7 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
    */
   test("link recusado pelo GoTrue diz POR QUE, e não manda pedir outro à toa", async ({ page }) => {
     await page.goto(
-      `${APP}/auth/confirm#error=access_denied&error_code=otp_expired` +
+      `/auth/confirm#error=access_denied&error_code=otp_expired` +
         `&error_description=Email+link+is+invalid+or+has+expired&sb=`,
     );
 
@@ -101,7 +149,7 @@ test.describe("recuperação de senha pelo link de fragmento", () => {
   });
 
   test("sem fragmento nenhum, /auth/sessao devolve ao erro honesto", async ({ page }) => {
-    await page.goto(`${APP}/auth/sessao`);
+    await page.goto("/auth/sessao");
     await expect(page).toHaveURL(/\/login\?error=link_invalido/, { timeout: 15_000 });
     await expect(page.getByText(/Link inválido ou expirado/i)).toBeVisible();
   });

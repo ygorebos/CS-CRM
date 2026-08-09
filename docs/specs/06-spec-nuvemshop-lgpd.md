@@ -490,6 +490,17 @@ grant execute on function fn_decrypt_oauth(bytea) to service_role;
 
 A chave é injetada via `ALTER DATABASE ... SET app.nuvemshop_oauth_key = '...'` no provisioning (ou em `set_config()` por sessão de service_role). **Nunca** em SQL versionado.
 
+> **Superado (medido em 2026-08-08).** Esse `ALTER DATABASE` **não é executável em
+> Supabase gerenciado**: o papel `postgres` não é superusuário (`rolsuper=f`) e o
+> PG15+ exige superusuário para GUC customizada — `ERROR: permission denied to
+> set parameter`. O passo nunca rodou porque nunca pôde, e o efeito colateral era
+> `fn_encrypt_oauth` falhando sempre, o que impedia **qualquer conexão de canal de
+> nascer**. A cifra at-rest de segredos passou para a aplicação
+> (`lib/crypto/envelope-secreto.ts`, AES-256-GCM com `SECRET_ENCRYPTION_KEY`); a
+> leitura reconhece os dois formatos pelo próprio ciphertext, então o que já
+> estava gravado por `pgp_sym` continua legível. Diagnóstico:
+> `npx tsx --env-file=.env.local scripts/verificar-cifra-de-segredos.ts`.
+
 ### 3.2 `orders`
 
 ```sql

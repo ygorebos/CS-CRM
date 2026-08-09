@@ -537,15 +537,30 @@ cada um no aparelho.
 
 ---
 
-## Estado da entrega (2026-08-08)
+## Estado da entrega (2026-08-09)
 
 **Fases 0–5: completas.** As três frentes (escrita direta no banco, envio, conexão) mais as
 transversais, com 4 migrations (0127–0130) cada uma com a tripla completa, e sabotagem executada em
 cada fatia.
 
-**Fase 6 (execução medida): 9 de 10.** T060, T061, T062, T064, T065, T066, T067, T068, T069 medidas
-com número real, gateway real e provedor real. T063 em 2 de 5 casos — o ambiente sobe por script, o
-gap de produto foi encontrado e corrigido, e o caso do QR segue sem diagnóstico.
+**Fase 6 (execução medida): 10 de 10.** Todas medidas com número real, gateway real e provedor
+real. A T063 fechou em 2026-08-09 com 5 de 5 casos pela tela, em ambiente montado do zero (Supabase
+local pg17 com o `baseline.sql`, conta nova, app em produção, gateway na variante `crm`
+provisionando instância real na uazapi). As 11 instâncias pagas que a execução criou foram apagadas,
+e a prova é o registro vazio do gateway.
+
+**O que a T063 ensinou depois de o produto já estar certo:** dois vermelhos restantes eram das
+minhas asserções. Cravar "mais de 10 s entre pedidos de QR" reprovava o comportamento correto —
+material no fim da validade *deve* ser pedido em 3 s. E comparar o segundo pedido com a validade do
+primeiro ignora que nem todo pedido vem do relógio: a transição `STARTING → SCAN_QR_CODE` re-dispara
+a busca. O caso passou a medir o **agendamento** (estado estável + material válido ⇒ nenhum pedido
+novo), e sabotar a regra de validade o reprova.
+
+**Um defeito fora da spec, achado no caminho dela e que a bloqueava inteira:** sem cifra de segredo
+disponível, NENHUMA conexão de canal nasce — 422 em ambas as portas. A GUC `app.nuvemshop_oauth_key`
+que a doutrina mandava injetar é **inexecutável em Supabase gerenciado** (`ALTER DATABASE ... SET`
+exige superusuário; o papel `postgres` não é um). A cifra passou para a aplicação
+(`lib/crypto/envelope-secreto.ts`), com a leitura reconhecendo os dois formatos pelo ciphertext.
 
 ### O que a execução achou, e nenhum teste unitário acharia
 

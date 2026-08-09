@@ -14,7 +14,7 @@ de plano de saúde (multi-nicho é capacidade, não prioridade). WhatsApp como c
 primário, com **todo tráfego de entrada chegando pelo `gateway_go`**. Multi-tenant com
 RLS desde o dia 1, LGPD nativa. **Entrega: SaaS de instância única, operada por nós** —
 ninguém instala nada. **Cobrança é gerenciada no Cotador Simplificado, não aqui.**
-Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (v2.3.0).
+Posicionamento: [`VISION.md`](VISION.md). Autoridade: `.specify/memory/constitution.md` (**v2.5.0**).
 
 **Consequência que muda como você trabalha:** existe **uma** instância e **um** banco.
 Bug em produção atinge todos os tenants ao mesmo tempo, e **não há versão de escape** —
@@ -117,6 +117,23 @@ Todo tráfego de entrada chega pelo `gateway_go`, **repo irmão com deploy separ
 
 Desenho e medições: `specs/004-envio-pelo-gateway/decisao-escrita-direta.md`.
 
+## Bancos: qual é qual (e é o inverso do que parece)
+
+**Produção é o Supabase SELF-HOSTED, operado por nós. O projeto no Supabase Cloud é o banco de
+DESENVOLVIMENTO** — é para onde o `.env.local` aponta.
+
+A intuição diz o contrário, e dois sinais do próprio repo empurram para o erro: o
+`.env.hostgator.example` sugere `https://SEU-PROJETO.supabase.co`, e o `docker-compose.prod.yml`
+não tem serviço de Postgres. Uma sessão inteira operou sob essa inversão em 2026-08-09.
+
+- Endereço `*.supabase.co` **é desenvolvimento** — nunca alvo de operação de produção.
+- Confirme o alvo **antes de escrever** e **diga qual banco** ao relatar. "Consultei o banco",
+  sem dizer qual, é afirmação sem referente.
+- A tripla de migration e o expand/contract valem nos **dois**. Cloud descartável não libera
+  `ALTER` solto: ele é o ensaio do que vai rodar em produção.
+
+Autoridade: constituição v2.5.0, Princípio XV. Detalhe em `CLAUDE.md` § "Bancos: qual é qual".
+
 ## Diretórios e arquivos SENSÍVEIS
 
 - **`supabase/baseline.sql`** — é o que sobe ambiente do zero e o que `scripts/test-db.sh`
@@ -213,7 +230,7 @@ Se a regra não está escrita, diga que não está e pergunte — não preencha 
 suposição plausível. Ao documentar, marque o que é `CONFIRMADO` (provado por código) e o
 que é `INFERIDO`.
 
-## Planejamento acompanha a execução (constituição v2.4.0)
+## Planejamento acompanha a execução (constituição v2.4.0+)
 
 A cada **5 tasks** avançadas — ou ao fechar uma fase, o que vier primeiro — atualize os artefatos de
 planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se o desenho mudou, e

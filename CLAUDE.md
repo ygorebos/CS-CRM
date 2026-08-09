@@ -13,7 +13,7 @@
   diagnóstico já foi pago uma vez, com a regra que sobrevive ao caso. **Leia antes de escrever teste de
   banco, mexer no `baseline.sql` ou concluir que algo "está verde"** — várias das entradas descrevem
   defeitos que passam verde. Ao gastar mais de 20 minutos entendendo um sintoma, acrescente a entrada.
-- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.4.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
+- [`.specify/memory/constitution.md`](.specify/memory/constitution.md) — **v2.5.0, autoridade acima deste arquivo em caso de conflito.** Onde este arquivo ainda disser "self-host", vale a constituição.
 
 ---
 
@@ -37,6 +37,33 @@ DeskcommCRM é um sistema operacional de vendas com agentes de IA nativos — ni
 - **AI:** Vercel AI Gateway (Anthropic primário; OpenAI backup pra embeddings); strings tipo `"anthropic/claude-sonnet-4-6"`
 - **Validação:** Zod em todo input externo (request body, webhook payload, env)
 - **Observability:** Sentry com `beforeSend` sanitizado
+
+---
+
+## Bancos: qual é qual (NÃO NEGOCIÁVEL — e é o inverso do que parece)
+
+**Produção é o Supabase SELF-HOSTED, operado por nós. O projeto no Supabase Cloud é o banco de
+DESENVOLVIMENTO** — é para onde o `.env.local` aponta, e é onde se erra de graça.
+
+A intuição da indústria diz o contrário (Cloud soa "gerenciado, logo produção"), e **dois sinais
+do próprio repo empurram para o erro**: o `.env.hostgator.example` sugere
+`https://SEU-PROJETO.supabase.co`, e o `docker-compose.prod.yml` não tem serviço de Postgres — o
+que leva a concluir sozinho, e errado, que o banco externo do compose é o Cloud. Uma sessão
+inteira operou sob essa inversão em 2026-08-09.
+
+Regras que decorrem disso:
+
+- **Endereço `*.supabase.co` = desenvolvimento.** Nunca é alvo de operação de produção nem de
+  conferência de "como está lá".
+- **Confirme o alvo antes de escrever, sempre**, e **diga qual banco** ao relatar. "Consultei o
+  banco" sem dizer qual é afirmação sem referente.
+- **A tripla de migration e o expand/contract valem nos dois.** O Cloud ser descartável não
+  libera `ALTER` solto: ele é o ensaio do que vai rodar em produção.
+- Nesta VPS ainda convivem os stacks self-hosted do **Cotador** (`/opt/stacks/supabase`) e um de
+  dev do CRM (`/opt/stacks/supabase-crm-dev`). Nomes de contêiner do upstream colidem — ver
+  `docs/runbooks/supabase-dev-local.md`.
+
+Autoridade: constituição **v2.5.0**, Princípio XV.
 
 ---
 
@@ -350,7 +377,7 @@ Processo padrão (siga sempre):
 
 ---
 
-## Planejamento acompanha a execução (constituição v2.4.0)
+## Planejamento acompanha a execução (constituição v2.4.0+)
 
 A cada **5 tasks** avançadas — ou ao fechar uma fase, o que vier primeiro — atualize os artefatos de
 planejamento antes de seguir: `tasks.md` da spec com o estado real, `plan.md` se o desenho mudou, e
