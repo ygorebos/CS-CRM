@@ -155,6 +155,13 @@ export type AuditAction =
   // mudou?".
   | "channel.migrated"
   | "channel.reverted"
+  // A conversa mudou de canal porque o anterior foi EXCLUÍDO pelo usuário e a
+  // organização tem exatamente um número vivo (`lib/channels/adocao.ts`). Ação
+  // própria, e não um `channel.migrated` reaproveitado: aquela é uma escolha
+  // deliberada sobre a conexão, esta é uma consequência automática sobre a
+  // conversa — e a pergunta do incidente ("o cliente recebeu de outro número,
+  // por quê?") só é respondível se as duas não se misturarem na mesma linha.
+  | "channel.conversation_adopted"
   | "authz.denied"
   | "team.role_changed"
   | "leads.bulk_assigned"

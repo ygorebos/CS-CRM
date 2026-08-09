@@ -140,8 +140,12 @@ function conversationRow(shape: ConversationShape = {}): Row {
 function makeSupabase(
   conversation: Row,
   templateRow: Row | null = null,
-  /** `semColunaArquivada`: banco em que a migration 0106 ainda não rodou. */
-  opts: { semColunaArquivada?: boolean } = {},
+  /**
+   * `semColunaArquivada`: banco em que a migration 0106 ainda não rodou.
+   * `canaisVivos`: as sessões não-arquivadas e WORKING da organização — o que
+   * decide se a conversa órfã é adotada, fica onde está, ou é ambígua demais.
+   */
+  opts: { semColunaArquivada?: boolean; canaisVivos?: Row[] } = {},
 ) {
   const state: { message: Row | null } = { message: null };
 
@@ -163,7 +167,17 @@ function makeSupabase(
                   : { data: conversation, error: null },
             }),
           }),
-          update: () => ({ eq: async () => ({ error: null }) }),
+          // Encadeável E aguardável: o UPDATE do preview usa um `.eq`, o da
+          // adoção usa dois (`id` + `organization_id` — service role não é
+          // protegido pela RLS e filtra o tenant na mão). Um `.eq` que já
+          // resolve obrigaria a escolher qual dos dois caminhos o dublê modela.
+          update: () => {
+            const alvo: { eq: () => typeof alvo; then: (r: (v: { error: null }) => void) => void } = {
+              eq: () => alvo,
+              then: (resolver) => resolver({ error: null }),
+            };
+            return alvo;
+          },
         };
       }
       if (table === 'meta_templates') {
@@ -201,6 +215,18 @@ function makeSupabase(
             };
           },
         };
+      }
+      if (table === 'channel_sessions') {
+        // A busca por canal VIVO da organização (`lib/channels/adocao.ts`), que
+        // só roda quando o canal da conversa está arquivado. Default: nenhum —
+        // assim o caso 8 continua medindo a recusa, e não a adoção.
+        const linhas = opts.canaisVivos ?? [];
+        const builder = {
+          eq: () => builder,
+          is: () => builder,
+          limit: async () => ({ data: linhas, error: null }),
+        };
+        return { select: () => builder };
       }
       throw new Error(`fake_supabase: tabela inesperada '${table}'`);
     },
@@ -512,6 +538,77 @@ describe('sendMessageHandler — os 6 desfechos do envio', () => {
 
     const msg = await sendMessageHandler(
       makeSupabase(conversationRow({ archivedAt: '2026-08-05T10:00:00.000Z' })),
+      ctx,
+      textInput(),
+    );
+
+    expect(msg.status).toBe('failed');
+    expect(msg.error_code).toBe('channel_archived');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  /**
+   * ⭐ O corretor trocou de número: a conversa vai junto (`lib/channels/adocao.ts`).
+   *
+   * Medido em 2026-08-09 na instância de desenvolvimento: excluir o número antigo
+   * deixou 16 conversas apontando para a sessão arquivada, e TODAS passaram a
+   * recusar envio — a caixa de entrada inteira virou somente-leitura, sem caminho
+   * de volta pela tela, contrariando a frase que o próprio produto mostra ao
+   * reconectar ("Conecte um número para voltar a atender").
+   *
+   * A asserção que importa não é "não falhou": é que a mensagem nasceu com o
+   * `channel_session_id` do canal VIVO. Só isso separa adoção de um `failed`
+   * silenciosamente reclassificado.
+   */
+  it('8b. canal arquivado + UM canal vivo: adota a conversa e envia pelo número novo', async () => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ id: 'wamid.novo' }), { status: 201 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const VIVO = '66666666-6666-4666-8666-666666666666';
+    const msg = await sendMessageHandler(
+      makeSupabase(conversationRow({ archivedAt: '2026-08-05T10:00:00.000Z' }), null, {
+        canaisVivos: [
+          {
+            id: VIVO,
+            status: 'WORKING',
+            provider: 'waha',
+            ...refDoProvider('waha'),
+            archived_at: null,
+          },
+        ],
+      }),
+      ctx,
+      textInput(),
+    );
+
+    const linha = msg as unknown as { status: string; error_code: string | null; channel_session_id: string };
+    expect(linha.error_code).not.toBe('channel_archived');
+    expect(linha.channel_session_id).toBe(VIVO);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  /**
+   * ⭐ Dois números vivos: escolher um é adivinhar por qual identidade o corretor
+   * quer falar com aquele cliente, e a escolha errada manda o histórico pelo
+   * número errado. Recusar é o desfecho honesto — e é o de hoje.
+   */
+  it('8c. canal arquivado + DOIS canais vivos: não adivinha, recusa como antes', async () => {
+    wahaConfigured(true);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const vivo = (id: string): Row => ({
+      id,
+      status: 'WORKING',
+      provider: 'waha',
+      ...refDoProvider('waha'),
+      archived_at: null,
+    });
+    const msg = await sendMessageHandler(
+      makeSupabase(conversationRow({ archivedAt: '2026-08-05T10:00:00.000Z' }), null, {
+        canaisVivos: [vivo('66666666-6666-4666-8666-666666666666'), vivo('77777777-7777-4777-8777-777777777777')],
+      }),
       ctx,
       textInput(),
     );

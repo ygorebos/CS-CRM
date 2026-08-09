@@ -18,6 +18,7 @@ import {
   resolveSessionRef,
   type ChannelSessionRef,
 } from "@/lib/channels";
+import { adotarCanalVivo } from "@/lib/channels/adocao";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { isMediaPathOwnedBy } from "@/lib/messaging/media/upload-validation";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
@@ -288,6 +289,25 @@ export async function sendMessageHandler(
       ctx.requestId,
       "Contato bloqueou o atendimento.",
     );
+  }
+
+  // Canal excluído: antes de recusar, tenta mover a conversa para o único
+  // número vivo da organização (ver `lib/channels/adocao.ts` para o porquê de
+  // "único"). Roda ANTES do insert de propósito — assim a mensagem já nasce com
+  // o canal certo, em vez de nascer no canal morto e ser corrigida depois, que
+  // deixaria uma janela em que a linha aponta para onde nada sai.
+  if (c.channel_sessions?.archived_at) {
+    const adotado = await adotarCanalVivo(supabase, {
+      organizationId: c.organization_id,
+      conversationId: c.id,
+      sessaoAnteriorId: c.channel_session_id,
+      requestId: ctx.requestId,
+      actorUserId: ctx.actor.type === "user" ? ctx.actor.id : null,
+    });
+    if (adotado) {
+      c.channel_session_id = adotado.id;
+      c.channel_sessions = adotado;
+    }
   }
 
   if (input.media_storage_path && !isMediaPathOwnedBy(input.media_storage_path, c.organization_id, c.id)) {
