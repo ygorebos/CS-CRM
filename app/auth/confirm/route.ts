@@ -20,6 +20,20 @@ import { env } from "@/lib/env";
  * Fluxo canônico do @supabase/ssr: verifyOtp grava os cookies de sessão via
  * cookies() do next/headers; o Next anexa os Set-Cookie ao redirect retornado.
  */
+/**
+ * O token existiu e não vale mais (usado, vencido, ou cancelado por um pedido
+ * mais novo) — em oposição a um link truncado ou forjado.
+ *
+ * O GoTrue devolve `otp_expired` nos três casos, e a mensagem é sempre "Email
+ * link is invalid or has expired". Olhar o `code` primeiro e a mensagem só como
+ * rede: `error.code` é recente no cliente e pode vir vazio em versão anterior.
+ */
+function tokenGasto(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  if (error.code === "otp_expired") return true;
+  return /invalid or has expired/i.test(error.message ?? "");
+}
+
 export async function GET(request: NextRequest) {
   const url = request.nextUrl;
   const tokenHash = url.searchParams.get("token_hash");
@@ -75,10 +89,20 @@ export async function GET(request: NextRequest) {
   if (error || !data.user) {
     await audit({
       action: "auth.email_link_rejected",
-      metadata: { type, reason: error?.message ?? "no_user" },
+      metadata: { type, reason: error?.message ?? "no_user", code: error?.code ?? null },
       requestId,
     });
-    return redirectTo("/login?error=link_invalido");
+    // "Gasto" e "inválido" NÃO são a mesma coisa para quem está do outro lado, e
+    // este ramo tratava os dois com a mesma frase — a genérica, que manda pedir
+    // outro link sem dizer que pedir outro foi justamente o que matou o
+    // anterior.
+    //
+    // Medido em 2026-08-09, com o link do dono: o formato de FRAGMENTO já
+    // chegava em `link_expirado` com a frase certa, e este — o formato de
+    // QUERY, que é o dos templates DESTE repo, isto é o caminho normal de todo
+    // usuário — caía na genérica. A mensagem boa estava no caminho raro e a
+    // ruim no comum.
+    return redirectTo(tokenGasto(error) ? "/login?error=link_expirado" : "/login?error=link_invalido");
   }
 
   if (type === "recovery") {
