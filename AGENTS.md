@@ -134,6 +134,23 @@ não tem serviço de Postgres. Uma sessão inteira operou sob essa inversão em 
 
 Autoridade: constituição v2.5.0, Princípio XV. Detalhe em `CLAUDE.md` § "Bancos: qual é qual".
 
+## Hard fork — o repositório-pai saiu do fluxo (2026-08-10)
+
+`ygorebos/CS-CRM` é fork de `melgarafael/DeskcommCRM` no registro do GitHub, mas **os dois pararam
+de convergir**. A `main` de `origin` é a fonte da verdade.
+
+- **`git merge upstream/main` é proibido**, e não por custo: a numeração de migration colidiu de
+  `0116` a `0136` (dezesseis números com arquivo diferente dos dois lados; última comum é a `0115`).
+  O merge produz dois arquivos reivindicando o mesmo `NNNN` e dois blocos com o mesmo rótulo no
+  apêndice do `baseline.sql`. Ambiente novo não sobe.
+- **Não use "Sync fork" no GitHub** — é o mesmo merge, sem revisão, e o site o oferece sozinho.
+- **O remote `upstream` foi removido deste clone.** Se reaparecer, remova.
+- **`gh` em fork resolve para o repositório-pai.** Confira `gh repo set-default --view` antes de
+  `gh pr create`; o valor certo é `ygorebos/CS-CRM`.
+- Aproveitar conserto de lá é `cherry-pick` com a migration **renumerada aqui**, nunca merge.
+
+Detalhe e as medições em `CLAUDE.md` § "Hard fork".
+
 ## Diretórios e arquivos SENSÍVEIS
 
 - **`supabase/baseline.sql`** — é o que sobe ambiente do zero e o que `scripts/test-db.sh`

@@ -301,3 +301,33 @@ ferramental de quem programa e **nunca** é distribuído.
 
 **A regra** — ao falar de MCP, diga qual. Uma decisão tomada sobre o errado vira feature que
 ninguém pediu ou credencial de dev num pacote de cliente.
+
+---
+
+## 17. Degradação silenciosa que ainda MENTE no campo que sobra
+
+**Sintoma** — imagem recebida aparece na conversa como mensagem sem anexo. Nenhum erro na tela,
+nenhum alerta, o log com um `WRN` que ninguém leu. Medido em 2026-08-10 no gateway de dev.
+
+**Causa** — três coisas de uma vez, e a terceira é a que ensina.
+
+1. A variante CRM do gateway ainda subia o arquivo no Storage do **Cotador** — que naquele modo
+   aponta para um endereço desativado de propósito (`http://127.0.0.1:1/...`). Toda mídia falhava.
+2. A função da quarta superfície (`fn_gateway_ingest_message`) gravava a mensagem e **não emitia**
+   `media.persist_requested`. O caminho de ingestão por HTTP emitia; a escrita direta, não. Duas
+   entradas para o mesmo lugar, uma com a cadeia viva e outra sem.
+3. **O código de erro caiu num `warn` e o campo seguiu preenchido com o valor errado.** Quando o
+   upload falhava, a variável de URL continuava com o endereço **cifrado do CDN do provedor**, e
+   ele ia para `messages.media_url` — coluna que o worker do CRM trata como endereço confiável do
+   caminho legado. O sintoma "sem anexo" escondia um segundo defeito: payload externo numa coluna
+   lida sem desconfiança.
+
+**Como apareceu** — não foi o log. Foi **sabotar o teste novo**: com o ramo novo desligado, a
+asserção mostrou `media_ref = https://cdn.../cifrado.enc`. Nenhuma leitura do código teria contado
+isso, porque o campo *parecia* preenchido.
+
+**A regra** — quando um passo opcional falha, **o campo que ele ia preencher tem de voltar ao
+estado vazio**, nunca ficar com o valor de entrada. "Salvou sem a URL" e "salvou com a URL errada"
+são desfechos diferentes, e o segundo não aparece em log nenhum. E quando existirem **duas
+entradas** para o mesmo efeito (aqui: ingestão por HTTP e escrita direta), a cadeia viva tem de
+sair das duas — inevitavelmente alguém acrescenta o evento só na que estava editando.

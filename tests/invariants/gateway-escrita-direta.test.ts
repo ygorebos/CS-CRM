@@ -59,10 +59,18 @@ type OpcoesIngestao = {
   status?: string;
   phone?: string;
   grupo?: boolean;
+  /** `metadata.media_ref` — a referência do anexo, como o gateway a emite. */
+  mediaRef?: string;
+  /** Anexo já persistido: o caminho no bucket privado. */
+  storagePath?: string;
 };
 
 function ingerir(conn: string, externalId: string, o: OpcoesIngestao = {}): string {
   const status = o.status ? `, p_status => '${o.status}'` : "";
+  const meta = o.mediaRef
+    ? `, p_metadata => jsonb_build_object('media_ref', '${o.mediaRef}')`
+    : "";
+  const storage = o.storagePath ? `, p_media_storage_path => '${o.storagePath}'` : "";
   return sql(`
     select coalesce(message_id::text, 'nulo') || '|' || duplicada::text || '|' || coalesce(motivo, '-')
       from public.fn_gateway_ingest_message(
@@ -74,7 +82,7 @@ function ingerir(conn: string, externalId: string, o: OpcoesIngestao = {}): stri
         p_contact_phone         => '${o.phone ?? "+5585999990000"}',
         p_body                  => 'ola',
         p_eh_grupo              => ${o.grupo ? "true" : "false"},
-        p_eh_eco                => ${o.eco ? "true" : "false"}${status});
+        p_eh_eco                => ${o.eco ? "true" : "false"}${status}${meta}${storage});
   `);
 }
 
@@ -307,5 +315,80 @@ describe("ACK — a guarda de não-regressão que o caminho do WAHA não tem", (
     const antes = contar(`select count(*) from public.messages where organization_id = '${ORG_A}';`);
     expect(ack("nunca-existiu", "delivered")).toContain("mensagem_desconhecida");
     expect(contar(`select count(*) from public.messages where organization_id = '${ORG_A}';`)).toBe(antes);
+  });
+});
+
+/**
+ * O anexo pede a própria persistência.
+ *
+ * MEDIDO em 2026-08-10, no gateway de dev: toda imagem recebida entrava como
+ * mensagem **sem anexo**. Metade da causa era do gateway (tentava o Storage do
+ * Cotador); a outra metade é esta — a função gravava a mensagem com a
+ * referência em `metadata.media_ref` e não acordava ninguém. O caminho por HTTP
+ * (`lib/gateway/ingest.ts`) emite `media.persist_requested` desde sempre; a
+ * escrita direta, não. Quem baixa é `workers/media-persist-worker.ts`.
+ *
+ * O sintoma que isto evita é o pior tipo: anexo eternamente "carregando" —
+ * sinal de progresso para algo que não vai acontecer.
+ */
+describe("anexo — a mídia que entra pela função pede a própria persistência", () => {
+  const eventosDeMidia = (externalId: string): number =>
+    contar(`
+      select count(*)
+        from public.event_log e
+        join public.messages m on m.id = e.entity_id
+       where e.event_type = 'media.persist_requested'
+         and m.organization_id = '${ORG_A}'
+         and m.external_id = '${externalId}';
+    `);
+
+  it("mensagem com media_ref emite media.persist_requested", () => {
+    ingerir(CONN_A, "midia-1", { mediaRef: "media/uazapi/conn-a/3EB0AA" });
+    expect(
+      eventosDeMidia("midia-1"),
+      "sem o evento, o worker nunca é acordado e o anexo nunca chega ao bucket",
+    ).toBe(1);
+  });
+
+  it("a referência sobrevive em messages.metadata — é de lá que o worker lê", () => {
+    expect(
+      sql(`select metadata->>'media_ref' from public.messages
+            where organization_id = '${ORG_A}' and external_id = 'midia-1';`),
+    ).toContain("media/uazapi/conn-a/3EB0AA");
+  });
+
+  it("o payload carrega o id da mensagem — o worker busca por ele", () => {
+    expect(
+      sql(`select e.payload->>'message_id' = m.id::text
+             from public.event_log e
+             join public.messages m on m.id = e.entity_id
+            where e.event_type = 'media.persist_requested'
+              and m.organization_id = '${ORG_A}' and m.external_id = 'midia-1';`),
+    ).toContain("t");
+  });
+
+  // A negativa importa tanto quanto a positiva: emitir para toda mensagem faria
+  // o worker acordar em cada texto, buscar anexo que não existe e dead-letrar
+  // — ruído que enterra o evento verdadeiro.
+  it("mensagem SEM anexo não emite nada", () => {
+    ingerir(CONN_A, "sem-midia-1");
+    expect(eventosDeMidia("sem-midia-1")).toBe(0);
+  });
+
+  it("anexo que JÁ está no bucket não é pedido de novo", () => {
+    ingerir(CONN_A, "midia-ja-persistida", {
+      mediaRef: "media/uazapi/conn-a/3EB0BB",
+      storagePath: "org/conversa/mensagem.jpg",
+    });
+    expect(eventosDeMidia("midia-ja-persistida")).toBe(0);
+  });
+
+  // Mesma razão do dispatch: a redelivery sai cedo, antes de qualquer emissão.
+  // Sem isso, uma reentrega baixaria o arquivo de novo e sobrescreveria o que
+  // já estava certo.
+  it("a redelivery NÃO pede o anexo uma segunda vez", () => {
+    ingerir(CONN_A, "midia-redelivery", { mediaRef: "media/uazapi/conn-a/3EB0CC" });
+    ingerir(CONN_A, "midia-redelivery", { mediaRef: "media/uazapi/conn-a/3EB0CC" });
+    expect(eventosDeMidia("midia-redelivery")).toBe(1);
   });
 });
