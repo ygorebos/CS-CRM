@@ -24,6 +24,18 @@ const CAPABILITIES = [
   "voiceNote",
   "groups",
   "costPerMessage",
+  // ── Formas de mensagem (spec 006) ────────────────────────────────────────
+  // Cada uma tem consumidor: `lib/messaging/payloads.ts` liga o tipo de envio à
+  // capability que ele exige, o handler recusa antes da rede, e a tela deixa de
+  // oferecer. Sem consumidor, este caso as chamaria de código morto — e é isso
+  // que ele fez quando elas nasceram, o que é o comportamento certo.
+  "quotedReply",
+  "sticker",
+  "location",
+  "contactCard",
+  "menuMaxOptions",
+  "ctaUrl",
+  "locationRequest",
 ] as const;
 
 describe("matriz capability × provider é exaustiva", () => {

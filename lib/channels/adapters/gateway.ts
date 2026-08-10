@@ -66,6 +66,40 @@ export const gatewayAdapter: ChannelAdapter = {
       tipo: envelope.kind,
     };
     if (envelope.body) corpo.texto = envelope.body;
+    // A CITAÇÃO (spec 006, FR-012). O gateway já tinha o campo — `QuotedID` em
+    // `sender.Envio` e `quoted_id` no contrato HTTP; o que faltava era o CRM
+    // preenchê-lo. Sem ele, toda resposta a um cliente que mandou cinco perguntas
+    // seguidas chega ambígua.
+    if (envelope.replyToExternalId) corpo.quoted_id = envelope.replyToExternalId;
+    // Carga de localização e de contato: os dois tipos que a API do CRM anunciava
+    // e NÃO conseguia entregar, porque o corpo não tinha onde carregá-los. O
+    // gateway recusava com "campos obrigatórios ausentes" — e o corretor
+    // descobria depois da rede.
+    if (envelope.location) {
+      corpo.latitude = envelope.location.lat;
+      corpo.longitude = envelope.location.lng;
+      if (envelope.location.name) corpo.nome = envelope.location.name;
+      if (envelope.location.address) corpo.endereco = envelope.location.address;
+    }
+    if (envelope.contacts && envelope.contacts.length > 0) {
+      // O gateway modela UM telefone por entrada (`contatoRequest{Nome,Telefone}`
+      // em `internal/handlers/messages.go:78`), não uma lista. Medido antes de
+      // escrever: mandar `telefones: []` faria todo envio de contato voltar 400,
+      // e o erro falaria de campo obrigatório ausente — diagnóstico que custaria
+      // uma rodada inteira. Um contato com dois telefones vira duas entradas, que
+      // é como o WhatsApp de fato os mostra no cartão.
+      corpo.contatos = envelope.contacts.flatMap((c) =>
+        c.phones.map((telefone) => ({ nome: c.name, telefone })),
+      );
+    }
+    if (envelope.menu) {
+      corpo.opcoes = envelope.menu.options;
+      if (envelope.menu.footer) corpo.texto_rodape = envelope.menu.footer;
+    }
+    if (envelope.ctaUrl) {
+      corpo.rotulo_botao = envelope.ctaUrl.button_label;
+      corpo.url_botao = envelope.ctaUrl.button_url;
+    }
     if (envelope.media) {
       // Mídia vai por REFERÊNCIA de endereço, nunca embutida (FR-024). A URL
       // assinada de ≥1h é responsabilidade de quem montou o OutboundMedia.

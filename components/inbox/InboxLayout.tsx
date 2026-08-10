@@ -19,6 +19,35 @@ import { RetentionNotice } from "./RetentionNotice";
 import { CRMSidePanel } from "./CRMSidePanel";
 import { InboxKeyboardShortcuts } from "./InboxKeyboardShortcuts";
 import { ShortcutsHelpDialog } from "./ShortcutsHelpDialog";
+import { ReplyTargetProvider } from "./message/reply-target";
+import { CHANNEL_CAPABILITIES, DEFAULT_CHANNEL_PROVIDER } from "@/lib/channels/capabilities";
+import type { ChannelProvider } from "@/lib/channels/types";
+
+/**
+ * O canal desta conversa permite responder citando?
+ *
+ * Fail-closed no provider desconhecido: um valor que a matriz não conhece pode
+ * ser um canal futuro cujo suporte ninguém declarou ainda, e oferecer a ação nele
+ * é o "canal morto na mão do corretor". Ausente cai no default da coluna, que é o
+ * mesmo que o servidor usa.
+ */
+function capsDoCanal(provider: string | null | undefined) {
+  const chave = (provider ?? DEFAULT_CHANNEL_PROVIDER) as ChannelProvider;
+  const caps = CHANNEL_CAPABILITIES[chave];
+  // Provider fora da matriz: tudo desligado. Um canal futuro cujo suporte
+  // ninguém declarou não pode estrear oferecendo ações que não existem.
+  return {
+    quotedReply: caps?.quotedReply ?? false,
+    sticker: caps?.sticker ?? false,
+    location: caps?.location ?? false,
+    contactCard: caps?.contactCard ?? false,
+    menuMaxOptions: caps?.menuMaxOptions ?? null,
+  };
+}
+
+function podeCitarNoCanal(provider: string | null | undefined): boolean {
+  return capsDoCanal(provider).quotedReply;
+}
 
 function tabToFilter(tab: InboxFiltersValue["tab"]): Partial<ConversationsFilters> {
   switch (tab) {
@@ -179,18 +208,29 @@ export function InboxLayout({ initialSelectedId = null }: InboxLayoutProps = {})
       <div className="flex h-full min-h-0 flex-col">
         {selectedConversation ? (
           <>
-            <ConversationHeader conversation={selectedConversation} />
-            <div className="min-h-0 flex-1 overflow-hidden">
-              <ChatThread conversationId={selectedConversation.id} />
-            </div>
-            <RetentionNotice conversationId={selectedConversation.id} />
-            <Composer
-              ref={composerRef}
-              conversationId={selectedConversation.id}
-              blockedReason={blockedReason}
-              disabled={selectedConversation.status === "closed"}
-              contactName={selectedConversation.contacts?.name ?? null}
-            />
+            {/* O provider vem da SESSÃO da conversa, e a pergunta que se faz a
+                ele é de CAPACIDADE, nunca "que canal é este" — o lint de canal
+                proíbe o nome do provider fora de `lib/channels/`. Canal que não
+                cita não mostra o gesto, em vez de mostrar e falhar depois
+                (spec 006, FR-018). */}
+            <ReplyTargetProvider
+              key={selectedConversation.id}
+              habilitado={podeCitarNoCanal(selectedConversation.channel_sessions?.provider)}
+            >
+              <ConversationHeader conversation={selectedConversation} />
+              <div className="min-h-0 flex-1 overflow-hidden">
+                <ChatThread conversationId={selectedConversation.id} />
+              </div>
+              <RetentionNotice conversationId={selectedConversation.id} />
+              <Composer
+                ref={composerRef}
+                conversationId={selectedConversation.id}
+                blockedReason={blockedReason}
+                disabled={selectedConversation.status === "closed"}
+                contactName={selectedConversation.contacts?.name ?? null}
+                caps={capsDoCanal(selectedConversation.channel_sessions?.provider)}
+              />
+            </ReplyTargetProvider>
           </>
         ) : selectionNotFound ? (
           <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">

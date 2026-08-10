@@ -142,3 +142,91 @@ describe("gatewayAdapter.resolveRecipient", () => {
     ).toBe("+5585999990000");
   });
 });
+
+/**
+ * Spec 006 — os campos que o gateway JÁ aceitava e o CRM nunca preenchia.
+ *
+ * Nenhum deles é campo novo do outro lado: `quoted_id`, `latitude`, `longitude`,
+ * `nome`, `endereco` e `contatos` estão no `envioRequest` do gateway desde antes
+ * desta feature. O defeito era só de cá — e é por isso que citar era impossível e
+ * `location`/`contact` eram tipos anunciados e inenviáveis.
+ */
+describe("gatewayAdapter.send — formas de mensagem da spec 006", () => {
+  async function corpoEnviado(envelope: Parameters<typeof gatewayAdapter.send>[0]) {
+    fetchMock.mockResolvedValue(respostaOk({ message_id: "wamid.OK" }));
+    await gatewayAdapter.send(envelope);
+    return JSON.parse((fetchMock.mock.calls[0]![1] as RequestInit).body as string);
+  }
+
+  it("a CITAÇÃO viaja como quoted_id", async () => {
+    const corpo = await corpoEnviado({
+      sessionRef: "conn-1",
+      to: "+5585999990000",
+      kind: "text",
+      body: "sim, cobre",
+      replyToExternalId: "wamid.ORIGINAL",
+    });
+    expect(corpo.quoted_id).toBe("wamid.ORIGINAL");
+  });
+
+  it("sem citação, o campo NÃO vai — corpo enxuto é contrato, não estilo", async () => {
+    const corpo = await corpoEnviado({
+      sessionRef: "conn-1",
+      to: "+5585999990000",
+      kind: "text",
+      body: "oi",
+    });
+    expect(corpo).not.toHaveProperty("quoted_id");
+  });
+
+  it("a citação acompanha MÍDIA também, não só texto", async () => {
+    const corpo = await corpoEnviado({
+      sessionRef: "conn-1",
+      to: "+5585999990000",
+      kind: "image",
+      replyToExternalId: "wamid.ORIGINAL",
+      media: { url: "https://s/foto.jpg", mime: "image/jpeg", filename: "foto.jpg", caption: "essa" },
+    });
+    expect(corpo.quoted_id).toBe("wamid.ORIGINAL");
+    expect(corpo.midia_url).toBe("https://s/foto.jpg");
+  });
+
+  it("localização vai como latitude/longitude/nome/endereco", async () => {
+    const corpo = await corpoEnviado({
+      sessionRef: "conn-1",
+      to: "+5585999990000",
+      kind: "location",
+      location: { lat: -23.5613, lng: -46.6565, name: "Clínica X", address: "Av. Paulista, 1000" },
+    });
+    expect(corpo.latitude).toBe(-23.5613);
+    expect(corpo.longitude).toBe(-46.6565);
+    expect(corpo.nome).toBe("Clínica X");
+    expect(corpo.endereco).toBe("Av. Paulista, 1000");
+  });
+
+  it("contato vai como `contatos` com nome e telefone — UM telefone por entrada", async () => {
+    // O gateway modela `contatoRequest{Nome,Telefone}`, não uma lista de números.
+    // Medido antes de escrever: mandar `telefones: []` faria todo envio de contato
+    // voltar 400 falando de campo obrigatório ausente.
+    const corpo = await corpoEnviado({
+      sessionRef: "conn-1",
+      to: "+5585999990000",
+      kind: "contact",
+      contacts: [{ name: "Dra. Ana", phones: ["+5511999998888", "+5511777776666"] }],
+    });
+    expect(corpo.contatos).toEqual([
+      { nome: "Dra. Ana", telefone: "+5511999998888" },
+      { nome: "Dra. Ana", telefone: "+5511777776666" },
+    ]);
+  });
+
+  it("o `tipo` continua sendo o vocabulário inglês compartilhado com o gateway", async () => {
+    const corpo = await corpoEnviado({
+      sessionRef: "conn-1",
+      to: "+5585999990000",
+      kind: "location",
+      location: { lat: 1, lng: 2 },
+    });
+    expect(corpo.tipo).toBe("location");
+  });
+});

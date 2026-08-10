@@ -18,9 +18,16 @@ import {
   resolveSessionRef,
   type ChannelSessionRef,
 } from "@/lib/channels";
+import { capabilitiesOf } from "@/lib/channels/capabilities";
+import { CAPABILITY_POR_TIPO } from "@/lib/messaging/payloads";
 import { adotarCanalVivo } from "@/lib/channels/adocao";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { isMediaPathOwnedBy } from "@/lib/messaging/media/upload-validation";
+import {
+  ehEventoSobreMensagem,
+  projetarEventos,
+} from "@/lib/messaging/projection/project-events";
+import { PROJECAO_VAZIA } from "@/lib/messaging/projection/types";
 import type { ListMessagesQuery, SendMessageInput } from "@/lib/schemas";
 import { sendTemplateForSession } from "@/lib/channels/meta/send-template-for-session";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -215,6 +222,19 @@ export async function listMessagesHandler(
     .select(MSG_COLS)
     .eq("conversation_id", conversationId)
     .eq("organization_id", ctx.organization_id)
+    // A REAÇÃO SAI DA LINHA DO TEMPO AQUI, no SQL (spec 006, FR-002).
+    //
+    // Ela continua sendo uma linha de `messages` — é a fonte da verdade do
+    // emoji —, mas como ITEM da conversa ela é o defeito: um emoji solto,
+    // cronologicamente posicionado como se o cliente tivesse mandado "👍" em vez
+    // de ter reagido a alguma coisa. A projeção a devolve presa ao alvo.
+    //
+    // No SQL, e não em JavaScript depois, porque filtrar depois encolheria a
+    // página abaixo de `limit` e desalinharia o cursor. `type` é `not null`, então
+    // `neq` não cai na armadilha de `NOT (null = x)` ser desconhecido — que é o
+    // motivo de o evento de apagamento ser filtrado adiante, em memória: ele mora
+    // num campo de `metadata` que é nulo na esmagadora maioria das linhas.
+    .neq("type", "reaction")
     .order("sent_at", { ascending: false })
     .order("id", { ascending: false })
     .limit(q.limit + 1);
@@ -242,10 +262,26 @@ export async function listMessagesHandler(
   const cursor =
     hasMore && oldest ? encodeMsgCursor({ sent_at: oldest.sent_at, id: oldest.id }) : null;
 
+  // O EVENTO DE APAGAMENTO também não é item da conversa.
+  //
+  // Ele sai aqui, e não no SQL, porque mora em `metadata->>'original_type'` — que
+  // é nulo na esmagadora maioria das linhas, e `not.eq` sobre coluna nula devolve
+  // desconhecido, o que faria o Postgres descartar quase TODAS as mensagens em
+  // silêncio. O cursor já foi calculado acima, sobre a página completa, então
+  // remover aqui não desalinha a paginação: só encurta a página nas raras vezes
+  // em que houve apagamento.
+  const visiveis = page.filter((m) => !ehEventoSobreMensagem(m));
+
+  const projecoes = await projetarEventos(supabase, ctx.organization_id, visiveis);
+  const comProjecao = visiveis.map((m) => ({
+    ...m,
+    projection: projecoes.get(m.id) ?? PROJECAO_VAZIA,
+  }));
+
   // A RESPOSTA continua cronológica (antigo → novo), igual a antes: o consumidor
   // renderiza de cima para baixo sem mudar nada. O que mudou foi QUAIS mensagens
   // entram na página, não a ordem em que saem.
-  return { messages: page.slice().reverse(), cursor, has_more: hasMore };
+  return { messages: comProjecao.slice().reverse(), cursor, has_more: hasMore };
 }
 
 // ---------------------------------------------------------------------------
@@ -338,6 +374,98 @@ export async function sendMessageHandler(
     );
   }
 
+  // ── Capacidade do canal ANTES da rede (spec 006, FR-018/FR-019) ───────────
+  //
+  // A pergunta é sobre o que o CANAL permite, nunca sobre qual provider é — o
+  // lint de canal proíbe o nome fora de `lib/channels/`. A tela já não deveria
+  // ter oferecido a ação; a API não confia na tela.
+  const capsDoCanal = capabilitiesOf(c.channel_sessions?.provider ?? DEFAULT_CHANNEL_PROVIDER);
+  const capExigida = CAPABILITY_POR_TIPO[input.type];
+  if (capExigida && capExigida !== "menuMaxOptions" && !capsDoCanal[capExigida]) {
+    throw new ApiError(
+      422,
+      "channel_capability_unsupported",
+      undefined,
+      ctx.requestId,
+      `O canal desta conversa não envia mensagem do tipo "${input.type}".`,
+    );
+  }
+  if (capExigida === "menuMaxOptions") {
+    const teto = capsDoCanal.menuMaxOptions;
+    if (teto === null) {
+      throw new ApiError(
+        422,
+        "channel_capability_unsupported",
+        undefined,
+        ctx.requestId,
+        "O canal desta conversa não envia menu de opções.",
+      );
+    }
+    // O teto é do CANAL e é imposto ANTES da rede (FR-019). Deixar passar faria o
+    // provedor recusar, e o corretor descobriria o limite pelo erro — com o
+    // número dele, não com o nosso.
+    const opcoes = input.menu?.options.length ?? 0;
+    if (opcoes > teto) {
+      throw new ApiError(
+        422,
+        "validation_failed",
+        undefined,
+        ctx.requestId,
+        `Este canal aceita no máximo ${teto} opções no menu; você enviou ${opcoes}.`,
+      );
+    }
+  }
+  if (input.reply_to_message_id && !capsDoCanal.quotedReply) {
+    throw new ApiError(
+      422,
+      "channel_capability_unsupported",
+      undefined,
+      ctx.requestId,
+      "O canal desta conversa não permite responder citando uma mensagem.",
+    );
+  }
+
+  // ── O alvo da citação (FR-011/FR-012) ─────────────────────────────────────
+  //
+  // Resolvido AQUI, antes do insert, porque uma citação que não resolve não pode
+  // virar mensagem: sair sem a citação em silêncio é o desfecho que a FR-012
+  // proíbe — o cliente receberia a resposta solta, e ninguém saberia.
+  let replyToExternalId: string | undefined;
+  if (input.reply_to_message_id) {
+    const { data: alvo } = await supabase
+      .from("messages")
+      .select("id, external_id, conversation_id")
+      .eq("id", input.reply_to_message_id)
+      .eq("organization_id", c.organization_id)
+      .eq("conversation_id", c.id)
+      .maybeSingle();
+
+    if (!alvo) {
+      // 404, e não 403: confirmar a existência de uma linha de outra organização
+      // já é vazamento — a resposta diria "existe, mas não é sua".
+      throw new ApiError(
+        404,
+        "not_found",
+        undefined,
+        ctx.requestId,
+        "Mensagem citada não encontrada nesta conversa.",
+      );
+    }
+    const externo = (alvo as { external_id: string | null }).external_id;
+    if (!externo) {
+      // Mensagem ainda em envio não tem endereço no canal. Recusar é o certo:
+      // mandar sem a citação entregaria uma resposta ambígua sem avisar ninguém.
+      throw new ApiError(
+        422,
+        "reply_target_not_addressable",
+        undefined,
+        ctx.requestId,
+        "A mensagem citada ainda não foi confirmada pelo canal. Tente de novo em instantes.",
+      );
+    }
+    replyToExternalId = externo;
+  }
+
   const now = new Date().toISOString();
   const insertRow = {
     organization_id: c.organization_id,
@@ -358,6 +486,14 @@ export async function sendMessageHandler(
     metadata: {
       ...(input.metadata ?? {}),
       ...(ctx.actor.type === "ai_agent" ? { ai_actor_id: ctx.actor.id } : {}),
+      // A citação é gravada no MESMO campo em que ela chega do canal. É o que faz
+      // a projeção exibir a citação da nossa mensagem sem nenhum ramo especial —
+      // e o que faz a bolha do corretor mostrar o trecho igual à do cliente.
+      ...(replyToExternalId ? { reply_to_external_id: replyToExternalId } : {}),
+      ...(input.location ? { location: input.location } : {}),
+      ...(input.contacts ? { contacts: input.contacts } : {}),
+      ...(input.menu ? { menu: input.menu } : {}),
+      ...(input.cta_url ? { cta_url: input.cta_url } : {}),
     },
   };
 
@@ -489,6 +625,7 @@ export async function sendMessageHandler(
           sessionRef: resolveSessionRef(c.channel_sessions),
           to: chatId,
           kind: input.type,
+          replyToExternalId,
           media: {
             url: signed.signedUrl,
             mime: input.media_mime ?? "application/octet-stream",
@@ -502,6 +639,14 @@ export async function sendMessageHandler(
           to: chatId,
           kind: input.type,
           body: input.body ?? "",
+          replyToExternalId,
+          // Localização e contato viajam como carga própria, não como texto: o
+          // canal precisa de coordenada e de cartão, não de uma frase que os
+          // descreva.
+          location: input.location,
+          contacts: input.contacts,
+          menu: input.menu,
+          ctaUrl: input.cta_url,
         }));
       }
       await removerEcoDoProprioEnvio(

@@ -206,7 +206,7 @@ export async function ingerirEnvelope(
     sessao.organization_id,
     conversationId,
     msg.direction,
-    (msg.body ?? `[${msg.type}]`).slice(0, 280),
+    previewDaListagem(msg.type, msg.body, envelope.metadata),
     agora,
   );
 
@@ -414,6 +414,51 @@ async function upsertConversa(
     return null;
   }
   return (data as string) ?? null;
+}
+
+/**
+ * A prévia que a LISTAGEM de conversas mostra.
+ *
+ * Era `body ?? "[tipo]"`, e isso produzia duas linhas ruins na lista:
+ *
+ * - **reação**: o corpo de uma reação é o emoji, então a conversa aparecia com
+ *   um "👍" solto como se fosse a última fala do cliente;
+ * - **apagamento e formas sem corpo**: `[system]` ou `[location]`, que são nomes
+ *   internos vazando para a tela de quem vende plano de saúde.
+ *
+ * Aqui a prévia diz o que aconteceu, em português. É a mesma promessa da bolha
+ * (nunca em branco, nunca críptico), um nível acima — na tela que o corretor
+ * varre antes de abrir qualquer conversa.
+ */
+export function previewDaListagem(
+  tipo: string,
+  body: string | null,
+  metadata: Record<string, unknown>,
+): string {
+  const original = typeof metadata.original_type === "string" ? metadata.original_type : null;
+
+  if (tipo === "reaction") {
+    const emoji = (body ?? "").trim();
+    return emoji === "" ? "Reação removida" : `Reagiu ${emoji}`;
+  }
+  if (tipo === "system" && original && /^(revoke|revoked|delete|deleted|message_delete)$/.test(original)) {
+    return "Mensagem apagada";
+  }
+
+  const texto = (body ?? "").trim();
+  if (texto !== "") return texto.slice(0, 280);
+
+  const ROTULO: Record<string, string> = {
+    image: "Foto",
+    video: "Vídeo",
+    audio: "Áudio",
+    document: "Documento",
+    sticker: "Figurinha",
+    location: "Localização",
+    contact: "Contato",
+    template: "Mensagem modelo",
+  };
+  return ROTULO[tipo] ?? "Nova mensagem";
 }
 
 async function carimbarConversa(

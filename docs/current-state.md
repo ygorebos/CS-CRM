@@ -394,3 +394,42 @@ apagado.
 conserto do gateway, pousando na conversa certa. As seis que existem são
 anteriores e foram repontadas pela 0131. A prova depende do dono responder com a
 tela aberta — `.superpowers/vigia-resposta.mjs` faz a medição em um comando.
+
+---
+
+## Formas de mensagem do WhatsApp (spec 006) — 2026-08-09
+
+**O que estava quebrado, e agora não está.** O CRM enviava **5** das 17 formas que o canal
+aceita, e a conversa **escondia** parte do que o cliente fazia. Dois dos cinco tipos que a API
+anunciava — `location` e `contact` — eram **impossíveis de enviar**: o corpo da requisição não
+tinha onde carregar coordenada nem cartão, então o pedido saía incompleto e o gateway recusava
+com "campos obrigatórios ausentes". Anunciado e inenviável é pior que ausente.
+
+**Pronto e coberto por teste:**
+
+- **Leitura fiel da conversa.** Citação, reação presa ao alvo, marca de mensagem apagada (com o
+  conteúdo preservado, decisão do dono), localização, cartão de contato, e rótulo para forma que
+  esta versão não sabe exibir. **Nenhuma bolha em branco** em nenhuma hipótese.
+- **Responder citando**, do gesto na mensagem ao envio.
+- **Enviar** localização, cartão de contato, figurinha (como figurinha, não como imagem) e menu de
+  opções clicáveis.
+- **Contrato pronto** para botão de link (`cta_url`) e pedido de localização (`location_request`).
+- **Vocabulário de tipo com UMA fonte** (`lib/messaging/message-types.ts`), da qual o envelope de
+  entrada e o enum de envio derivam, com par novo no invariante contra o CHECK do banco. Antes
+  eram três listas sem gate entre elas.
+- Duas migrations aditivas: **0132** (índice da projeção) e **0133** (`menu`, `cta_url`,
+  `location_request` no CHECK).
+
+**Incompleto, e por quê:**
+
+- **Enviar reação e apagar para todos: NÃO existe.** A operação não existe na porta de tráfego
+  para conversa comum. Fora do escopo por decisão do dono (FR-022) — vira spec no repo do gateway.
+  *Ler* reação e apagamento do cliente **está pronto**.
+- **Apagamento não chega pelo canal não-oficial**, que é o que a Central cria hoje. A leitura
+  funciona por evento e serve qualquer canal que o entregue; a prova em produção só existe no canal
+  oficial. Detalhe em `docs/testing/user-journey-map.md`.
+- **`cta_url` e `location_request` não têm tela**, de propósito: as duas são `false` para todo
+  canal provisionável hoje (só o oficial as suporta, e a Central não o cria). Construir a tela
+  antes seria a tela morta que o Princípio II proíbe.
+- **Nada foi provado com aparelho real.** Formato de terceiro (citação, vCard, menu) e latência só
+  se sabem medindo o terceiro. Está declarado como pendência de ambiente, não como coberto.

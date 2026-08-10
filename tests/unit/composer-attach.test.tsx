@@ -24,10 +24,22 @@ function renderComposer() {
   const qc = new QueryClient();
   return render(
     <QueryClientProvider client={qc}>
-      <Composer conversationId="conv-1" />
+      <Composer caps={CAPS_DE_TESTE} conversationId="conv-1" />
     </QueryClientProvider>,
   );
 }
+
+/**
+ * Canal que permite tudo que o menu de anexo oferece. O teste é sobre o
+ * COMPOSER, não sobre a matriz de canal — quem vigia a matriz é
+ * `canal-capacidades-matriz.test.ts`.
+ */
+const CAPS_DE_TESTE = {
+  sticker: true,
+  location: true,
+  contactCard: true,
+  menuMaxOptions: 10,
+};
 
 describe("Composer + anexos", () => {
   beforeEach(() => {

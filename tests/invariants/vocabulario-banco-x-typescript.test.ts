@@ -132,6 +132,22 @@ const PARES: Array<{
     simbolo: "CaseEventKind",
   },
   {
+    tabela: "messages",
+    coluna: "type",
+    // lib/messaging/message-types.ts → MessageType.
+    //
+    // A coluna mais exercitada do sistema estava DESCOBERTA por este invariante,
+    // e era a que tinha mais listas: `TIPOS_CONHECIDOS` (o que entra pelo
+    // envelope), `messageTypeSchema` (o que sai pela API) e o CHECK. Três, sem
+    // gate entre elas — exatamente o eixo que este arquivo existe para vigiar.
+    //
+    // O par aponta para a UNIÃO (entrada + saída), porque é ela que espelha o
+    // CHECK. Os dois subconjuntos derivam do mesmo símbolo com guarda de
+    // compilação, então não há como um crescer sem o outro saber.
+    arquivo: "lib/messaging/message-types.ts",
+    simbolo: "MessageType",
+  },
+  {
     tabela: "system_update_runs",
     coluna: "status",
     // lib/system/update-run.ts → RunStatus

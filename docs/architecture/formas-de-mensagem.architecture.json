@@ -1,0 +1,157 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Formas de mensagem — o que o cliente faz, e o que o corretor vê",
+    "subtitle": "citação, reação e apagamento chegam pelo mesmo campo; a projeção é o que os torna visíveis",
+    "output": "formas-de-mensagem.html",
+    "quality_profile": "standard"
+  },
+  "lanes": [
+    { "id": "mundo", "label": "Fora do CRM" },
+    { "id": "gateway", "label": "gateway_go (instância única, sem réplica)" },
+    { "id": "entrada", "label": "Entrada do CRM" },
+    { "id": "dados", "label": "Banco" },
+    { "id": "leitura", "label": "Leitura" },
+    { "id": "saida", "label": "Saída" },
+    { "id": "humano", "label": "O que a pessoa vê" }
+  ],
+  "mainPath": ["cliente", "normalizador", "envelope", "ingest", "mensagens", "projecao", "bolha"],
+  "nodes": [
+    {
+      "id": "cliente",
+      "lane": "mundo",
+      "col": 1,
+      "type": "external",
+      "label": "O cliente no WhatsApp",
+      "sublabel": "cita · reage · apaga · manda lugar e contato"
+    },
+    {
+      "id": "normalizador",
+      "lane": "gateway",
+      "col": 2,
+      "type": "service",
+      "label": "internal/normalizer",
+      "sublabel": "o alvo de citação, reação e apagamento cai no MESMO campo: ReplyToMsgID"
+    },
+    {
+      "id": "envelope",
+      "lane": "gateway",
+      "col": 3,
+      "type": "contract",
+      "label": "envelope v1",
+      "sublabel": "message.reply_to_external_id · metadata.reaction_emoji · metadata.location"
+    },
+    {
+      "id": "ingest",
+      "lane": "entrada",
+      "col": 4,
+      "type": "service",
+      "label": "lib/gateway/ingest.ts",
+      "sublabel": "grava metadata.reply_to_external_id — já fazia isto antes da spec 006"
+    },
+    {
+      "id": "mensagens",
+      "lane": "dados",
+      "col": 5,
+      "type": "table",
+      "label": "public.messages",
+      "sublabel": "reação e apagamento são LINHAS; o vínculo é por external_id (único por org)"
+    },
+    {
+      "id": "indice",
+      "lane": "dados",
+      "col": 5,
+      "type": "index",
+      "label": "idx_messages_reply_to_external_id",
+      "sublabel": "migration 0132 · parcial · organization_id lidera para o filtro ser seek"
+    },
+    {
+      "id": "projecao",
+      "lane": "leitura",
+      "col": 6,
+      "type": "service",
+      "label": "lib/messaging/projection/project-events.ts",
+      "sublabel": "2 consultas por página; parte do ALVO, nunca do evento"
+    },
+    {
+      "id": "handler",
+      "lane": "leitura",
+      "col": 6,
+      "type": "route",
+      "label": "GET /api/v1/conversations/[id]/messages",
+      "sublabel": "tira reação e apagamento da linha do tempo; anexa `projection`"
+    },
+    {
+      "id": "bolha",
+      "lane": "humano",
+      "col": 7,
+      "type": "ui",
+      "label": "MessageBubble + message/*",
+      "sublabel": "citação · reação presa · marca de apagada · lugar · contato · rótulo"
+    },
+    {
+      "id": "composer",
+      "lane": "humano",
+      "col": 7,
+      "type": "ui",
+      "label": "Composer + composer/*",
+      "sublabel": "citar · figurinha · localização · contato · opções clicáveis"
+    },
+    {
+      "id": "capacidades",
+      "lane": "saida",
+      "col": 6,
+      "type": "policy",
+      "label": "lib/channels/capabilities.ts",
+      "sublabel": "a tela pergunta o que o canal PERMITE, nunca qual provider é"
+    },
+    {
+      "id": "cargas",
+      "lane": "saida",
+      "col": 6,
+      "type": "contract",
+      "label": "lib/messaging/payloads.ts",
+      "sublabel": "tipo aceito tem carga declarada — não compila sem ela"
+    },
+    {
+      "id": "adapter",
+      "lane": "saida",
+      "col": 6,
+      "type": "service",
+      "label": "lib/channels/adapters/gateway.ts",
+      "sublabel": "quoted_id · latitude/longitude · contatos · opcoes · rotulo_botao"
+    },
+    {
+      "id": "vocabulario",
+      "lane": "dados",
+      "col": 4,
+      "type": "contract",
+      "label": "lib/messaging/message-types.ts",
+      "sublabel": "uma fonte para o envelope, para o envio e para o CHECK do banco"
+    }
+  ],
+  "edges": [
+    { "from": "cliente", "to": "normalizador", "label": "webhook do provedor" },
+    { "from": "normalizador", "to": "envelope", "label": "normaliza" },
+    { "from": "envelope", "to": "ingest", "label": "POST assinado" },
+    { "from": "ingest", "to": "mensagens", "label": "insert idempotente" },
+    { "from": "ingest", "to": "vocabulario", "label": "tipo desconhecido vira system + original_type" },
+    { "from": "mensagens", "to": "projecao", "label": "quem aponta para esta página?" },
+    { "from": "indice", "to": "projecao", "label": "torna a pergunta um seek" },
+    { "from": "projecao", "to": "handler", "label": "mapa id → projeção" },
+    { "from": "handler", "to": "bolha", "label": "data[].projection" },
+    { "from": "bolha", "to": "composer", "label": "gesto de responder prepara a citação" },
+    { "from": "composer", "to": "capacidades", "label": "posso oferecer esta ação?" },
+    { "from": "composer", "to": "cargas", "label": "valida a carga antes de sair" },
+    { "from": "cargas", "to": "adapter", "label": "POST /api/v1/messages" },
+    { "from": "capacidades", "to": "adapter", "label": "recusa antes da rede" },
+    { "from": "adapter", "to": "envelope", "label": "o envio volta como eco, pelo mesmo caminho" },
+    { "from": "vocabulario", "to": "cargas", "label": "tipo novo exige carga" }
+  ],
+  "notes": [
+    "O que a spec 006 NÃO faz: enviar reação e apagar para todos. A operação não existe na porta de tráfego para conversa comum, e mexer nela é outro repositório com deploy próprio (FR-022). LER as duas está dentro — a informação já chega.",
+    "O apagamento não chega pelo canal não-oficial: mapUazapiType não tem o caso. A leitura funciona por evento e serve qualquer canal que o entregue; a prova em produção só existe no canal oficial. Buraco declarado em docs/testing/user-journey-map.md.",
+    "external_id é único POR ORGANIZAÇÃO. Toda consulta da projeção filtra organization_id — sem isso, a reação de um cliente apareceria na conversa de outra empresa."
+  ]
+}

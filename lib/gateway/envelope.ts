@@ -26,6 +26,8 @@
  */
 import { z } from "zod";
 
+import { type InboundMessageType, isMessageType } from "@/lib/messaging/message-types";
+
 /** Versão que este parser entende. Envelope mais novo é aceito, não recusado. */
 export const ENVELOPE_VERSION_SUPORTADA = 1;
 
@@ -35,19 +37,11 @@ export const ENVELOPE_VERSION_SUPORTADA = 1;
  * Descartar perderia a mensagem inteira por causa de um rótulo — e o cliente que
  * mandou um "postback" — um clique de botão — continua sendo um cliente
  * esperando resposta.
+ *
+ * A lista NÃO mora aqui: ela é o vocabulário de `lib/messaging/message-types.ts`,
+ * que é o mesmo que o CHECK do banco cobra e o mesmo do qual o envio deriva.
+ * Escrevê-la de novo aqui foi o que criou três listas sem gate entre elas.
  */
-const TIPOS_CONHECIDOS = [
-  "text",
-  "image",
-  "video",
-  "audio",
-  "document",
-  "sticker",
-  "location",
-  "contact",
-  "reaction",
-  "system",
-] as const;
 
 /** O que o envelope pode carregar. `read_watermark` é aceito e ignorado. */
 const EVENT_KINDS = ["new_message", "status_update", "read_watermark"] as const;
@@ -150,7 +144,7 @@ export interface EnvelopeNormalizado {
     externalId: string;
     direction: "inbound" | "outbound";
     /** Já mapeado para o vocabulário de `messages.type`. */
-    type: (typeof TIPOS_CONHECIDOS)[number];
+    type: InboundMessageType;
     body: string | null;
     replyToExternalId: string | null;
     isGroup: boolean;
@@ -283,7 +277,7 @@ export function parseEnvelope(bruto: unknown): ResultadoParse {
   let message: EnvelopeNormalizado["message"] = null;
   if (e.message) {
     const tipoBruto = e.message.type;
-    const conhecido = (TIPOS_CONHECIDOS as readonly string[]).includes(tipoBruto);
+    const conhecido = isMessageType(tipoBruto);
     if (!conhecido) {
       // Mensagem preservada, rótulo sinalizado. Descartar por causa do tipo
       // perderia a conversa; um `postback` é uma pessoa clicando num botão.
@@ -293,7 +287,7 @@ export function parseEnvelope(bruto: unknown): ResultadoParse {
     message = {
       externalId: e.message.external_id,
       direction: e.message.direction,
-      type: conhecido ? (tipoBruto as (typeof TIPOS_CONHECIDOS)[number]) : "system",
+      type: conhecido ? tipoBruto : "system",
       body: e.message.body ?? null,
       replyToExternalId: e.message.reply_to_external_id ?? null,
       isGroup: e.message.is_group ?? false,

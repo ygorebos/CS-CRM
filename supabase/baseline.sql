@@ -8541,14 +8541,23 @@ create policy tenant_isolation_meta_templates_all on public.meta_templates
 -- (template e cobrado por entrega), conformidade de janela, e o que o contato viu.
 -- Backfill: nenhum por construcao — o conjunto antigo e subconjunto do novo.
 
+-- ⚠️ ESTE E O BLOCO UNICO de messages_type_check no baseline. Migration que
+-- amplia o vocabulario EDITA a lista abaixo — nao acrescenta outro bloco.
+-- Dois blocos fazem a tabela ficar SEM constraint entre o drop e o add que
+-- funciona, e num banco com dado do vocabulario novo os blocos antigos falham em
+-- cadeia ao re-aplicar. Vigiado por tests/unit/baseline-constraint-reconstruida.ts.
+-- Vocabulario final: 0091 acrescentou 'template'; 0133 acrescentou os tres
+-- interativos.
 do $$ begin
   alter table public.messages drop constraint if exists messages_type_check;
   alter table public.messages add constraint messages_type_check
     check (type = any (array[
       'text', 'image', 'video', 'audio', 'document', 'sticker',
       'location', 'contact', 'reaction', 'system',
-      -- novo: envio de template aprovado (canal oficial, fora da janela de 24h)
-      'template'
+      -- 0091: envio de template aprovado (canal oficial, fora da janela de 24h)
+      'template',
+      -- 0133: formas interativas que o canal entrega e o CRM passa a registrar
+      'menu', 'cta_url', 'location_request'
     ]));
 end $$;
 
@@ -10288,5 +10297,28 @@ update public.contacts c
        updated_at     = now()
   from pares p
  where c.id = p.duplicado;
+
+-- ---- índice da projeção de eventos sobre mensagens (migration 0132) ----
+-- Racional completo no arquivo da migration. Em uma linha: citação, reação e
+-- apagamento chegam pelo MESMO campo (`metadata->>'reply_to_external_id'`) e a
+-- leitura passa a projetá-los na mensagem-alvo. Sem este índice, cada página de
+-- conversa vira varredura de `messages` — defeito que só aparece na conversa
+-- grande, nunca no teste pequeno.
+--
+-- Parcial (só linhas que apontam para alguma outra) para não pesar no INSERT do
+-- caminho mais quente do sistema. `organization_id` lidera porque `external_id` é
+-- único POR ORGANIZAÇÃO, e o filtro de tenant precisa ser seek.
+--
+-- Aditivo: nada reescrito, nada apagado, sem backfill.
+create index if not exists idx_messages_reply_to_external_id
+  on public.messages (organization_id, ((metadata ->> 'reply_to_external_id')))
+  where metadata ->> 'reply_to_external_id' is not null;
+
+-- ---- message type: menu, cta_url, location_request (migration 0133) ----
+-- SEM BLOCO PROPRIO, de proposito. Os tres valores ja estao no bloco unico de
+-- messages_type_check, la em cima — a regra e "uma constraint, um bloco"
+-- (tests/unit/baseline-constraint-reconstruida.ts). Reconstruir a constraint aqui
+-- deixaria a tabela sem constraint entre o drop e o add, e faria o bloco anterior
+-- falhar ao re-aplicar num banco que ja tenha uma linha 'menu'.
 
 notify pgrst, 'reload schema';

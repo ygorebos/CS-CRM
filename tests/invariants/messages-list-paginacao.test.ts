@@ -41,6 +41,19 @@ import { sql } from "./gov-helpers";
 // duplo mínimo do PostgrestQueryBuilder — só o que listMessagesHandler usa
 // ---------------------------------------------------------------------------
 
+/**
+ * Traduz o nome de coluna do estilo PostgREST para SQL.
+ *
+ * `metadata->>reply_to_external_id` (como o cliente do Supabase o escreve) vira
+ * `metadata->>'reply_to_external_id'`. Sem isto, a consulta da projeção viraria
+ * SQL inválido e o invariante reprovaria por defeito do instrumento — que é o
+ * modo de falha mais caro, porque manda consertar o código certo.
+ */
+function pgCol(col: string): string {
+  const m = /^([a-z_]+)->>([a-z_]+)$/i.exec(col);
+  return m ? `${m[1]}->>'${m[2]}'` : col;
+}
+
 function sqlString(v: string): string {
   return `'${v.replace(/'/g, "''")}'`;
 }
@@ -95,6 +108,8 @@ type Res = { data: unknown; error: { message: string } | null };
 class FakeQuery implements PromiseLike<Res> {
   private cols = "*";
   private eqs: Array<{ col: string; val: unknown }> = [];
+  private neqs: Array<{ col: string; val: unknown }> = [];
+  private ins: Array<{ col: string; vals: unknown[] }> = [];
   private ors: string[] = [];
   // ACUMULA os order: o handler encadeia .order("sent_at").order("id") e o
   // desempate por id é o que segura a borda da página quando há sent_at igual.
@@ -113,6 +128,27 @@ class FakeQuery implements PromiseLike<Res> {
     this.eqs.push({ col, val });
     return this;
   }
+  /**
+   * `neq` existe porque o handler tira a REAÇÃO da linha do tempo no SQL
+   * (spec 006): ela continua sendo linha de `messages`, mas como item da conversa
+   * é o defeito — um emoji solto, posicionado como se fosse fala do cliente.
+   */
+  neq(col: string, val: unknown): this {
+    this.neqs.push({ col, val });
+    return this;
+  }
+  /**
+   * `in` existe porque a PROJEÇÃO passa por aqui: ela resolve citação, reação e
+   * apagamento com `external_id in (…)` e `metadata->>reply_to_external_id in (…)`.
+   *
+   * Traduzir o caminho jsonb do estilo PostgREST para SQL é o que faz este
+   * invariante medir a consulta DE VERDADE contra Postgres, em vez de um dublê
+   * respondendo o formato que eu escrevi.
+   */
+  in(col: string, vals: unknown[]): this {
+    this.ins.push({ col, vals });
+    return this;
+  }
   or(raw: string): this {
     this.ors.push(`(${splitTopLevel(raw).map(orNodeToSql).join(" or ")})`);
     return this;
@@ -128,7 +164,16 @@ class FakeQuery implements PromiseLike<Res> {
 
   private toSql(): string {
     const where = [
-      ...this.eqs.map((f) => `${f.col} = ${sqlString(String(f.val))}`),
+      ...this.eqs.map((f) => `${pgCol(f.col)} = ${sqlString(String(f.val))}`),
+      ...this.neqs.map((f) => `${pgCol(f.col)} <> ${sqlString(String(f.val))}`),
+      ...this.ins.map((f) =>
+        // Lista vazia vira `false` em vez de `in ()`, que é erro de sintaxe. O
+        // chamador já guarda contra isso; aqui é para o dublê não mentir sobre a
+        // causa se um dia deixar de guardar.
+        f.vals.length === 0
+          ? "false"
+          : `${pgCol(f.col)} in (${f.vals.map((v) => sqlString(String(v))).join(", ")})`,
+      ),
       ...this.ors,
     ];
     let q = `select ${this.cols} from public.${this.table}`;

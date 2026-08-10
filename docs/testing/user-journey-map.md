@@ -569,3 +569,57 @@ desfecho possível para um teste.
 **Por que isto está escrito aqui e não só no `tasks.md`.** Pelo mesmo motivo da seção da spec 001: a
 soma destas oito linhas é uma frase que nenhuma task diz sozinha — *a jornada de envio nunca foi
 percorrida inteira por uma pessoa*.
+
+---
+
+## Formas de mensagem do WhatsApp — cobertura e o buraco declarado (spec 006, 2026-08-09)
+
+A conversa **escondia** o que o cliente fazia. Citação, reação e apagamento chegavam pelo mesmo
+campo do envelope (`message.reply_to_external_id`) e o ingest já os gravava — nada disso era lido.
+O sintoma na tela: citação invisível, reação virando um emoji solto na linha do tempo, mensagem
+apagada e localização virando **bolha em branco**. Perder o que o cliente disse, sem sinal nenhum
+de que se perdeu.
+
+**O que a rede passou a vigiar (com a sabotagem que a torna verdadeira):**
+
+| Promessa | Onde | Sabotagem que a derruba |
+|---|---|---|
+| Reação fica presa ao alvo, não na linha do tempo | `projecao-de-eventos.test.ts` | devolver a reação à linha do tempo ⇒ 2 vermelhos |
+| Reação é ESTADO, não histórico | idem | acumular em vez de sobrescrever ⇒ 2 vermelhos |
+| A projeção não cruza organização | `projecao-de-eventos.test.ts` · `projecao-de-eventos-isolamento.test.ts` | remover o filtro de `organization_id` ⇒ 1 vermelho |
+| Nenhuma bolha em branco | `bolha-sem-buraco.test.tsx` | remover o rótulo de não-suportada ⇒ 2 vermelhos |
+| Mensagem apagada continua legível, marcada | idem | esconder o corpo ⇒ 1 vermelho |
+| A citação viaja como `quoted_id` | `adapters/gateway.test.ts` | descartar o campo ⇒ 2 vermelhos |
+| Contato vai com UM telefone por entrada | idem | mandar lista de telefones ⇒ 1 vermelho |
+| Tipo aceito é tipo enviável | `tipo-aceito-e-enviavel.test.ts` | tipo sem carga declarada não compila |
+| O teto do menu é do canal | `menu-limites-do-canal.test.ts` | teto fixo no schema ⇒ 1 vermelho |
+| Capacidade sem consumidor é código morto | `channel-capability-matrix.test.ts` | capability nova sem uso ⇒ 1 vermelho |
+| O vocabulário de tipo é UM só | `vocabulario-banco-x-typescript.test.ts` (par `messages.type`) | valor no banco sem o TypeScript ⇒ 1 vermelho |
+
+**O buraco, nomeado em vez de escondido:**
+
+**O apagamento de mensagem NÃO chega pelo canal não-oficial** — `mapUazapiType`
+(`gateway_go/internal/normalizer/uazapi.go`) reconhece dez tipos e nenhum é apagamento; o que não
+casa vira `unsupported`. O canal oficial **tem** o caso (`whatsapp_cloud.go`). O código de leitura
+do CRM funciona **por evento** e serve qualquer canal que o entregue, mas a prova em produção só
+existe no canal oficial — e o canal que a Central cria hoje é o não-oficial.
+
+Consertar mora na porta de tráfego, que ficou **fora do escopo por decisão do dono** (FR-022). O
+caso de apagamento em `tests/e2e/mensagens-leitura-fiel.spec.ts` semeia o evento na forma exata do
+envelope e prova a LEITURA — ele **não** prova que o canal manda, e não deve ser lido como se
+provasse.
+
+**O que ainda depende de ambiente real:**
+
+| Caso | O que falta |
+|---|---|
+| Citação chega ao aparelho apontando para a mensagem certa | celular real + gateway de pé — formato de terceiro só se sabe medindo o terceiro |
+| Localização abre no lugar certo; contato salva na agenda | idem |
+| Figurinha chega COMO figurinha, sem moldura de imagem | idem |
+| Menu chega clicável e o clique volta legível | idem |
+| Apagamento observado ponta a ponta | depende do canal oficial conectado, ou de trabalho no gateway |
+| Projeção em conversa de ≥500 mensagens | banco povoado — conversa de 10 mensagens não mede índice nenhum |
+
+**Enviar reação e apagar para todos continuam fora**, e não por esquecimento: a operação não existe
+na porta de tráfego para conversa comum (`tiposParaOperacao` não tem `reaction`; apagar só existe
+como passagem do canal não-oficial).

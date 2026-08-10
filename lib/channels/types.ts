@@ -41,6 +41,33 @@ export interface ChannelCapabilities {
   groups: "full" | "limited" | "none";
   /** Mensagem entregue gera custo → decisões de envio precisam considerar orçamento. */
   costPerMessage: boolean;
+
+  // ── Formas de mensagem (spec 006) ────────────────────────────────────────
+  //
+  // Uma por AÇÃO que a tela pode oferecer. Existem porque a tela precisa
+  // decidir o que desenhar, e a única pergunta que ela tem direito de fazer é
+  // "o canal permite?" — nunca "que canal é este?" (invariante 1 de
+  // `docs/doctrine/restricao-de-canal.md`). Oferecer e falhar depois é o defeito
+  // que a FR-014 da spec 004 nomeia: canal morto na mão do corretor.
+
+  /** Responder citando uma mensagem específica (`quoted_id` no envio). */
+  quotedReply: boolean;
+  /** Enviar figurinha como figurinha, e não como imagem. */
+  sticker: boolean;
+  /** Enviar localização (coordenada + nome + endereço). */
+  location: boolean;
+  /** Enviar cartão de contato (vCard). */
+  contactCard: boolean;
+  /**
+   * Enviar menu de opções clicáveis. `null` = o canal não tem menu; número =
+   * teto de opções que ele aceita. O teto é do CANAL, e é imposto antes do
+   * envio — descobrir pelo 422 do provedor é descobrir na cara do corretor.
+   */
+  menuMaxOptions: number | null;
+  /** Enviar botão que abre uma URL. */
+  ctaUrl: boolean;
+  /** Pedir a localização do contato com um botão. */
+  locationRequest: boolean;
 }
 
 /**
@@ -69,6 +96,25 @@ export interface OutboundEnvelope {
   kind: OutboundKind;
   body?: string;
   media?: OutboundMedia;
+
+  // ── Spec 006 ─────────────────────────────────────────────────────────────
+
+  /**
+   * Identificador NO CANAL da mensagem citada — já resolvido pelo handler a
+   * partir do UUID que a API recebeu.
+   *
+   * Chega resolvido, e não como UUID, porque traduzir linha do CRM em endereço do
+   * canal é trabalho de quem tem o banco na mão; o adapter só fala o dialeto.
+   */
+  replyToExternalId?: string;
+  /** Carga de `kind: "location"`. */
+  location?: { lat: number; lng: number; name?: string; address?: string };
+  /** Carga de `kind: "contact"`. */
+  contacts?: Array<{ name: string; phones: string[] }>;
+  /** Carga de `kind: "menu"`. O teto de opções já foi imposto por quem chama. */
+  menu?: { options: string[]; footer?: string };
+  /** Carga de `kind: "cta_url"`. */
+  ctaUrl?: { button_label: string; button_url: string };
 }
 
 /**

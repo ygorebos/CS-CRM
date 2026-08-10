@@ -110,4 +110,11 @@ export {
   Key,
   UserCircle,
   ClockCounterClockwise,
+  // formas de mensagem do WhatsApp (spec 006): citação, localização, cartão de
+  // contato e a marca de mensagem apagada
+  ArrowBendUpLeft,
+  ListBullets,
+  MapPin,
+  IdentificationCard,
+  Prohibit,
 } from "@phosphor-icons/react/dist/ssr";

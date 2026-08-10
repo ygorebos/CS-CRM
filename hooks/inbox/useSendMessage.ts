@@ -12,6 +12,16 @@ interface SendArgs {
   media_storage_path?: string;
   media_size_bytes?: number;
   type?: string;
+  /** UUID da mensagem citada (spec 006). Nunca o identificador do canal. */
+  reply_to_message_id?: string;
+  /** Carga de `type: "location"`. */
+  location?: { lat: number; lng: number; name?: string; address?: string };
+  /** Carga de `type: "contact"`. */
+  contacts?: Array<{ name: string; phones: string[] }>;
+  /** Carga de `type: "menu"`. */
+  menu?: { options: string[]; footer?: string };
+  /** Carga de `type: "cta_url"`. */
+  cta_url?: { button_label: string; button_url: string };
 }
 
 interface MessagesPage {

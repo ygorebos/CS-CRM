@@ -7,12 +7,15 @@ import { AttachmentPreviewDialog } from "@/components/inbox/composer/AttachmentP
 import { AudioRecorder } from "@/components/inbox/composer/AudioRecorder";
 import { DraftReplyButton } from "@/components/inbox/composer/DraftReplyButton";
 import { EmojiButton } from "@/components/inbox/composer/EmojiButton";
+import { ReplyPreview } from "@/components/inbox/composer/ReplyPreview";
+import { useReplyTarget } from "@/components/inbox/message/reply-target";
 import { resolveSlash, TemplateMenu } from "@/components/inbox/composer/TemplateMenu";
 import { useCreateNote } from "@/hooks/inbox/useCreateNote";
 import { useMessageTemplates, type MessageTemplate } from "@/hooks/inbox/useMessageTemplates";
 import { useSendMessage } from "@/hooks/inbox/useSendMessage";
 import { useUploadMedia } from "@/hooks/inbox/useUploadMedia";
 import { interpolateTemplate } from "@/lib/inbox/template-vars";
+import type { ChannelCapabilities } from "@/lib/channels/types";
 import { cn } from "@/lib/utils";
 
 export interface ComposerHandle {
@@ -26,17 +29,28 @@ interface Props {
   blockedReason?: string | null;
   /** Nome do contato da conversa, para interpolar {{nome}}/{{primeiro_nome}} do template escolhido. */
   contactName?: string | null;
+  /**
+   * O que o canal desta conversa permite (spec 006, FR-018).
+   *
+   * Chega resolvido de quem sabe qual é a sessão. O composer NÃO pergunta qual é
+   * o provider — o lint de canal proíbe esse nome fora de `lib/channels/`, e a
+   * doutrina de restrição de canal existe justamente para que a tela pergunte o
+   * que o canal permite, não com quem ela fala.
+   */
+  caps: Pick<ChannelCapabilities, "sticker" | "location" | "contactCard" | "menuMaxOptions">;
 }
 
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
-  { conversationId, disabled, blockedReason, contactName },
+  { conversationId, disabled, blockedReason, contactName, caps },
   ref,
 ) {
   const [text, setText] = useState("");
   const [pendingFile, setPendingFile] = useState<File | null>(null);
+  const [comoFigurinha, setComoFigurinha] = useState(false);
   const [menuDismissed, setMenuDismissed] = useState(false);
   const [mode, setMode] = useState<"reply" | "note">("reply");
   const taRef = useRef<HTMLTextAreaElement | null>(null);
+  const { alvo: alvoDeCitacao, limpar: limparCitacao } = useReplyTarget();
   const send = useSendMessage();
   const upload = useUploadMedia();
   const createNote = useCreateNote();
@@ -62,6 +76,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
     const body = text.trim();
     if (!body || isDisabled) return;
     if (mode === "note") {
+      // Nota interna nunca vai ao cliente — citar não faz sentido nela, e mandar
+      // o alvo junto seria gravar uma citação que ninguém do outro lado vê.
       createNote.mutate(
         { conversation_id: conversationId, body },
         {
@@ -74,10 +90,19 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       return;
     }
     send.mutate(
-      { conversation_id: conversationId, body, type: "text" },
+      {
+        conversation_id: conversationId,
+        body,
+        type: "text",
+        ...(alvoDeCitacao ? { reply_to_message_id: alvoDeCitacao.messageId } : {}),
+      },
       {
         onSuccess: () => {
           setText("");
+          // A citação some junto com o texto: mantê-la grudaria a próxima
+          // mensagem na mesma pergunta, e o corretor só notaria no aparelho do
+          // cliente.
+          limparCitacao();
           requestAnimationFrame(() => autoresize());
         },
       },
@@ -143,6 +168,9 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           onPick={applyTemplate}
           onClose={() => setMenuDismissed(true)}
         />
+        {mode === "reply" && alvoDeCitacao && (
+          <ReplyPreview alvo={alvoDeCitacao} onCancelar={limparCitacao} />
+        )}
         <div className="mb-1.5 flex gap-1">
           <button
             type="button"
@@ -170,7 +198,38 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
           </button>
         </div>
         <div className="flex items-end gap-2">
-          {mode === "reply" && <AttachMenu disabled={isDisabled} onPick={setPendingFile} />}
+          {mode === "reply" && (
+            <AttachMenu
+              disabled={isDisabled}
+              caps={caps}
+              onPick={(f) => {
+                setComoFigurinha(false);
+                setPendingFile(f);
+              }}
+              onPickFigurinha={(f) => {
+                setComoFigurinha(true);
+                setPendingFile(f);
+              }}
+              onEnviarLocalizacao={(location) =>
+                send.mutate(
+                  { conversation_id: conversationId, type: "location", location },
+                  { onSuccess: limparCitacao },
+                )
+              }
+              onEnviarContato={(contacts) =>
+                send.mutate(
+                  { conversation_id: conversationId, type: "contact", contacts },
+                  { onSuccess: limparCitacao },
+                )
+              }
+              onEnviarMenu={(texto, menu) =>
+                send.mutate(
+                  { conversation_id: conversationId, type: "menu", body: texto, menu },
+                  { onSuccess: limparCitacao },
+                )
+              }
+            />
+          )}
           {mode === "reply" && (
             <DraftReplyButton conversationId={conversationId} disabled={isDisabled} onDraft={applyDraft} />
           )}
@@ -234,7 +293,10 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
       <AttachmentPreviewDialog
         file={pendingFile}
         sending={upload.isPending || send.isPending}
-        onCancel={() => setPendingFile(null)}
+        onCancel={() => {
+          setPendingFile(null);
+          setComoFigurinha(false);
+        }}
         onSend={async (caption) => {
           if (!pendingFile) return;
           try {
@@ -242,13 +304,23 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer(
             send.mutate(
               {
                 conversation_id: conversationId,
-                type: uploaded.kind,
+                // Figurinha é ESCOLHA do usuário, não dedução do MIME. Enquanto o
+                // tipo vinha só de `uploaded.kind`, todo `.webp` virava `image` e
+                // figurinha simplesmente não existia no produto.
+                type: comoFigurinha ? "sticker" : uploaded.kind,
                 body: caption || undefined,
                 media_storage_path: uploaded.storage_path,
                 media_mime: uploaded.media_mime,
                 media_size_bytes: uploaded.media_size_bytes,
+                ...(alvoDeCitacao ? { reply_to_message_id: alvoDeCitacao.messageId } : {}),
               },
-              { onSuccess: () => setPendingFile(null) },
+              {
+                onSuccess: () => {
+                  setPendingFile(null);
+                  setComoFigurinha(false);
+                  limparCitacao();
+                },
+              },
             );
           } catch {
             // toast já disparado pelo onError de useUploadMedia; dialog fica aberto p/ retry

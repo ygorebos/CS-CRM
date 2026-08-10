@@ -20,6 +20,18 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     voiceNote: "server-convert",
     groups: "full",
     costPerMessage: false,
+    // As formas novas da spec 006 saem pelo caminho do GATEWAY. Este adapter é o
+    // caminho direto, herdado, e não as monta. Declarar `true` aqui ofereceria na
+    // tela um botão que falharia no envio — que é exatamente o "canal morto na mão
+    // do corretor" que a capability existe para impedir. O dia em que o adapter
+    // direto aprender a montá-las, estas linhas mudam JUNTO com ele, nunca antes.
+    quotedReply: false,
+    sticker: false,
+    location: false,
+    contactCard: false,
+    menuMaxOptions: null,
+    ctaUrl: false,
+    locationRequest: false,
   },
   // Hetero-restrição: não me banem, mas a Meta me proíbe e me cobra.
   meta_cloud: {
@@ -30,6 +42,14 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     voiceNote: "opus-only",
     groups: "limited",
     costPerMessage: true,
+    // Mesmo motivo do `waha`: caminho direto, não monta as formas novas.
+    quotedReply: false,
+    sticker: false,
+    location: false,
+    contactCard: false,
+    menuMaxOptions: null,
+    ctaUrl: false,
+    locationRequest: false,
   },
 
   // ── Canais que chegam pelo gateway (spec 001) ────────────────────────────
@@ -49,6 +69,21 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     voiceNote: "server-convert",
     groups: "full",
     costPerMessage: true,
+    // Medido na matriz do gateway (`internal/sender/capability.go`), não suposto:
+    // figurinha, localização, contato e menu são `Total` nesta plataforma.
+    quotedReply: true,
+    sticker: true,
+    location: true,
+    contactCard: true,
+    // 10 é o teto de LINHAS DE LISTA do WhatsApp — o mesmo `LimiteLinhasOficial`
+    // que o gateway impõe no canal oficial. Aqui ele não impõe, mas o WhatsApp
+    // impõe: mandar mais falha no provedor, e falhar no provedor é falhar na cara
+    // do corretor. Até 3 opções o canal desenha botões; acima disso, lista.
+    menuMaxOptions: 10,
+    // `NaoImplementado` no gateway para esta plataforma — não é "o WhatsApp não
+    // tem", é "o caminho não existe". Ficar `false` é o que impede oferecer.
+    ctaUrl: false,
+    locationRequest: false,
   },
   // WhatsApp oficial pela Cloud API, entregue pelo gateway. Mesma física do
   // meta_cloud: hetero-restrição.
@@ -60,6 +95,16 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     voiceNote: "opus-only",
     groups: "limited",
     costPerMessage: true,
+    quotedReply: true,
+    sticker: true,
+    location: true,
+    contactCard: true,
+    // `Restrito` na matriz do gateway: no máximo 3 botões de resposta OU 10 linhas
+    // de lista (`LimiteBotoesOficial` / `LimiteLinhasOficial`), e só dentro da
+    // janela de 24 h.
+    menuMaxOptions: 10,
+    ctaUrl: true,
+    locationRequest: true,
   },
   // Instagram Direct. Hetero-restrição sem cobrança por mensagem: a Meta fecha a
   // janela de 24h e não existe template como no WhatsApp — fora da janela só se
@@ -75,6 +120,18 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     voiceNote: "opus-only",
     groups: "none",
     costPerMessage: false,
+    // Citar existe na Messaging API da Meta (`reply_to`), e é o único da lista
+    // que existe aqui. Figurinha de arquivo próprio NÃO passa (só `like_heart`),
+    // localização e cartão de contato não existem na Messaging API, e menu
+    // interativo não está disponível no Instagram — medido em
+    // `internal/sender/capability.go`, com o motivo escrito lá.
+    quotedReply: true,
+    sticker: false,
+    location: false,
+    contactCard: false,
+    menuMaxOptions: null,
+    ctaUrl: false,
+    locationRequest: false,
   },
   // Messenger. Mesma família do Instagram: janela de 24h, etiquetas em vez de
   // template, sem custo por mensagem e sem grupo.
@@ -86,6 +143,18 @@ export const CHANNEL_CAPABILITIES: Record<ChannelProvider, ChannelCapabilities> 
     voiceNote: "opus-only",
     groups: "none",
     costPerMessage: false,
+    // Citar NÃO existe no Messenger: a Send API da Meta não tem resposta citada,
+    // e o gateway recusa `quoted_id` com 422 nesta plataforma
+    // (`internal/handlers/messages.go:264`). Figurinha só do catálogo da Meta por
+    // `sticker_id` — arquivo próprio não passa. Quick replies existem na
+    // plataforma, mas o gateway ainda não expõe botões no contrato de envio.
+    quotedReply: false,
+    sticker: false,
+    location: false,
+    contactCard: false,
+    menuMaxOptions: null,
+    ctaUrl: false,
+    locationRequest: false,
   },
 };
 

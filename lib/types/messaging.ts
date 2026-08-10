@@ -2,6 +2,9 @@
  * Shapes canônicos das tabelas conversations e messages (Spec 03).
  * Espelha o schema do Postgres — atualizar aqui quando a migration mudar.
  */
+import type { MessageProjection } from "@/lib/messaging/projection/types";
+
+export type { MessageProjection };
 
 export interface Conversation {
   id: string;
@@ -61,6 +64,14 @@ export interface Message {
   read_at: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
+  /**
+   * Citação, reações e marca de apagada, resolvidas na leitura (spec 006).
+   *
+   * Opcional no TIPO porque a mesma interface descreve a linha crua do banco —
+   * onde a projeção não existe — e o item da API, onde ela existe sempre. Quem
+   * exibe trata a ausência como projeção vazia; quem grava nunca a preenche.
+   */
+  projection?: MessageProjection;
 }
 
 /** Nota interna de conversa (Onda 5.2) — nunca vai ao cliente, tabela separada de messages. */
