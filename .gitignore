@@ -45,6 +45,25 @@ pnpm-debug.log*
 *.tsbuildinfo
 next-env.d.ts
 
+# Planilhas soltas na raiz — este repositório é PÚBLICO.
+#
+# Achado em 10/08/2026 por auditoria de git: `importar-leads.xlsx` (166 KB)
+# estava na árvore, sem rastreio e sem nenhuma regra que o cobrisse. Um
+# `git add -A` seguido de push publicaria uma lista de leads — nome, telefone,
+# e-mail de terceiros — em github.com/ygorebos/CS-CRM, aberto a qualquer um.
+#
+# Não é higiene: é o tipo de dado cuja publicação é incidente de privacidade, e
+# que não se desfaz apagando o commit depois. Planilha de trabalho não mora na
+# árvore do repositório; se precisar de uma, ela fica fora.
+#
+# Ancorado na RAIZ de propósito, como o `/image copy*.png` acima. `*.csv` solto
+# bloquearia `evidence/**/gates.csv` e `docs/testing/*.csv`, que são rastreados e
+# fazem parte do padrão de evidência — a regra protegeria contra um erro criando
+# outro.
+/*.xlsx
+/*.xls
+/*.csv
+
 # Supabase local
 supabase/.temp/
 supabase/.branches/
