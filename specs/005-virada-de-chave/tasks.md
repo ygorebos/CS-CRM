@@ -24,7 +24,7 @@ falsos nesta migração.
 > qualquer virada de chave em produção — hoje ligar o gateway quebra o cadastro de quem chegar
 > depois.
 
-- [ ] **T001** Uma resposta só para "que transporte esta instalação tem?" — `lib/channels/transporte.ts`.
+- [x] **T001** Uma resposta só para "que transporte esta instalação tem?" — `lib/channels/transporte.ts`.
       **(FR-002, FR-006)**
   - Hoje a mesma pergunta tem três formas: `getWahaClient() !== null`
     (`app/onboarding/connect-whatsapp/page.tsx:13`), `provisionamentoConfigurado()`
@@ -39,7 +39,7 @@ falsos nesta migração.
   - Trocar os três chamadores. O da Central muda de forma sem mudar de comportamento — se mudar,
     é regressão, e a prova é o teste que já existe.
 
-- [ ] **T002** A tela do onboarding para de depender do WAHA. **(FR-002)**
+- [x] **T002** A tela do onboarding para de depender do WAHA. **(FR-002)**
   - `app/onboarding/connect-whatsapp/page.tsx:13` passa a consultar T001; `_client.tsx` recebe o
     transporte, não o booleano `wahaConfigured`.
   - **O sintoma que isto conserta**: instalação com gateway ligado e WAHA ausente mostra ao usuário
@@ -68,22 +68,29 @@ falsos nesta migração.
   - A rota `/onboarding/whatsapp/qr` **continua existindo** enquanto houver instalação no legado.
     Removê-la é contract, e contract vem depois da escrita nova estar em produção.
 
-- [ ] **T005** Sem transporte nenhum, a tela recusa dizendo o que falta. **(FR-005)**
+- [x] **T005** Sem transporte nenhum, a tela recusa dizendo o que falta. **(FR-005)**
   - `null` da T001 vira texto que nomeia a variável ausente para quem opera, sem nomear provedor
     para quem usa. Nunca tela vazia; nunca QR que não vai funcionar.
 
-- [ ] **T006** Nenhuma palavra da jornada nomeia provedor. **(FR-001, SC-003)**
+- [x] **T006** Nenhuma palavra da jornada nomeia provedor. **(FR-001, SC-003)**
   - Varrer o texto visível de `app/onboarding/connect-whatsapp/**` por "WAHA", "uazapi", "gateway".
   - Se `lint-channels` já cobre parte disso, estender em vez de duplicar — ele foi o que reprovou a
     primeira versão da rota `/pairing` na 004.
 
 - [ ] **T007** Provas de unidade da Fase 1.
+  - **Parcial (10/08)**: as da T001 estão escritas e verdes — 11 casos em
+    `lib/channels/transporte.test.ts`, incluindo a tabela de equivalência com as três
+    formas antigas nas quatro combinações. Falta a parte da T003, que depende dela.
   - T001: precedência com os dois configurados, `null` com nenhum, e as três formas antigas
     devolvendo o mesmo que a nova para cada combinação.
   - T003: gravação falha desfaz a instância; nome `org_<8>` estável entre duas chamadas.
   - **Não** testar `useEffect` de tela aqui — a prova de tela é a Fase 3.
 
 - [ ] **T008** **[SABOTAGEM]** Quebrar de propósito e exigir vermelho.
+  - **Parcial (10/08)**: sabotagem 1 executada — precedência invertida (legado ganhando
+    do gateway) produziu **2 vermelhos** de 11, e os dois certos: a precedência com os
+    dois ligados e a equivalência com a forma da Central. Restaurado e verde de novo.
+    Falta a sabotagem 2, que depende da T003.
   - Inverter a precedência da T001 (legado ganhando do gateway) → os testes da T007 reprovam.
   - Devolver `wahaConfigured=true` fixo na T002 → o caso de "gateway sem WAHA" reprova.
   - Registrar quantos vermelhos cada sabotagem produziu. Sabotagem que não fica vermelha significa

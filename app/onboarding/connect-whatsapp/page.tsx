@@ -1,6 +1,6 @@
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
 import { redirect } from "next/navigation";
-import { getWahaClient } from "@/lib/waha/client";
+import { transporteDaInstalacao } from "@/lib/channels/transporte";
 import { ConnectWhatsappClient } from "./_client";
 
 export const dynamic = "force-dynamic";
@@ -10,9 +10,26 @@ export default async function ConnectWhatsappPage() {
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) redirect("/login");
 
-  const wahaConfigured = getWahaClient() !== null;
-  // We don't try to start the session at SSR — client kicks off the call
-  // (and shows graceful banner if WAHA is not reachable).
+  // T002 da spec 005. Esta linha perguntava `getWahaClient() !== null`, e era a
+  // terceira forma da mesma pergunta — a que ficou para trás quando o gateway
+  // entrou. Numa instalação com gateway ligado e WAHA ausente, a primeira tela
+  // de quem acabou de se cadastrar dizia que o serviço estava indisponível e não
+  // mostrava QR nenhum. O cadastro morria ali.
+  const transporte = transporteDaInstalacao();
+
+  // T005: `null` é estado legítimo, e quem OPERA precisa saber qual variável
+  // falta. Vai para o log do servidor, não para a tela: o texto que o usuário lê
+  // não pode nomear provedor nem mandá-lo configurar coisa nossa (SC-003/SC-007).
+  if (transporte === null) {
+    console.warn(
+      "[onboarding] nenhum transporte configurado — o cadastro não consegue conectar canal. " +
+        "Configure GATEWAY_BASE_URL + GATEWAY_ADMIN_TOKEN (caminho novo) " +
+        "ou WAHA_API_BASE_URL + WAHA_API_KEY (legado).",
+    );
+  }
+
+  // A sessão não é iniciada no SSR — quem dispara é o cliente, que também mostra
+  // o aviso quando não há transporte.
 
   return (
     <div className="space-y-6">
@@ -23,7 +40,7 @@ export default async function ConnectWhatsappPage() {
         </p>
       </header>
       <ConnectWhatsappClient
-        wahaConfigured={wahaConfigured}
+        transporte={transporte}
         sessionName={`org_${activeOrg.orgId.slice(0, 8)}`}
       />
     </div>

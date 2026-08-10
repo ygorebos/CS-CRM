@@ -15,7 +15,8 @@ import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
 import { CHANNEL_PROVIDER_GATEWAY_WHATSAPP } from "@/lib/channels/capabilities";
 import { criarConexaoDeCanal, provisionarEGravarConexao } from "@/lib/channels/criar-conexao";
-import { ErroDoGateway, provisionamentoConfigurado } from "@/lib/gateway/provisionamento";
+import { transporteDaInstalacao } from "@/lib/channels/transporte";
+import { ErroDoGateway } from "@/lib/gateway/provisionamento";
 import { createChannelSchema } from "@/lib/schemas/channels";
 import { createClient } from "@/lib/supabase/server";
 import { getWahaClient, wahaFriendlyError } from "@/lib/waha/client";
@@ -71,7 +72,11 @@ export async function POST(req: NextRequest): Promise<Response> {
   // O provisionamento pelo gateway tem precedência quando está configurado: é
   // ele que a instalação passa a usar. Sem ele, o caminho antigo continua
   // valendo — a virada é por CONFIGURAÇÃO, não por release.
-  const peloGateway = provisionamentoConfigurado();
+  //
+  // A precedência agora mora em `transporteDaInstalacao` (spec 005, T001) e não
+  // mais em cada chamador: era espalhada assim, um a um, que ela se perdia.
+  // Mesmo desfecho de antes — mudou a forma, não o comportamento.
+  const peloGateway = transporteDaInstalacao() === "gateway";
 
   const waha = peloGateway ? null : getWahaClient();
   if (!peloGateway && !waha) {

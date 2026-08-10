@@ -1,7 +1,7 @@
 import { redirect } from "next/navigation";
 
 import { requireAuth, resolveActiveOrg } from "@/lib/auth/server";
-import { provisionamentoConfigurado } from "@/lib/gateway/provisionamento";
+import { transporteDaInstalacao } from "@/lib/channels/transporte";
 import { ROLE_RANK } from "@/lib/auth/types";
 import { ConexoesShell } from "@/components/connections/ConexoesShell";
 
@@ -25,11 +25,13 @@ export default async function ConnectionsPage() {
   // O nome da flag mentia junto: `wahaConfigured` decidia se dá para CONECTAR,
   // que é uma pergunta sobre haver ALGUM caminho de provisionamento — não sobre
   // um provedor específico. Vira `podeConectar`, e passa a ser a união dos dois.
-  const key = process.env.WAHA_API_KEY;
-  const transporteLegadoPronto = Boolean(
-    process.env.WAHA_API_BASE_URL && key && key !== "dev_plaintext_change_me",
-  );
-  const podeConectar = transporteLegadoPronto || provisionamentoConfigurado();
+  //
+  // T001 da spec 005: a união dos dois virou `transporteDaInstalacao() !== null`.
+  // Este era o único dos três lugares que já sabia responder certo — e a
+  // duplicata da regra do legado, copiada de `getWahaClient` inclusive na guarda
+  // do `dev_plaintext_change_me`, era o que fazia as três formas poderem
+  // divergir em silêncio.
+  const podeConectar = transporteDaInstalacao() !== null;
 
   return (
     <div className="flex h-full flex-col gap-6 p-6">

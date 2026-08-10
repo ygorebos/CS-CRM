@@ -5,9 +5,17 @@ import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { skipWhatsapp, markWhatsappConfigured } from "@/app/actions/onboarding/skipWhatsapp";
+import type { Transporte } from "@/lib/channels/transporte";
 
 interface Props {
-  wahaConfigured: boolean;
+  /**
+   * T002 da spec 005: era `wahaConfigured: boolean`, e o nome mentia — a tela
+   * nunca precisou saber QUAL provedor existe, só se existe ALGUM. Com o
+   * booleano do WAHA, uma instalação de gateway caía no aviso de indisponível.
+   *
+   * `null` é "nenhum transporte", estado legítimo e tratado (T005).
+   */
+  transporte: Transporte | null;
   sessionName: string;
 }
 
@@ -43,7 +51,11 @@ function isRedirectError(err: unknown): boolean {
   );
 }
 
-export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
+export function ConnectWhatsappClient({ transporte, sessionName }: Props) {
+  // A tela toda só quer saber se HÁ caminho. Qual deles é problema do servidor:
+  // `/api/v1/onboarding/whatsapp/session` provisiona no gateway ou no legado
+  // conforme a instalação, e devolve o mesmo formato nos dois casos (T003).
+  const temTransporte = transporte !== null;
   const [pending, startTransition] = useTransition();
   const [info, setInfo] = useState<SessionInfo>({ status: "INIT", session: sessionName });
   const [qrTick, setQrTick] = useState(0);
@@ -51,9 +63,9 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
 
   const status = info.status;
 
-  // 1) On mount (when WAHA is configured), start the session if not yet started.
+  // 1) Havendo transporte, inicia a sessão na montagem se ainda não começou.
   useEffect(() => {
-    if (!wahaConfigured) return;
+    if (!temTransporte) return;
     let cancelled = false;
     (async () => {
       setBusy(true);
@@ -70,11 +82,11 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [wahaConfigured, sessionName]);
+  }, [temTransporte, sessionName]);
 
   // 2) Poll status every 3 seconds until WORKING/FAILED.
   useEffect(() => {
-    if (!wahaConfigured) return;
+    if (!temTransporte) return;
     if (status === "WORKING" || status === "FAILED") return;
     const id = setInterval(async () => {
       try {
@@ -89,7 +101,7 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
       }
     }, 3000);
     return () => clearInterval(id);
-  }, [wahaConfigured, status]);
+  }, [temTransporte, status]);
 
   // 3) When status → WORKING, auto-advance.
   useEffect(() => {
@@ -120,11 +132,11 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
     }
   }
 
-  const showQr = wahaConfigured && status === "SCAN_QR_CODE";
+  const showQr = temTransporte && status === "SCAN_QR_CODE";
 
   return (
     <div className="space-y-4 rounded-lg border bg-background p-6">
-      {!wahaConfigured && (
+      {!temTransporte && (
         <div className="rounded-md border border-amber-300/60 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-950/40 dark:text-amber-100">
           {/* SC-007 / T064: nem nome de provedor, nem comando de terminal. Esta
               é a PRIMEIRA tela de quem acabou de se cadastrar; mandá-lo subir
@@ -139,7 +151,7 @@ export function ConnectWhatsappClient({ wahaConfigured, sessionName }: Props) {
         </div>
       )}
 
-      {wahaConfigured && (
+      {temTransporte && (
         <div className="rounded-md border bg-muted/40 p-4">
           <p className="text-sm font-medium">
             Sessão: <code>{sessionName}</code>
