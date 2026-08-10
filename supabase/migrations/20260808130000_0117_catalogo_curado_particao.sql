@@ -68,7 +68,7 @@ create table if not exists public.catalog_materials (
   title            text not null,
   body             text not null,
   -- Validade opcional (FR-025). Nulo = não vence. Material vencido não ancora
-  -- resposta — o corte vive em `fn_buscar_lastro` (migration 0119).
+  -- resposta — o corte vive em `fn_buscar_lastro` (migration 0123).
   valid_until      date,
   -- A "recência" do desempate de FR-035.
   published_at     timestamptz not null default now(),

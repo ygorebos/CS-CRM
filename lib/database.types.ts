@@ -1724,11 +1724,14 @@ export type Database = {
       }
       catalog_materials: {
         Row: {
+          adopted_at: string | null
+          adopted_by: string | null
           applies_to_all: boolean
           body: string
           catalog_scope_id: string | null
           created_at: string
           id: string
+          inert: boolean
           origin: string
           published_at: string
           slug: string
@@ -1738,11 +1741,14 @@ export type Database = {
           version: number
         }
         Insert: {
+          adopted_at?: string | null
+          adopted_by?: string | null
           applies_to_all?: boolean
           body: string
           catalog_scope_id?: string | null
           created_at?: string
           id?: string
+          inert?: boolean
           origin?: string
           published_at?: string
           slug: string
@@ -1752,11 +1758,14 @@ export type Database = {
           version: number
         }
         Update: {
+          adopted_at?: string | null
+          adopted_by?: string | null
           applies_to_all?: boolean
           body?: string
           catalog_scope_id?: string | null
           created_at?: string
           id?: string
+          inert?: boolean
           origin?: string
           published_at?: string
           slug?: string
@@ -5986,6 +5995,23 @@ export type Database = {
       fn_attendant_metrics: {
         Args: { p_from: string; p_org: string; p_owner?: string; p_to: string }
         Returns: Json
+      }
+      fn_buscar_lastro: {
+        Args: {
+          p_agent_id: string
+          p_embedding: string
+          p_k?: number
+          p_scope_id: string
+          p_threshold?: number
+        }
+        Returns: {
+          chunk_id: string
+          content: string
+          layer: string
+          material_id: string
+          similarity: number
+          source_ref: Json
+        }[]
       }
       fn_can_view_conversation: {
         Args: { p_assigned_to_user_id: string; p_org: string }

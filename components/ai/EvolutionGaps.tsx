@@ -19,6 +19,12 @@ import { ROTULO_DO_PASSO } from "@/lib/leads/agent-mapping";
  *  2. lista vazia NÃO é boa notícia por si. Cada frase de elogio é uma afirmação
  *     sobre uma fonte diferente e só sai com a evidência daquela fonte — ver o
  *     docblock de `boaNoticia`, que é onde a regra vive.
+ *  3. as linhas de assunto e os dois números de busca contam a MESMA lacuna por
+ *     ângulos diferentes, e os números não batem de propósito: uma busca que não
+ *     achou nada nem sempre vira recusa (o agente pode não ter chegado a afirmar
+ *     nada), e uma recusa some da Central quando é tratada. Por isso nenhuma das
+ *     frases apresenta um como subconjunto do outro — só a de "quase acertou" faz
+ *     isso, e ela é subconjunto de verdade, medido na mesma fonte.
  */
 
 /**
@@ -39,11 +45,74 @@ function plural(n: number, um: string, muitos: string): string {
   return n === 1 ? um : muitos;
 }
 
+/**
+ * O léxico de assistência em palavra de corretor.
+ *
+ * As chaves são as categorias fechadas de `lib/agent-engine/guardrails/lexico-assistencia.ts`
+ * — a MESMA régua que classifica a afirmação no gate de lastro e que a divergência grava.
+ * Traduzir aqui em vez de gravar o rótulo no banco é DIRC: Calcular; e um rótulo só existe
+ * num lugar, senão a tela e o gate passam a chamar a mesma coisa por nomes diferentes.
+ *
+ * Categoria fora do mapa cai no próprio nome (o `??` de quem monta a frase): vocabulário
+ * novo aparece feio, e não some.
+ */
+export const ASSUNTO_EM_PORTUGUES: Record<string, string> = {
+  cobranca: "cobrança e boleto",
+  acesso: "acesso e cadastro",
+  rede: "rede credenciada",
+  cobertura: "cobertura",
+  prazos: "prazos e carência",
+  canais: "canais de atendimento",
+  regras: "regras do contrato",
+};
+
 interface Lacuna {
   chave: string;
   texto: string;
   href?: string;
   cta?: string;
+}
+
+/**
+ * Quantos assuntos viram linha própria antes de a lista virar ruído.
+ *
+ * Cada linha aqui é uma TAREFA — escrever um material. Quinze delas de uma vez não são mais
+ * informação, são a lista inteira sendo ignorada, que é a forma mais comum de um mecanismo
+ * anti-morte morrer. O resto não some: vira uma linha que manda para a Central, onde cada
+ * pergunta tem a sua própria tratativa.
+ */
+const ASSUNTOS_NA_TELA = 5;
+
+/** Quantas operadoras cabem numa frase antes de ela virar uma lista. */
+const OPERADORAS_NA_FRASE = 4;
+
+/** "a, b e c" — em português, não "a, b, c". */
+function listaEmPortugues(partes: string[]): string {
+  if (partes.length <= 1) return partes[0] ?? "";
+  return `${partes.slice(0, -1).join(", ")} e ${partes[partes.length - 1]}`;
+}
+
+type BaldeDeEscopo = EvolutionPayload["gaps"]["knowledge_by_scope"][number];
+
+/**
+ * O recorte por operadora, quando ele diz alguma coisa.
+ *
+ * ⚠️ Sai VAZIO quando nenhuma das operadoras foi identificada. " Por operadora: operadora
+ * não identificada (4)." é uma frase que ocupa espaço e não muda decisão nenhuma — e é
+ * exatamente o que uma instalação sem escopo cadastrado produziria em TODAS as linhas.
+ */
+function porOperadora(
+  baldes: readonly BaldeDeEscopo[],
+  campo: "sem_material" | "quase_no_limiar" | "busca_indisponivel",
+): string {
+  const comLacuna = baldes.filter((b) => b[campo] > 0);
+  if (comLacuna.every((b) => b.scope_name === null)) return "";
+
+  const mostrados = comLacuna.slice(0, OPERADORAS_NA_FRASE);
+  const partes = mostrados.map((b) => `${b.scope_name ?? "sem operadora identificada"} (${b[campo]})`);
+  const restantes = comLacuna.length - mostrados.length;
+  const cauda = restantes > 0 ? `, e mais ${restantes} ${plural(restantes, "operadora", "operadoras")}` : "";
+  return ` Onde: ${listaEmPortugues(partes)}${cauda}.`;
 }
 
 /**
@@ -97,13 +166,56 @@ export function montaLacunas(gaps: EvolutionPayload["gaps"]): Lacuna[] {
     });
   }
 
+  // ⚠️ AS PERGUNTAS REAIS VÊM PRIMEIRO, e a ordem é a mensagem. Os dois números abaixo
+  // ("não encontrou nada" / "quase encontrou") dizem QUANTO; estas linhas dizem O QUÊ, com a
+  // frase do cliente. Um corretor que só lê a primeira linha da lista tem que sair sabendo o
+  // que escrever, não quanto lhe falta.
+  const assuntos = gaps.knowledge_refusals.slice(0, ASSUNTOS_NA_TELA);
+  for (const r of assuntos) {
+    const quem = r.count === 1 ? "Um cliente" : "Clientes";
+    const de = r.scope_name ? ` da ${r.scope_name}` : "";
+    // Assunto que o léxico não classificou vira frase sem o trecho "sobre …", em vez de
+    // "sobre ." pendurado. Quando há pergunta de exemplo, é ela que carrega o sentido — e
+    // é o caso em que o assunto vazio menos incomoda.
+    const sobre = r.subject ? ` sobre ${ASSUNTO_EM_PORTUGUES[r.subject] ?? r.subject}` : "";
+    const quantas = r.count === 1 ? "" : ` em ${r.count} conversas`;
+    out.push({
+      chave: `recusa-${r.scope_name ?? "sem-operadora"}-${r.subject}`,
+      texto:
+        `${quem}${de} ${plural(r.count, "perguntou", "perguntaram")}${sobre}${quantas} e o agente não tinha material ` +
+        `para responder — ${plural(r.count, "a conversa voltou", "as conversas voltaram")} para a sua fila. ` +
+        // A PERGUNTA REAL, como o cliente escreveu (FR-028). Sem ela o corretor lê uma
+        // categoria ("cobrança e boleto") e ainda tem que adivinhar o que escrever; com ela,
+        // o material se escreve sozinho, respondendo a frase que está ali.
+        (r.example_question ? `${r.count === 1 ? "Ele" : "Um deles"} escreveu: «${r.example_question}». ` : "") +
+        (r.scope_name ? "" : "Nessas conversas o agente não identificou a operadora. ") +
+        `Um material que responda isso faz o agente resolver sozinho da próxima vez.`,
+      href: "/app/ai/knowledge/sources",
+      cta: "Escrever esse material",
+    });
+  }
+
+  const assuntosDeFora = gaps.knowledge_refusals.length - assuntos.length;
+  if (assuntosDeFora > 0) {
+    out.push({
+      chave: "recusas-restantes",
+      texto:
+        `Há mais ${assuntosDeFora} ${plural(assuntosDeFora, "assunto", "assuntos")} com menos perguntas, que não ` +
+        `${plural(assuntosDeFora, "cabe", "cabem")} nesta lista. Cada pergunta dessas abriu um aviso próprio nos ` +
+        `Alertas, com o texto do cliente e a conversa para responder.`,
+      href: "/app/ai/inbox",
+      cta: "Ver os alertas",
+    });
+  }
+
   if (gaps.knowledge_empty > 0) {
     out.push({
       chave: "knowledge-empty",
       texto:
         `${gaps.knowledge_empty} ${plural(gaps.knowledge_empty, "pergunta de cliente não encontrou", "perguntas de clientes não encontraram")} ` +
         `resposta nos seus materiais. São os assuntos que ainda faltam escrever — cada um deles é uma conversa em que o ` +
-        `agente teve que improvisar ou passar adiante.`,
+        `agente teve que improvisar ou passar adiante.` +
+        porOperadora(gaps.knowledge_by_scope, "sem_material"),
       href: "/app/ai/knowledge/sources",
       cta: "Abrir a base de conhecimento",
     });
@@ -116,9 +228,52 @@ export function montaLacunas(gaps: EvolutionPayload["gaps"]): Lacuna[] {
         `Destas, ${gaps.knowledge_near_misses} ${plural(gaps.knowledge_near_misses, "chegou perto", "chegaram perto")}: ` +
         `havia material parecido, mas não parecido o bastante para o agente arriscar usar. Aqui o conteúdo provavelmente ` +
         `já existe — só está escrito com palavras diferentes das que o cliente usa. Vale reescrever esses materiais com as ` +
-        `perguntas do jeito que chegam.`,
+        `perguntas do jeito que chegam.` +
+        porOperadora(gaps.knowledge_by_scope, "quase_no_limiar"),
       href: "/app/ai/knowledge/sources",
       cta: "Abrir a base de conhecimento",
+    });
+  }
+
+  if (gaps.knowledge_unavailable > 0) {
+    out.push({
+      chave: "knowledge-unavailable",
+      // ⚠️ ESTA LACUNA NÃO É DO USUÁRIO, e o texto tem que dizer isso antes de qualquer
+      // outra coisa. Somada às de cima, ela mandaria o corretor escrever material para
+      // consertar uma queda de infraestrutura — trabalho inútil, feito com a sensação de
+      // estar consertando. Por isso o agregador a mantém fora de `knowledge_empty`.
+      texto:
+        `Em ${gaps.knowledge_unavailable} ${plural(gaps.knowledge_unavailable, "pergunta", "perguntas")} o sistema não ` +
+        `conseguiu nem consultar os seus materiais — foi falha técnica, não material faltando. Não há nada para você ` +
+        `escrever aqui: se o número não for pequeno, vale conferir a conexão com o provedor de IA ou avisar quem cuida ` +
+        `da sua instalação.` +
+        porOperadora(gaps.knowledge_by_scope, "busca_indisponivel"),
+      href: "/app/ai/credentials",
+      cta: "Conferir a conexão de IA",
+    });
+  }
+
+  for (const d of gaps.knowledge_divergences) {
+    out.push({
+      chave: `divergencia-${d.winner_title}-${d.loser_title}-${d.subject}`,
+      // ⚠️ NOMEIA OS DOIS MATERIAIS, e é isso que separa esta linha de um alarme inútil.
+      // "Há divergência na sua base" manda o corretor procurar agulha no palheiro; dizer
+      // QUAL texto dele contradiz QUAL texto da operadora é o que ele consegue ir conferir
+      // hoje. Por isso `knowledge_divergences` é lista, e não contagem.
+      //
+      // O texto NÃO afirma quem está errado, porque o sistema não sabe: o desempate é por
+      // ORIGEM (material do corretor vence), nunca por correção. Escrever "o seu material
+      // está errado" mandaria corrigir justamente o texto que ele pode ter escrito de
+      // propósito quando a operadora mudou a regra e o catálogo ficou para trás.
+      texto:
+        `O seu material "${d.winner_title}" está sendo usado no lugar de "${d.loser_title}"` +
+        (d.scope_name ? `, em ${d.scope_name}` : "") +
+        (d.subject ? ` — os dois falam de ${ASSUNTO_EM_PORTUGUES[d.subject] ?? d.subject}` : "") +
+        `. Quando isso acontece, o agente responde pelo seu, e o outro texto fica em silêncio. ` +
+        (d.occurrences > 1 ? `Já foi assim em ${d.occurrences} respostas. ` : "") +
+        `Vale abrir os dois e conferir qual está atualizado: se o certo for o outro, quem responde hoje é o texto errado.`,
+      href: "/app/ai/knowledge/sources",
+      cta: "Conferir os dois materiais",
     });
   }
 

@@ -35,6 +35,27 @@ cd "$(dirname "$0")/.."
 SUPABASE="supabase"
 command -v supabase >/dev/null 2>&1 || SUPABASE="npx supabase"
 
+# ── A porta do app sob teste, em UM lugar só ────────────────────────────────
+#
+# Mesma regra do `playwright.config.ts` (`E2E_PORT ?? "3001"`), e é ele quem sobe
+# o `next start`. Duas redações da mesma porta é o defeito que este bloco fecha.
+#
+# ⚠️ MEDIDO no CI (2026-08-08): `NEXT_PUBLIC_APP_URL` NÃO era escrita aqui, então
+# valia o default de `lib/env.ts` — `http://localhost:3000`. E `/auth/confirm`
+# monta o redirect com essa var DE PROPÓSITO (nunca com `Host`/`X-Forwarded-Host`,
+# que seria open redirect dentro do fluxo de recuperação de senha). Resultado: o
+# link do e-mail estabelecia a sessão e mandava o browser para a porta 3000, onde
+# não havia nada — `ERR_CONNECTION_REFUSED`, com o Playwright reportando a URL do
+# `goto` original e a falha parecendo "servidor fora do ar". Só as 3 specs que
+# passam por `/auth/confirm` quebravam (password-recovery, reset-password-mfa e
+# signup-journey — esta última é P0 da doutrina de QA Visual), enquanto as outras
+# 37 do shard passavam, o que fazia o sintoma parecer instabilidade.
+#
+# `localhost` e não `127.0.0.1`: cookie é por HOST, e o baseURL do Playwright é
+# `localhost`. Redirecionar para `127.0.0.1` entregaria a sessão a outro host e a
+# tela seguinte veria um usuário deslogado.
+PORTA_APP="${E2E_PORT:-3001}"
+
 if ! $SUPABASE status >/dev/null 2>&1; then
   echo "==> O Supabase local não está de pé. Rode 'npx supabase start' antes." >&2
   exit 1
@@ -58,6 +79,11 @@ ler() { printf '%s\n' "$ENVOUT" | grep "^$1=" | cut -d= -f2- | tr -d '"'; }
 API_URL="$(ler API_URL)"
 ANON="$(ler ANON_KEY)"
 SERVICE="$(ler SERVICE_ROLE_KEY)"
+# A porta do Postgres vem do PRÓPRIO stack, não de um literal. `supabase/config.toml` é
+# versionado, mas quem roda duas frentes na mesma máquina troca as portas para não colidir
+# (constituição v2.3.1) — e com o literal `54322` o `.env.e2e` apontava para o banco da
+# OUTRA frente, ou para nenhum. Erro que aparece como "a suíte não vê o que o seed gravou".
+DB_URL="$(ler DB_URL)"
 
 if [ -z "$API_URL" ] || [ -z "$ANON" ] || [ -z "$SERVICE" ]; then
   echo "==> Não consegui ler as chaves do stack local (API_URL/ANON_KEY/SERVICE_ROLE_KEY)." >&2
@@ -83,14 +109,14 @@ cat > .env.e2e <<EOF
 NEXT_PUBLIC_SUPABASE_URL=$API_URL
 NEXT_PUBLIC_SUPABASE_ANON_KEY=$ANON
 SUPABASE_SERVICE_ROLE_KEY=$SERVICE
-SUPABASE_DB_URL=postgresql://postgres:postgres@127.0.0.1:54322/postgres
+SUPABASE_DB_URL=$DB_URL
 
 # Placeholders: 'next start' roda em NODE_ENV=production, e lib/env.ts exige
 # estas vars em produção. As specs não exercitam os serviços por trás delas.
 # Local e CI falham pelos mesmos motivos porque leem ESTE arquivo: o workflow
-# publica o `.env.e2e` no ambiente do job em vez de redigitar os valores. A
+# publica o \`.env.e2e\` no ambiente do job em vez de redigitar os valores. A
 # versão anterior desta linha prometia "valores iguais aos do CI" e eles não
-# eram iguais (`e2e-placeholder…` aqui, `ci-placeholder…` lá) — a promessa por
+# eram iguais (\`e2e-placeholder…\` aqui, \`ci-placeholder…\` lá) — a promessa por
 # coincidência durou até a primeira divergência, que custou 8 specs em 401.
 INTERNAL_SECRET=e2e-placeholder-nao-e-segredo
 # As três abaixo são chaves de CIFRA de verdade: o app exige 32 bytes e recusa
@@ -103,31 +129,23 @@ WAHA_BYO_ENCRYPTION_KEY=$CHAVE_WAHA
 AI_CRED_AES_KEY=$CHAVE_AI
 WAHA_API_BASE_URL=http://127.0.0.1:3999
 WAHA_API_KEY=e2e-placeholder-nao-e-segredo
-WAHA_WEBHOOK_BASE_URL=http://127.0.0.1:3001
-
-# O endereço do PRÓPRIO app, e ele não é opcional aqui.
-#
-# Sem esta linha, lib/env.ts assume o default \`http://localhost:3000\` — e a suíte
-# roda na 3001. \`/auth/confirm\` monta o redirect com \`new URL(path,
-# NEXT_PUBLIC_APP_URL)\` de propósito (ler \`X-Forwarded-Host\` ali seria open
-# redirect dentro do fluxo de recuperação de senha), então todo link de e-mail
-# terminava num \`Location\` para a 3000, onde não há ninguém escutando.
-#
-# Medido em 2026-08-09: as CINCO specs que passam por \`/auth/confirm\`
-# (password-recovery, reset-password-mfa, signup-journey e as duas de
-# recuperacao-de-senha-por-fragmento) reprovavam com
-# \`net::ERR_CONNECTION_REFUSED\`, e só elas — as outras 38 passavam. Três delas
-# estavam vermelhas na \`main\` havia dias, com a causa parecendo ser do produto.
-NEXT_PUBLIC_APP_URL=http://localhost:${E2E_PORT:-3001}
+WAHA_WEBHOOK_BASE_URL=http://127.0.0.1:$PORTA_APP
 
 # Explícito, e não por ausência: a suíte tem spec que EXIGE o segundo fator
-# (reset-password-mfa). Como a linha acima é http://localhost, a dispensa de MFA
+# (reset-password-mfa). Como o app sobe em http://localhost, a dispensa de MFA
 # passaria a ser possível — e bastaria alguém ligar a chave para a spec virar
 # falso verde sem que nada do produto mudasse.
 MFA_DISPENSADA_LOCAL=false
 UPSTASH_REDIS_REST_URL=http://127.0.0.1:3998
 UPSTASH_REDIS_REST_TOKEN=e2e-placeholder-nao-e-segredo
 NEXT_TELEMETRY_DISABLED=1
+
+# A porta em que o Playwright sobe o app. NÃO é decoração: \`/auth/confirm\` monta
+# o redirect do link de e-mail a partir DELA, por recusar ler o \`Host\` da
+# requisição (open redirect). Errada aqui, todo fluxo que chega por e-mail —
+# confirmar cadastro, redefinir senha — cai numa porta vazia.
+# Vigiado por tests/unit/e2e-env-porta-do-app.test.ts.
+NEXT_PUBLIC_APP_URL=http://localhost:$PORTA_APP
 EOF
 
 echo "==> .env.e2e gerado, apontando para $API_URL"

@@ -78,12 +78,16 @@ abrir o código para responder está mal escrito e deve ser reescrito.
   há cenário exigindo comportamento que nenhum FR sustenta.
 - [x] CHK027 Cada critério de sucesso corresponde a ao menos um requisito, e nenhum requisito
   crítico ficou sem forma de medir.
-- [ ] CHK028 As Assumptions não contradizem os requisitos nem a constituição, e nenhuma delas
+- [x] CHK028 As Assumptions não contradizem os requisitos nem a constituição, e nenhuma delas
   "resolve" por conta própria uma pergunta que ficou marcada como em aberto.
-  → **reprovado na rodada 3**: A-10 contradiz o princípio X, que declara conteúdo de operadora como
-  dado de tenant. A contradição é deliberada, está declarada no topo da spec e tem caminho de
-  resolução (emenda em PR próprio), mas enquanto a emenda não entra o item é falso. Reavaliar
-  depois da emenda.
+  → **reprovado na rodada 3**: A-10 contradizia o Princípio X, que declarava conteúdo de operadora
+  como dado de tenant. A contradição era deliberada e tinha caminho declarado (emenda em PR
+  próprio), mas enquanto a emenda não entrasse o item era falso.
+  → **FECHADO em 2026-08-09, na condição que o próprio item declarou.** A emenda entrou: o
+  Princípio X foi redefinido em MAJOR (constituição, "redefinição incompatível do Princípio X"),
+  passando a enumerar as DUAS camadas — acervo do tenant × catálogo curado — e as sete travas da
+  exceção de mão única ao Princípio I. A-10 foi revisada na mesma data para dizer o que a emenda
+  decidiu. Não há mais contradição a declarar.
 - [x] CHK029 Os edge cases não introduzem comportamento novo que os requisitos não cobrem — ou, se
   introduzem, o requisito correspondente existe.
 
@@ -106,13 +110,18 @@ abrir o código para responder está mal escrito e deve ser reescrito.
 
 - [x] CHK036 Há história para o **corretor** (quem carrega) e para o **cliente final** (quem
   pergunta), e as duas são independentemente testáveis.
-- [ ] CHK037 As histórias estão priorizadas, e a P1 sozinha entrega valor observável — cabe no
+- [x] CHK037 As histórias estão priorizadas, e a P1 sozinha entrega valor observável — cabe no
   ritmo de duas jornadas do princípio II.
   → **reprovado na rodada 3**: a P1 passou de três histórias para quatro (US1, US2, US3, US7) e
   ganhou a camada curada inteira — superfície de curadoria, semeadura versionada que nunca
   sobrescreve, precedência entre camadas e vínculo cliente↔operadora por duas vias. Continua
-  priorizada e entregando valor observável, mas **não cabe em duas jornadas**. O fatiamento é
-  trabalho do plano, não da spec — por isso o item fica aberto em vez de a spec ser reescrita.
+  priorizada e entregando valor observável, mas **não cabia em duas jornadas**. O fatiamento é
+  trabalho do plano, não da spec — por isso o item ficou aberto em vez de a spec ser reescrita.
+  → **FECHADO em 2026-08-09, pelo caminho que o próprio item apontou.** O plano fatiou a P1 em
+  **F1…F5**, e cada fatia tem resultado observável declarado (`tasks.md`, tabela do topo): F1 "o
+  agente para de inventar", F2+F3 "a instalação nasce sabendo, e nós curamos sem destruir", F4 "o
+  corretor manda no que vale para ele", F5 "o erro fica corrigível". A unidade de entrega passou a
+  ser a fatia, não a história — que é exatamente o que o ritmo do Princípio II exige.
 - [x] CHK038 Edge case "operadora sem conteúdo" está coberto.
 - [x] CHK039 Edge case "conteúdo desatualizado" está coberto, incluindo o caso de o material
   vencido ser o **único** que responderia.

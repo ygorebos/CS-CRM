@@ -42,8 +42,51 @@ export interface Grounding {
   readonly material_id: string | null;
   readonly layer: 'tenant' | 'catalog';
   readonly similarity: number;
+  /**
+   * Assuntos DO TRECHO, pela mesma régua que classifica a afirmação (T138).
+   *
+   * **Obrigatório de propósito.** Opcional, ele seria esquecido em algum produtor novo e
+   * o buraco voltaria em silêncio — com a suíte verde, que é como este defeito nasceu.
+   * Obrigatório, o compilador aponta cada lugar que constrói uma âncora.
+   */
+  readonly categorias: readonly CategoriaAssistencia[];
+  /**
+   * O trecho veio de conhecimento gerado AUTOMATICAMENTE a partir de conversas (FR-040)?
+   *
+   * **Obrigatório pelo mesmo motivo de `categorias`**: opcional, algum produtor novo o
+   * esqueceria, o `undefined` seria lido como "não" e o buraco voltaria em silêncio.
+   */
+  readonly aprendidoDeConversa: boolean;
   /** Título, escopo e data de atualização — a cópia histórica que a tela mostra (FR-023). */
   readonly source_ref?: Record<string, unknown>;
+}
+
+/**
+ * Os `source_type` que significam "isto foi extraído de conversa, sozinho".
+ *
+ * Constante compartilhada, nunca literal espalhada: o CHECK do banco aceita as duas grafias
+ * (`conversations` e `conversation`), e uma lista escrita à mão em cada lugar erraria uma
+ * delas — a falha seria o gate deixando passar exatamente o que FR-040 proíbe.
+ */
+const ORIGENS_APRENDIDAS = new Set(['conversations', 'conversation']);
+
+/**
+ * A âncora nasceu de aprendizado automático? (FR-040)
+ *
+ * ═══ POR QUE ISTO É UMA REGRA E NÃO UMA PREFERÊNCIA ═══
+ *
+ * O acervo indexa conversas passadas. Isso é ótimo para tom, jeito de responder e as
+ * dúvidas que os clientes realmente têm — e é veneno como fonte de fato de assistência:
+ * o que um atendente humano disse sobre carência há oito meses vira "material", e o agente
+ * o repete com a mesma cara de certeza que teria o manual da operadora. Um erro humano
+ * pontual vira regra institucional, com citação para provar.
+ *
+ * O trecho continua entrando na busca e ajudando o modelo a escrever. O que ele não pode
+ * é SUSTENTAR a afirmação — que é a diferença entre aprender a falar e aprender a mentir.
+ */
+export function ehAprendizadoDeConversa(sourceRef: Record<string, unknown> | undefined): boolean {
+  const tipo = sourceRef?.source_type;
+  return typeof tipo === 'string' && ORIGENS_APRENDIDAS.has(tipo);
 }
 
 export interface ClassificacaoDeAssistencia {
@@ -57,8 +100,13 @@ export interface ClassificacaoDeAssistencia {
  * Divide em frases preservando o terminador. Quebra de linha conta como fim de frase:
  * mensagem de WhatsApp costuma listar passos em linhas soltas, sem ponto final, e cada
  * passo é uma afirmação independente.
+ *
+ * **Exportada** porque FR-018 (veto por AFIRMAÇÃO, não por mensagem) precisa da mesma
+ * régua: `lastro-por-escopo.ts` decide frase a frase o que pode sair, e duas definições de
+ * "frase" fariam a classificação e a partição discordarem sobre o mesmo texto — a
+ * divergência apareceria como afirmação recusada que o gate deixaria passar, ou o inverso.
  */
-function frases(texto: string): string[] {
+export function frasesDeTexto(texto: string): string[] {
   return texto
     .split(/(?<=[.!?])\s+|\n+/)
     .map((f) => f.trim())
@@ -83,7 +131,7 @@ export function classificarAfirmacaoDeAssistencia(texto: string): ClassificacaoD
     return { isAssistanceClaim: false, categorias: [], motivo: 'sem_assunto' };
   }
 
-  const comAssunto = frases(texto).filter((f) => detectarAssuntoDeAssistencia(f).achou);
+  const comAssunto = frasesDeTexto(texto).filter((f) => detectarAssuntoDeAssistencia(f).achou);
   // `comAssunto` vazio só acontece se o termo cruzar fronteira de frase — e nesse caso
   // o texto contém o assunto sem que nenhuma frase isolada o contenha. Bias: afirmação.
   const todasPerguntas = comAssunto.length > 0 && comAssunto.every((f) => f.endsWith('?'));
@@ -164,22 +212,94 @@ export const assistanceGroundingGate: Gate = {
     const isClaim = ctx.isAssistanceClaim ?? classificarAfirmacaoDeAssistencia(ctx.body).isAssistanceClaim;
     if (!isClaim) return { pass: true };
 
-    const ancoras = ctx.groundings ?? [];
+    // FR-040 · T123: o que foi aprendido de conversa NÃO ancora afirmação de assistência.
+    // O corte é aqui em cima, antes de qualquer contagem, e não num `if` lá embaixo: o que
+    // não pode sustentar a afirmação também não pode ENGROSSAR o número que a libera.
+    // Ver `ehAprendizadoDeConversa` para o porquê.
+    const todasAsAncoras = ctx.groundings ?? [];
+    const ancoras = todasAsAncoras.filter((a) => !a.aprendidoDeConversa);
+    const descartadasPorOrigem = todasAsAncoras.length - ancoras.length;
     // `minCitations` vem do guardrail `rag_must_hit` da tela (FR-015). Ausente = 1: uma
     // âncora é o piso do requisito, não uma preferência configurável para baixo.
     const piso = Math.max(1, ctx.minCitations ?? 1);
-    if (ancoras.length >= piso) return { pass: true };
+
+    // ── Pertinência (T138): a âncora tem de falar DO QUE a afirmação diz ──────────────
+    //
+    // Contar âncora não basta, e isto foi MEDIDO, não temido: com embeddings reais no
+    // limiar do produto (0.40), "como funciona o reembolso" ancorou em "Como consultar a
+    // rede credenciada" com 0.460. Um texto de rede autorizava uma afirmação sobre
+    // reembolso — e a resposta saía COM citação, parecendo mais confiável.
+    //
+    // Não se conserta no limiar: a âncora correta mais fraca medida foi 0.495, colada na
+    // errada mais forte. Não há corte que as separe. Similaridade mede distância entre
+    // vetores; o que falta é ASSUNTO, e o assunto já existe aqui — a mesma classificação
+    // determinística que decide se a frase é afirmação de assistência.
+    //
+    // A régua é por FRASE, e não pela mensagem inteira, pelo mesmo motivo de FR-018: uma
+    // frase ancorada não empresta lastro para a de baixo. "O reembolso sai em 30 dias. A
+    // rede tem 40 hospitais." com âncora só de reembolso é meia mensagem inventada.
+    const assistivas = frasesDeTexto(ctx.body)
+      .map((f) => classificarAfirmacaoDeAssistencia(f))
+      .filter((c) => c.isAssistanceClaim);
+
+    const pertinente = (a: Grounding, cats: readonly CategoriaAssistencia[]): boolean =>
+      a.categorias.some((c) => cats.includes(c));
+
+    // Chamador afirmou que é assistência num corpo sem termo do léxico. Não há categoria
+    // para comparar, e inventar uma seria pior que declarar que não avaliou: o gate volta
+    // a contar, e o trace diz que a pertinência não foi julgada (T030 — o léxico é
+    // calibrado sobre medição, e um `pass` mudo apagaria o caso).
+    if (assistivas.length === 0) {
+      if (ancoras.length >= piso) return { pass: true };
+      return {
+        pass: false,
+        code: 'assistencia_sem_lastro',
+        reason: RECUSA_SEM_LASTRO,
+        detail: {
+          ancoras: ancoras.length,
+          piso,
+          pertinencia: 'nao_avaliada',
+          // Sem isto, uma recusa com citações na tela pareceria defeito do gate. É o
+          // número que explica "havia âncora, mas era de conversa" (FR-040).
+          descartadas_por_origem: descartadasPorOrigem,
+        },
+      };
+    }
+
+    const categorias = [...new Set(assistivas.flatMap((c) => c.categorias))];
+    const pertinentes = ancoras.filter((a) => pertinente(a, categorias));
+    const frasesSemAncora = assistivas.filter(
+      (c) => !ancoras.some((a) => pertinente(a, c.categorias)),
+    ).length;
+
+    if (frasesSemAncora === 0 && pertinentes.length >= piso) return { pass: true };
 
     return {
       pass: false,
       code: 'assistencia_sem_lastro',
-      reason:
-        'esta mensagem afirma um procedimento da operadora sem nenhum trecho do acervo que a sustente. ' +
-        'Não invente o procedimento e não responda "com o que você já sabe": diga ao cliente, em ' +
-        'linguagem simples, que a informação será confirmada por uma pessoa, e encerre o turno.',
-      // Contagens e categorias fechadas. O corpo NUNCA entra no detail — é o texto que o
-      // modelo escreveu sobre um cliente, e detail é persistido em before_send_traces.
-      detail: { ancoras: ancoras.length, piso },
+      reason: pertinentes.length === 0 && ancoras.length > 0 ? RECUSA_SEM_PERTINENCIA : RECUSA_SEM_LASTRO,
+      // Contagens e categorias FECHADAS. O corpo e os termos casados NUNCA entram — o
+      // detail é persistido em `before_send_traces`, e o corpo é texto sobre um cliente.
+      detail: {
+        ancoras: ancoras.length,
+        pertinentes: pertinentes.length,
+        piso,
+        // Vocabulário fechado, seguro para o trace — os TERMOS casados nunca saem daqui.
+        categorias: categorias.join(','),
+        frases_sem_ancora: frasesSemAncora,
+        descartadas_por_origem: descartadasPorOrigem,
+      },
     };
   },
 };
+
+const RECUSA_SEM_LASTRO =
+  'esta mensagem afirma um procedimento da operadora sem nenhum trecho do acervo que a sustente. ' +
+  'Não invente o procedimento e não responda "com o que você já sabe": diga ao cliente, em ' +
+  'linguagem simples, que a informação será confirmada por uma pessoa, e encerre o turno.';
+
+const RECUSA_SEM_PERTINENCIA =
+  'os trechos recuperados do acervo falam de OUTRO assunto que não o desta afirmação — eles não a ' +
+  'sustentam, por mais parecidos que tenham parecido na busca. Não use trecho de um assunto para ' +
+  'afirmar sobre outro: diga ao cliente, em linguagem simples, que a informação será confirmada ' +
+  'por uma pessoa, e encerre o turno.';
