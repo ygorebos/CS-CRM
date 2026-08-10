@@ -35,13 +35,13 @@ o projeto vinha sendo desenvolvido publicamente desde abril de 2026 sem tags.
 
 | Métrica | Valor |
 |---|---|
-| Arquivos TS/TSX em `app`+`lib`+`components`+`workers` | 987 |
-| Route handlers (`app/api/**/route.ts`) | 169 |
-| Migrations em `supabase/migrations/` | 81 arquivos, até `0092_stage_names_acentos` |
-| Testes unitários (`*.test.ts(x)`) | 221 arquivos |
-| Invariantes de banco (`tests/invariants/`) | 56 arquivos |
-| Specs E2E (`tests/e2e/`) | 19 |
-| Documentos `.md` em `docs/` | 119 (em 23 subpastas) |
+| Arquivos TS/TSX em `app`+`lib`+`components`+`workers` | 1219 |
+| Route handlers (`app/api/**/route.ts`) | 198 |
+| Migrations em `supabase/migrations/` | 129 arquivos, até `0136_lacuna_sabe_de_qual_operadora` |
+| Testes unitários (`*.test.ts(x)`) | 346 arquivos |
+| Invariantes de banco (`tests/invariants/`) | 94 arquivos |
+| Specs E2E (`tests/e2e/`) | 38 |
+| Documentos `.md` em `docs/` | 148 (em 29 subpastas) |
 | Import cycles | **0** (graphify, medido em árvore anterior) |
 | `console.log` fora de `lib/logger.ts` | **0** |
 | `: any` / `as any` | 7 |
@@ -51,10 +51,20 @@ quase nenhum `any`. Os god nodes do grafo (`fail` 325 arestas, `createAdminClien
 `ok` 305, `audit` 290, `requireRole` 230) são *helpers canônicos* — indicam convenção
 sendo aplicada, não acoplamento acidental.
 
-**Doutrina de migrations está sendo cumprida** — CONFIRMADO: o apêndice idempotente de
-`baseline.sql` cobre até `migration 0092`, que é a última em `supabase/migrations/`. Os
-artefatos de schema andam juntos como a doutrina exige — o kit self-host recebe as
-mudanças. Esse é o invariante mais fácil de quebrar num projeto open-source e ele está de pé.
+**Doutrina de migrations está sendo cumprida** — CONFIRMADO em 2026-08-09: o apêndice
+idempotente de `baseline.sql` cobre até a **última** migration de `supabase/migrations/`, e
+o job `invariants` aplica o baseline em install **e** update a cada PR. Os artefatos de
+schema andam juntos como a doutrina exige. Esse é o invariante mais fácil de quebrar e ele
+está de pé.
+
+> ⚠️ **Não escreva o número da última migration aqui de novo.** A versão anterior deste
+> parágrafo cravava "até `migration 0092`" e usava a igualdade "última do apêndice == última
+> de `migrations/`" como prova. O literal envelheceu 42 migrations e a prova passou a
+> apontar para um fato falso — continuava verde por coincidência, e quem fosse auditar
+> encontraria uma diferença que não existe. Pior: lendo "até 0092", alguém conclui que o
+> `baseline.sql` está atrasado e "conserta" reaplicando à mão o que já está lá. Confira com
+> `ls supabase/migrations/ | tail -1` contra o último bloco `-- ---- ... (migration NNNN)`
+> do apêndice.
 
 ---
 
@@ -203,7 +213,7 @@ Dois HANDOFFs também migraram para `docs/handoffs/`. Restam 3 na raiz (`HANDOFF
 ### 4.9 Divergências de estado nos HANDOFFs 🟡
 
 `HANDOFF.md` afirma "Migration seguinte livre: **0058**" e lista pendência de aplicar `0057`
-no dev DB — mas o repo já tem migrations até **0092**. São 34 migrations de deriva. É
+no dev DB — mas o repo já tem migrations até **0135**. São 76 migrations de deriva. É
 consequência natural de trabalho em branches paralelas, mas ilustra a regra:
 **HANDOFF não é fonte da verdade de schema** — `supabase/migrations/` e `baseline.sql` são.
 **A CONFIRMAR:** se a pendência de dev DB de `0057` ainda existe.
@@ -395,6 +405,77 @@ conserto do gateway, pousando na conversa certa. As seis que existem são
 anteriores e foram repontadas pela 0131. A prova depende do dono responder com a
 tela aberta — `.superpowers/vigia-resposta.mjs` faz a medição em um comando.
 
+## RAG por operadora (spec 002) — 2026-08-09, noite
+
+134 de 140 tarefas fechadas na branch `feat/002-rag-prova-e-remocao` (PR #15). O que segue são
+os **defeitos de produto** que a execução achou — nenhum deles aparecia nas 3.700 asserções de
+unidade, e todos foram achados pela mesma via: usar o produto como o corretor usa, num ambiente
+com as dependências reais de pé.
+
+### Quatro defeitos, e o que cada um ensina
+
+1. **Escopo removido voltava ao recarregar.** A página de Operadoras é Server Component e lê o
+   banco direto; o filtro `deleted_at is null` estava só na rota. Sumia no clique e voltava no
+   F5. *Só a tela pega: teste de rota mede a rota.*
+
+2. **A lacuna não se fechava quando o material chegava** (SC-013), e — depois de consertado — a
+   lista da **Evolução** continuava mostrando a lacuna coberta, porque lia `agent_inbox_items`
+   sem filtrar `status`. Duas metades do mesmo critério; consertar uma e parar ali passaria por
+   pronto. *A lista onde o corretor lê é a que conta.*
+
+3. **Não havia porta para criar a própria operadora.** `POST /api/v1/knowledge-scopes` existia,
+   cumpria FR-002 e passava nos testes dela — e nenhum botão chegava até a rota. O estado vazio
+   ainda mandava "comece carregando um material em Conhecimento", que é a tela que exige um nome
+   já ligado: dois becos apontando um para o outro. *Rota sem porta e tela inexistente são a
+   mesma coisa para quem usa.*
+
+4. **O segundo material carregado em 30 s do primeiro NUNCA era indexado.** O `rag-indexer`
+   devolvia `skipped` na janela de debounce, e `skipped` marca o evento como consumido: fonte
+   `ready`, item gravado, `last_index_status` nulo, tela dizendo "Preparando" para sempre, nada
+   reemitindo. É o modo de falha que FR-004 proíbe pelo nome. Conserto: `retry` com `retry_at`.
+   *Coalescer é juntar a rajada, nunca descartar o que chegou cedo.*
+
+### O que o ambiente ensinou (custou quatro execuções vermelhas)
+
+O defeito 4 **só aparece com Redis de pé**. Sem ele o debounce cai no mapa em memória do
+processo, e cada `next start` começa com a janela limpa — o bug fica invisível exatamente no
+ambiente em que quase todo mundo testa. E a ausência do Redis, antes disso, derrubava o
+`rag-indexer` com um `fetch failed` genérico que aparecia três asserções depois, como "os avisos
+não fecharam", apontando para o lugar errado do produto.
+
+Os comandos de subir Redis + `serverless-redis-http` para o e2e estão no cabeçalho de
+`tests/e2e/lacunas-acionaveis.spec.ts`.
+
+### Medições registradas (`.superpowers/evidence/002-t094-t101/medicao.json`)
+
+| Critério | Medido | Teto | Gestos de tela |
+|---|---|---|---|
+| SC-003 (primeiro material próprio, do login ao primeiro trecho) | **14,7 s** | 300 s | 12 |
+| SC-004 (segundo material) | **44 s**, zero amostras sem base | 120 s | 11 |
+
+Os dois carimbos vêm do Postgres, não do laço do teste. Os **gestos** entram na medição junto com
+o tempo: é a parte que não depende da máquina, e um caminho que cresce em passos reprova mesmo
+que o hardware melhore.
+
+### Fechado (140 de 140)
+
+Todas as tarefas da spec 002 foram fechadas em 2026-08-10. As três frentes que faltavam
+saíram nesta rodada, e cada uma achou defeito:
+
+- **T131** (SC-001/SC-002) — 20 perguntas respondidas por modelo de verdade e julgadas pelo
+  gate de verdade. Com a busca derrubada, 13 de 13 afirmações recusadas; afirmação que
+  sairia sem âncora: zero nas duas rodadas. A primeira versão do instrumento derivava "é
+  afirmação" do próprio veredito do gate — número que não podia subir.
+- **T041/T139** (instalação nasce sabendo, SC-010) — catálogo listado com zero espelhos
+  ligados, e um clique fazendo a busca ancorar na camada curada, no mesmo processo. Duas
+  asserções de tela passaram antes sobre um clique que não tinha persistido: o interruptor é
+  otimista, e o sinal de chegada é a resposta do PATCH.
+- **T040** (curadoria) — corrigir material curado publica a versão 2 e a 1 fica intacta.
+- **T074** e **T128** — sequência de gates e quickstart percorrido, com o que NÃO foi
+  executado declarado por escrito.
+
+O que segue aberto é de outra natureza: os passos 1–3 de F1 do quickstart pedem as 20
+perguntas pelo WhatsApp de teste, e isso é transporte — superfície da spec 004.
 ---
 
 ## Formas de mensagem do WhatsApp (spec 006) — 2026-08-09
@@ -417,7 +498,7 @@ com "campos obrigatórios ausentes". Anunciado e inenviável é pior que ausente
 - **Vocabulário de tipo com UMA fonte** (`lib/messaging/message-types.ts`), da qual o envelope de
   entrada e o enum de envio derivam, com par novo no invariante contra o CHECK do banco. Antes
   eram três listas sem gate entre elas.
-- Duas migrations aditivas: **0132** (índice da projeção) e **0133** (`menu`, `cta_url`,
+- Duas migrations aditivas: **0137** (índice da projeção) e **0138** (`menu`, `cta_url`,
   `location_request` no CHECK).
 
 **Incompleto, e por quê:**

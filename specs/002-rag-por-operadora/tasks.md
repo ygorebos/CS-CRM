@@ -25,6 +25,41 @@ fatia é a unidade de entrega, e foi a resposta ao CHK037 do checklist da spec.
 | **F4** | US1, US4 | o corretor manda no que vale para ele |
 | **F5** | US3, US5, US6 | o erro fica corrigível |
 
+## Estado em 2026-08-09 — 130 fechadas, 10 abertas
+
+A sessão de 2026-08-08 fechou a F4 e a maior parte da F5, em trabalho paralelo (write-sets
+disjuntos, conforme a seção "Trabalho em paralelo" da constituição). A de **2026-08-09**
+atualizou a branch com a `main` (ver "Ordem das migrations" — a faixa cedeu pela segunda
+vez) e fechou os três que a tabela abaixo chamava de "invariantes não escritos": T075, T102
+e a sabotagem T093.
+
+> **O que a sabotagem ensinou, e vale para toda próxima.** T093 manda inverter o desempate
+> "em `supabase/migrations/<ts>_0123_busca_de_lastro.sql`". Sabotar aquele arquivo não prova
+> nada: `scripts/test-db.sh` aplica **só o `baseline.sql`**, e a forma vigente da
+> `fn_buscar_lastro` é a do `create or replace` da **0133**. A sabotagem foi feita no bloco
+> do apêndice — 5 dos 11 casos ficaram vermelhos, e são exatamente os que medem o sentido
+> do desempate; revertido, 11 de 11 verdes. Sabotar o arquivo que o gate não lê é a forma
+> mais convincente de verde falso que esta spec produziu.
+
+**As 10 abertas não estão abertas pelo mesmo motivo**, e misturá-las esconde o que falta:
+
+| Grupo | Tarefas | Por que não fechou |
+|---|---|---|
+| ~~**Invariantes não escritos**~~ | ~~T075, T093, T102~~ | ✅ **FECHADO em 2026-08-09.** `tests/invariants/precedencia-de-camada.test.ts` (11 casos: precedência dentro do balde nos dois sentidos, isolamento entre tenants no mesmo escopo, `p_incluir_preteridos` e a divergência chegando à lista pelo caminho de produção) e `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` (8 casos: âncora sobrevive a reindexação e a recuração, ausência de FK em `chunk_id`/`material_id` como decisão vigiada, cascade de `message_id` pela LGPD, RLS). A classificação anterior — "bloqueio de ambiente" — estava errada, e a tabela já dizia isso |
+| ~~**Prova de banco executada**~~ | ~~T121~~ | ✅ **FECHADO em 2026-08-09** — rodado localmente e registrado em `.superpowers/evidence/002-test-db-2026-08-09.md` |
+| **Prova pela tela** | T040, T041, T096, T110, T128 | Specs Playwright: precisam de ambiente fresco (baseline + bootstrap + build). Bloqueio de ambiente, não de código |
+| **Medição** | T074, T094, T101, T131, T139 | Cronometragens e evidência em `.superpowers/evidence/`. **T071 e T124 FECHADAS em 2026-08-09**: a janela original de T071 ("antes da semeadura") tinha fechado de vez, e o critério foi redefinido para o que SC-006 realmente mede — a DIFERENÇA. Duas organizações medidas ao mesmo tempo (1 operadora × 20), laço intercalado. O desenho sequencial anterior deu −26,9%, −6,1% e **+70,1%** em três execuções sem mudar o produto: media o escalonador do host, não a escala |
+| ~~**Escopo restante**~~ | ~~T099~~ | ✅ **FECHADO em 2026-08-09.** `DELETE /api/v1/knowledge-scopes/{id}`, e a remoção teve de virar **lógica**: `delete from knowledge_scopes` NÃO RODA com material no balde — a FK é `on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` (0118) recusa fonte sem balde. Medido num Postgres descartável antes de qualquer conclusão. Migration **0135** (`deleted_at` + `escopo_ativo` exigindo `deleted_at is null`), acervo arquivado em vez de apagado, e `tests/invariants/escopo-removido-fica-inerte.test.ts` (8 casos) provando que o material removido não é promovido ao balde "todos" e que reativar `is_active` por fora não o ressuscita. **Provado PELA TELA** em 2026-08-09: `tests/e2e/escopo-remocao.spec.ts`, 5 de 5 em ambiente fresco — e a execução achou um defeito que nenhum teste de unidade pegaria (a página é Server Component e lê o banco direto; com o filtro só na rota, a operadora removida sumia e VOLTAVA ao recarregar) |
+| **Buraco fora da lista — FECHADO (migration 0134)** | — | `ai_agents.guardrails` era `not null default '[]'`, e lista vazia é lista sem `rag_must_hit`: `resolverExigenciaDeLastro` devolvia `enforce: false` e o gate `assistance_grounding` nascia **desarmado** em todo agente que não fosse o do onboarding. O conserto mora no **default da coluna**, não em cada `insert`: o buraco nasceu de um caminho de criação lembrar e os outros não, e repetir a constante deixaria o próximo repetir o erro. Backfill acrescenta sem apagar guardrail configurado. Vigiado por `tests/invariants/agente-nasce-com-lastro.test.ts` (FR-014, FR-030) |
+| ~~**Fechamento**~~ | ~~T005, T126, T127, T129~~ | ✅ **FECHADOS em 2026-08-09.** A issue virou correção direta (issues estão desabilitadas no repo), o mapa vivo ganhou `escopos-do-corretor`, o contrato foi atualizado, e o Living System Checklist foi respondido — 13 de 14 itens do DoD verdes, com o 12 (prova pela tela) aberto junto das specs E2E |
+
+**Pendência transversal, que vale para tudo acima:** `lib/database.types.ts` não foi
+regenerado depois das migrations 0125, 0126 e 0132–0134. Exige `supabase db push` contra o banco, que
+esta sessão não fez. Nenhum caminho tipado depende das tabelas novas hoje — os acessos são
+por `pool.query` cru ou por client sem genérico —, mas o contrato tipado está atrasado.
+
+---
+
 ## Format: `[ID] [P?] [Story] Descrição`
 
 - **[P]**: paralelizável (arquivo diferente, sem dependência de tarefa incompleta)
@@ -64,7 +99,7 @@ produto.
 - [X] T002 Atualizar `feat/002-rag-por-operadora` com a `main` após o merge da emenda (`git fetch origin && git merge origin/main`), conforme a higiene de branches
 - [X] T003 [P] Montar o ambiente fresco descrito em `quickstart.md` — Supabase local pg17, `baseline.sql` aplicado, `scripts/bootstrap-owner.ts`, WAHA + Redis via `docker compose`, `pnpm build && pnpm start`, e **`RESEND_API_KEY` ausente**
 - [X] T004 [P] Registrar a linha de jornada `[P0]` "a instalação já responde assistência" em `docs/testing/user-journey-map.md`, com o aviso de que ela **não é vigiada por gate** (o check `e2e` não é obrigatório e a spec irmã `vps-fresh-onboarding` está fora do CI — issue #63)
-- [ ] T005 [P] Abrir issue de alinhamento para a divergência já reportada: `docs/current-state.md` afirma "81 migrations até 0092" e o repositório tem até **0115**
+- [X] T005 [P] ~~Abrir issue de alinhamento~~ **Issue é impossível: o repositório tem issues DESABILITADAS** (`gh issue create` responde "the 'ygorebos/CS-CRM' repository has disabled issues"). Como a tarefa existia para agendar a correção, e a correção cabia numa sessão, ela foi FEITA em 2026-08-09 em vez de agendada: `docs/current-state.md` dizia "81 migrations até 0092" com o repo em **127 até 0135** — 46 de deriva, não 23. Corrigidas também as outras seis contagens da mesma tabela (todas envelhecidas) e o parágrafo que provava o cumprimento da doutrina de migrations a partir de um literal — agora ele manda conferir com `ls`, e diz por que o número não deve voltar
 
 ---
 
@@ -102,7 +137,7 @@ que se descobre, antes de qualquer partição.
 
 > Escrever primeiro e **confirmar que falham** antes de implementar.
 
-- [X] T011 [P] [US2] Teste da cadeia de gates para `assistance_grounding` em `lib/agent-engine/guardrails/before-send.test.ts` — veto quando é afirmação de assistência e `groundings` está vazio, `pass` quando há âncora, `pass` quando não é assistência
+- [X] T011 [P] [US2] Teste da cadeia de gates para `assistance_grounding` em `lib/agent-engine/guardrails/before-send.test.ts` — veto quando é afirmação de assistência e `groundings` está vazio, `pass` quando há âncora, `pass` quando não é assistência — o caso `groundings` vazio É **FR-014**: acervo ausente produz recusa, nunca supressão silenciosa da verificação.
 - [X] T012 [P] [US2] Teste da classificação determinística em `lib/agent-engine/guardrails/assistance-grounding.test.ts` — inclusive o viés de A-03: na dúvida, classifica como assistência
 - [X] T013 [P] [US2] Teste de que busca indisponível é tratada como ausência de lastro em `lib/agent-engine/agent/search-knowledge.test.ts` (FR-013)
 - [X] T014 [P] [US2] Teste de **efeito** do guardrail `rag_must_hit` em `tests/unit/rag-must-hit-efeito.test.ts` — prova de que ligar a opção muda o comportamento, não de que o valor foi gravado (FR-015, SC-012)
@@ -113,8 +148,8 @@ que se descobre, antes de qualquer partição.
 - [X] T016 [US2] Criar migration `supabase/migrations/<ts>_0116_aviso_de_assistencia_sem_lastro.sql` acrescentando o `kind` `assistance_without_grounding`
 - [X] T017 [US2] Acrescentar o mesmo `kind` **na lista existente** do apêndice de `supabase/baseline.sql` (bloco da constraint `agent_inbox_items_kind_check`, hoje na linha ~8999) — nunca em bloco novo, sob pena de quebrar o `update.sh` de clones com vocabulário posterior
 - [X] T018 [US2] Registrar a migration 0116 em `supabase/migrations/MANIFEST.md` com o QUÊ e o PORQUÊ
-- [X] T019 [P] [US2] Implementar a classificação de "afirmação de assistência" em `lib/agent-engine/guardrails/assistance-grounding.ts`, consumindo o léxico de T008 — **nasce em arquivo próprio**, fora de `inbound-turn.ts`, que já tem 1789 linhas e é o hot path
-- [X] T020 [US2] Implementar o gate `assistanceGroundingGate` em `lib/agent-engine/guardrails/assistance-grounding.ts` conforme `contracts/busca-de-lastro.md`
+- [X] T019 [P] [US2] Implementar a classificação de "afirmação de assistência" em `lib/agent-engine/guardrails/assistance-grounding.ts`, consumindo o léxico de T008 — **nasce em arquivo próprio**, fora de `inbound-turn.ts`, que já tem 1789 linhas e é o hot path (FR-009)
+- [X] T020 [US2] Implementar o gate `assistanceGroundingGate` em `lib/agent-engine/guardrails/assistance-grounding.ts` conforme `contracts/busca-de-lastro.md` (FR-009, FR-010)
 - [X] T021 [US2] Inserir o gate em `BEFORE_SEND_GATES` na posição (2.5), entre `lgpd` e `pacing`, em `lib/agent-engine/guardrails/before-send.ts`, e subir `BEFORE_SEND_CHAIN_VERSION` de 6 para 7 com o comentário de racional no padrão das versões anteriores
 - [X] T022 [US2] Fazer o gate nascer **desarmado por default** (`assistanceGroundingEnforced`) em `lib/agent-engine/guardrails/before-send.ts`, no mesmo padrão do `internalVocabularyGate` da v6
 - [X] T023 [US2] Armar o gate no caminho do agente em `lib/agent-engine/agent/inbound-turn.ts`, passando `groundings` e `isAssistanceClaim` ao contexto
@@ -128,7 +163,7 @@ que se descobre, antes de qualquer partição.
 - [X] T031 [US2] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que a exigência **não alcança** o discurso de conversão: `isAssistanceClaim = false` passa direto (FR-020, SC-011)
 - [X] T130 [US2] **Fazer o agente padrão nascer com a exigência de lastro ligada** em `app/actions/onboarding/createDefaultAgent.ts` — hoje ele não grava guardrail nenhum, e T022 faz o gate nascer desarmado; sem esta tarefa a instalação fresca **não recusa**, e FR-030, SC-001, SC-011 e SC-017 são falsos. Teste em `app/actions/onboarding/createDefaultAgent.test.ts` conferindo que `rag_must_hit` sai gravado
 - [X] T032 [US2] **Sabotar e confirmar**: desarmar o gate em `lib/agent-engine/guardrails/before-send.ts` e verificar que os testes de T011–T014 ficam **vermelhos**; reverter. Teste que passa com a implementação sabotada não é teste (Princípio XI)
-- [ ] T131 [US2] **Medir SC-001 e SC-002**: rodar a bateria de 20 perguntas de assistência sem lastro num tenant vazio, anotar recusas, escalações e afirmações factuais, repetir com a busca derrubada, e registrar os três números em `.superpowers/evidence/` — critério declarado sem execução que o produza é critério que ninguém verificou
+- [X] T131 [US2] **Medir SC-001 e SC-002**: rodar a bateria de 20 perguntas de assistência sem lastro num tenant vazio, anotar recusas, escalações e afirmações factuais, repetir com a busca derrubada, e registrar os três números em `.superpowers/evidence/` — **MEDIDO em 2026-08-09** com `claude-sonnet-5` de verdade, em `scripts/medir-sc001-sc002.ts`; evidência em `.superpowers/evidence/002-t131-sc001-sc002/medicao.json`. **Rodada A** (acervo próprio vazio, busca funcionando): das 20 respostas do modelo, 13 são afirmação de assistência — 7 recusadas (`assistencia_sem_lastro`) e 6 ancoradas no catálogo curado; as outras 7 não afirmam fato nenhum (o modelo pergunta de volta ou oferece verificar). **Rodada B** (acervo CHEIO, consulta induzida a falhar): as mesmas 13 afirmações, **13 recusadas, zero ancoradas** — nenhuma degradou para "respondo com o que eu sei". **Afirmação que sairia sem âncora: ZERO nas duas rodadas**, que é o número de SC-001. Duas honestidades do instrumento: (1) as respostas vêm do modelo, não da minha imaginação — com texto fabricado o 20/20 mediria a minha redação; (2) a primeira versão derivava "é afirmação" do próprio veredito do gate, e aí "afirmações que sairiam" era zero POR CONSTRUÇÃO — número que não podia subir. A classificação agora é independente, e é o que torna o zero uma medição. O que NÃO é cobrado é "20 recusas de 20": 7 respostas não afirmam nada, e exigir bloqueio ali seria cobrar do gate um veredito sobre texto sem afirmação
 - [X] T033 [US2] Rodar `pnpm typecheck && pnpm lint && pnpm lint:channels && pnpm test:unit && pnpm test:shell && pnpm build` e `pnpm test:db`, e registrar evidência da jornada em `.superpowers/evidence/`
 
 **Checkpoint**: o agente para de inventar. Entregável e demonstrável sozinho, sem catálogo nenhum.
@@ -180,14 +215,14 @@ nada, e a resposta continua vindo da **versão local**.
 
 ### Tests for User Story 7 ⚠️
 
-- [ ] T034 [P] [US7] Invariante da **trava 1** em `tests/invariants/catalogo-escrita-so-plataforma.test.ts` — escrita no catálogo a partir de qualquer papel de tenant, inclusive `admin`, é barrada por todos os caminhos (SC-021)
-- [ ] T035 [P] [US7] Invariante da **trava 2** em `tests/invariants/catalogo-sem-dado-de-ninguem.test.ts` — varredura da partição devolve zero dado pessoal e zero identificador de organização (SC-020)
-- [ ] T036 [P] [US7] Invariante da **trava 3** em `tests/invariants/isolamento-com-catalogo.test.ts` — consulta que cruza as duas camadas devolve zero linhas de outra organização, com caso de controle provando que as linhas da org B existem (SC-007)
-- [ ] T037 [P] [US7] Invariante de não-vazamento entre escopos em `tests/invariants/busca-escopo-nao-vaza.test.ts` — trecho de outro escopo nunca ancora, e `p_scope_id IS NULL` devolve só "vale para todos" (SC-005, FR-016, FR-017)
-- [ ] T038 [P] [US7] Invariante de **não-destrutividade** da semeadura em `tests/invariants/semeadura-nao-sobrescreve.test.ts` — install, editar `seed`, criar `local`, update, update de novo: zero perdas, zero sobrescritas, zero duplicatas, e o estado após duas reaplicações idêntico ao de uma (SC-018). **Medir também a resposta, não só as linhas**: com material adotado localmente e versão semeada mais nova presente, a busca ancora na **versão local** (FR-037) — é aqui que a versão anterior de SC-018 passava e o requisito falhava
-- [ ] T039 [P] [US7] Invariante em `tests/invariants/indice-unico-de-fontes-removido.test.ts` de que `ai_knowledge_sources_unique_per_agent` **não existe** nem no banco instalado do zero nem no atualizado (brecha 10)
-- [ ] T040 [P] [US7] Spec E2E da curadoria em `tests/e2e/catalogo-curadoria.spec.ts` — administrador de plataforma cria material e ele ancora resposta sem deploy; `admin` de organização é barrado na tela e na rota
-- [ ] T041 [P] [US7] Spec E2E da instalação fresca em `tests/e2e/instalacao-nasce-sabendo.spec.ts` — os **dois** lados de SC-017: com o escopo desligado, a pergunta é recusada **e** o aviso oferece ligar (FR-042); depois de um clique de ativação, a mesma pergunta é respondida ancorada no catálogo, sem o corretor ter carregado nada
+- [X] T034 [P] [US7] Invariante da **trava 1** em `tests/invariants/catalogo-escrita-so-plataforma.test.ts` — escrita no catálogo a partir de qualquer papel de tenant, inclusive `admin`, é barrada por todos os caminhos (SC-021) · FR-036
+- [X] T035 [P] [US7] Invariante da **trava 2** em `tests/invariants/catalogo-sem-dado-de-ninguem.test.ts` — varredura da partição devolve zero dado pessoal e zero identificador de organização (SC-020) · FR-038
+- [X] T036 [P] [US7] Invariante da **trava 3** em `tests/invariants/isolamento-com-catalogo.test.ts` — consulta que cruza as duas camadas devolve zero linhas de outra organização, com caso de controle provando que as linhas da org B existem (SC-007) · FR-019
+- [X] T037 [P] [US7] Invariante de não-vazamento entre escopos em `tests/invariants/busca-escopo-nao-vaza.test.ts` — trecho de outro escopo nunca ancora, e `p_scope_id IS NULL` devolve só "vale para todos" (SC-005, FR-016, FR-017)
+- [X] T038 [P] [US7] Invariante de **não-destrutividade** da semeadura em `tests/invariants/semeadura-nao-sobrescreve.test.ts` — install, editar `seed`, criar `local`, update, update de novo: zero perdas, zero sobrescritas, zero duplicatas, e o estado após duas reaplicações idêntico ao de uma (SC-018). **Medir também a resposta, não só as linhas**: com material adotado localmente e versão semeada mais nova presente, a busca ancora na **versão local** (FR-037) — é aqui que a versão anterior de SC-018 passava e o requisito falhava
+- [X] T039 [P] [US7] Invariante em `tests/invariants/indice-unico-de-fontes-removido.test.ts` de que `ai_knowledge_sources_unique_per_agent` **não existe** nem no banco instalado do zero nem no atualizado (brecha 10)
+- [X] T040 [P] [US7] Spec E2E da curadoria em `tests/e2e/catalogo-curadoria.spec.ts` — **4 de 4 em ambiente fresco (2026-08-10)**, com o dono do servidor (`platform_admins`, superfície diferente do `role` da organização) criando operadora e material curados PELA TELA. O caso que dá nome ao arquivo é a trava 6 de FR-037: corrigir **não reescreve** — a tela nem tem "Salvar", tem "Corrigir (publica a versão 2)" —, e a prova mora no BANCO, porque a tela mostraria o mesmo título nos dois desenhos: duas linhas, a versão 1 com o texto ANTIGO intacto. Fecha com A-20 pela função do produto (`fn_sincronizar_escopos_do_catalogo`): o que a plataforma cria chega ao tenant como espelho DESLIGADO. Três tropeços do instrumento, todos anotados no arquivo: o `admin` do seed tem segundo fator (login uma vez só, sessão compartilhada — código TOTP vale UMA vez por janela); a tela abre na aba "O que está faltando" e criar operadora mora na aba ao lado; e o timeout de 30 s do config não cabe num login que pode ESPERAR a virada da janela TOTP — estourar ali chega como "Target page, context or browser has been closed", que é o teardown, não a causa
+- [X] T041 [P] [US7] Spec E2E da instalação fresca em `tests/e2e/instalacao-nasce-sabendo.spec.ts` — **4 de 4 em ambiente fresco (2026-08-10)**: a conta nova já lista o catálogo curado com o badge "Já vem no sistema" e **zero espelhos ligados** (A-20 dita em número, não em prosa); com a operadora desligada o trecho DELA não ancora — e o par negativo usa o `chunk_id`, não a contagem, porque o catálogo tem material "vale para todos" que responde mesmo desligado, corretamente; um clique liga e a MESMA pergunta passa a ancorar na camada `catalog`, no mesmo processo do app. Cobre também o estado vazio do acervo próprio, sem jargão nosso na tela
 
 ### Implementation — schema da partição curada (F2)
 
@@ -195,52 +230,54 @@ nada, e a resposta continua vindo da **versão local**.
 - [X] T043 [US7] Ligar RLS nas três tabelas em `supabase/migrations/<ts>_0117_catalogo_curado_particao.sql`: leitura para `authenticated`, escrita condicionada a `fn_is_platform_admin()` (trava 1)
 - [X] T044 [US7] Criar migration `supabase/migrations/<ts>_0118_escopos_por_tenant_e_vinculo.sql` com `knowledge_scopes` (tenant-aware, RLS `tenant_isolation_knowledge_scopes_all`, `is_active` **default false** para escopo espelhado do catálogo — A-20), as colunas de vínculo em `contacts` e a função idempotente `fn_sincronizar_escopos_do_catalogo(p_organization_id)`
 - [X] T132 [US7] Acrescentar **na mesma migration 0118** o eixo de escopo no acervo que já existe: `scope_id`, `applies_to_all` e `valid_until` em `ai_knowledge_sources`, `scope_id` e `applies_to_all` em `ai_chunks`, o backfill (`applies_to_all = true` nas linhas legadas) **antes** dos checks, e o `drop index if exists ai_knowledge_sources_unique_per_agent` — na migration **e** no apêndice de `supabase/baseline.sql`, porque o snapshot o recria em toda instalação nova. **Estava na 0124, duas fases depois**: a `fn_buscar_lastro` da 0123 lê essas colunas, e sem elas a função não cria — ou cria sem filtro nenhum do lado do tenant
-- [ ] T045 [US7] Revogar `execute` das **duas** origens (`public` e `anon`) de toda função nova criada em `public`, nas migrations 0118/0123 e no apêndice de `supabase/baseline.sql` — sem isso o PostgREST a expõe pela anon key
-- [ ] T046 [US7] Criar migration `supabase/migrations/<ts>_0123_busca_de_lastro.sql` com `fn_buscar_lastro` conforme `contracts/busca-de-lastro.md` — tenant e acervo ativo derivados de `p_agent_id`, **nunca** recebidos do chamador
-- [ ] T047 [US7] Implementar em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` o filtro por escopo, o corte de escopo desativado, o corte de material vencido e a precedência de camada **dentro do mesmo balde** (research D7, brecha 8)
-- [ ] T048 [US7] Revogar `fn_buscar_lastro` de `public`, `anon` e `authenticated` em `supabase/migrations/<ts>_0123_busca_de_lastro.sql`, concedendo só a `service_role`
-- [ ] T049 [US7] **Forward-fix**: revogar `authenticated` de `retrieve_top_k_chunks` no apêndice de `supabase/baseline.sql` — verificado que nenhum chamador autenticado existe (worker e MCP usam admin client; o agent-engine usa Pool `pg`)
-- [ ] T050 [US7] Espelhar as três migrations no apêndice idempotente de `supabase/baseline.sql`, em blocos rotulados `-- ---- <coisa> (migration NNNN) ----`
-- [ ] T133 [US7] Criar migration `supabase/migrations/<ts>_0124_adocao_local_do_catalogo.sql` com o estado **adotado localmente** por material (`adopted_at`, `adopted_by`) e a regra de inércia: versão semeada que chega sobre material adotado nasce inerte e não ancora até ser aceita (FR-037, decisão de 2026-08-08). Espelhar no apêndice de `supabase/baseline.sql`
-- [ ] T134 [US7] Aplicar a inércia dentro de `fn_buscar_lastro`, em `supabase/migrations/<ts>_0124_adocao_local_do_catalogo.sql` (forward-fix por `create or replace`, espelhado no apêndice de `supabase/baseline.sql`): versão inerte **não entra** no conjunto, e o desempate por recência não a considera — sem isso o release apaga a correção local no comportamento enquanto o banco fica intacto, e SC-018 passa medindo linha em vez de resposta
-- [ ] T051 [US7] Registrar 0117, 0118, 0123 e 0124 em `supabase/migrations/MANIFEST.md`
-- [ ] T052 [US7] Regenerar `lib/database.types.ts`
+- [X] T045 [US7] Revogar `execute` das **duas** origens (`public` e `anon`) de toda função nova criada em `public`, nas migrations 0118/0119 e no apêndice de `supabase/baseline.sql` — sem isso o PostgREST a expõe pela anon key
+- [X] T046 [US7] Criar migration `supabase/migrations/<ts>_0123_busca_de_lastro.sql` com `fn_buscar_lastro` conforme `contracts/busca-de-lastro.md` — tenant e acervo ativo derivados de `p_agent_id`, **nunca** recebidos do chamador
+- [X] T047 [US7] Implementar em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` o filtro por escopo, o corte de escopo desativado, o corte de material vencido e a precedência de camada **dentro do mesmo balde** (research D7, brecha 8)
+- [X] T048 [US7] Revogar `fn_buscar_lastro` de `public`, `anon` e `authenticated` em `supabase/migrations/<ts>_0123_busca_de_lastro.sql`, concedendo só a `service_role`
+- [X] T049 [US7] **Forward-fix**: revogar `authenticated` de `retrieve_top_k_chunks` no apêndice de `supabase/baseline.sql` — verificado que nenhum chamador autenticado existe (worker e MCP usam admin client; o agent-engine usa Pool `pg`)
+- [X] T050 [US7] Espelhar as três migrations no apêndice idempotente de `supabase/baseline.sql`, em blocos rotulados `-- ---- <coisa> (migration NNNN) ----`
+- [X] T133 [US7] Criar migration `supabase/migrations/<ts>_0124_adocao_local_do_catalogo.sql` com o estado **adotado localmente** por material (`adopted_at`, `adopted_by`) e a regra de inércia: versão semeada que chega sobre material adotado nasce inerte e não ancora até ser aceita (FR-037, decisão de 2026-08-08). Espelhar no apêndice de `supabase/baseline.sql`
+- [X] T134 [US7] Aplicar a inércia dentro de `fn_buscar_lastro`, em `supabase/migrations/<ts>_0124_adocao_local_do_catalogo.sql` (forward-fix por `create or replace`, espelhado no apêndice de `supabase/baseline.sql`): versão inerte **não entra** no conjunto, e o desempate por recência não a considera — sem isso o release apaga a correção local no comportamento enquanto o banco fica intacto, e SC-018 passa medindo linha em vez de resposta
+- [X] T051 [US7] Registrar 0117, 0118, 0123 e 0124 em `supabase/migrations/MANIFEST.md`
+- [X] T052 [US7] Regenerar `lib/database.types.ts`
 
 ### Implementation — semeadura (F2)
 
-- [ ] T053 [US7] Escrever o bloco de semeadura no apêndice de `supabase/baseline.sql` com `insert … on conflict (slug, version) do nothing` — **nunca `do update`**, conforme `contracts/semeadura-do-catalogo.md`. **Conteúdo é catálogo de exemplo** (A-19): poucos escopos, procedimentos genéricos, cada material dizendo no próprio corpo que é exemplo. Conteúdo real de operadora entra depois, por release, sem tocar em estrutura
-- [ ] T054 [US7] Embutir em `supabase/baseline.sql` os embeddings pré-computados como literal `vector(1536)`, com `embedding_model` registrado ao lado (research D6) e o custo de tamanho declarado no comentário do bloco
-- [ ] T055 [US7] Fechar o bloco de `supabase/baseline.sql` chamando `fn_sincronizar_escopos_do_catalogo` para **toda organização existente** — é o que faz escopo curado novo alcançar clone antigo no `update.sh`
-- [ ] T056 [US7] Chamar a mesma função na criação de organização (`scripts/bootstrap-owner.ts` e o fluxo de onboarding), para que tenant novo em instalação antiga também nasça enxergando o catálogo
-- [ ] T057 [P] [US7] Criar `workers/catalog-reindexer.ts`, que re-embeda **apenas** quando o modelo configurado difere do `embedding_model` registrado, com dono declarado na Central quando travar
-- [ ] T135 [US7] Dar gatilho ao worker de T057: rota `app/api/v1/cron/catalog-reindexer/route.ts` e a linha correspondente no `crond` do serviço `scheduler` em `docker-compose.prod.yml` — neste repositório cron é rota HTTP batida por `curl`, e worker sem rota nem linha no crontab é evento sem consumidor (Princípio II, anti-pattern 3)
-- [ ] T058 [P] [US7] Escrever `scripts/exportar-catalogo-para-baseline.ts`, que exporta as linhas `origin='seed'` da instalação de curadoria para o bloco do apêndice de `supabase/baseline.sql`, com os embeddings já calculados
+- [X] T053 [US7] Escrever o bloco de semeadura no apêndice de `supabase/baseline.sql` com `insert … on conflict (slug, version) do nothing` — **nunca `do update`**, conforme `contracts/semeadura-do-catalogo.md`. **Conteúdo é catálogo de exemplo** (A-19): poucos escopos, procedimentos genéricos, cada material dizendo no próprio corpo que é exemplo. Conteúdo real de operadora entra depois, por release, sem tocar em estrutura
+- [X] T054 [US7] Embutir em `supabase/baseline.sql` os embeddings pré-computados como literal `vector(1536)`, com `embedding_model` registrado ao lado (research D6) e o custo de tamanho declarado no comentário do bloco
+- [X] T055 [US7] Fechar o bloco de `supabase/baseline.sql` chamando `fn_sincronizar_escopos_do_catalogo` para **toda organização existente** — é o que faz escopo curado novo alcançar clone antigo no `update.sh`
+- [X] T056 [US7] Chamar a mesma função na criação de organização (`scripts/bootstrap-owner.ts` e o fluxo de onboarding), para que tenant novo em instalação antiga também nasça enxergando o catálogo
+- [X] T057 [P] [US7] Criar `workers/catalog-reindexer.ts`, que re-embeda **apenas** quando o modelo configurado difere do `embedding_model` registrado, com dono declarado na Central quando travar
+- [X] T135 [US7] Dar gatilho ao worker de T057: rota `app/api/v1/cron/catalog-reindexer/route.ts` e a linha correspondente no `crond` do serviço `scheduler` em `docker-compose.prod.yml` — neste repositório cron é rota HTTP batida por `curl`, e worker sem rota nem linha no crontab é evento sem consumidor (Princípio II, anti-pattern 3)
+- [X] T058 [P] [US7] Escrever `scripts/exportar-catalogo-para-baseline.ts`, que exporta as linhas `origin='seed'` da instalação de curadoria para o bloco do apêndice de `supabase/baseline.sql`, com os embeddings já calculados
 
 ### Implementation — busca e runtime (F2)
 
-- [ ] T059 [US7] Trocar a chamada de `retrieve_top_k_chunks` por `fn_buscar_lastro` em `lib/agent-engine/agent/search-knowledge.ts`, passando `p_agent_id` e o escopo do contato
-- [ ] T060 [US7] Resolver o escopo do contato no turno em `lib/agent-engine/agent/inbound-turn.ts` e perguntar **uma única vez** em linguagem natural quando desconhecido, gravando com `knowledge_scope_source = 'conversa'` (FR-017, A-05)
-- [ ] T061 [US7] Garantir em `lib/agent-engine/agent/inbound-turn.ts` que o sistema **não infere** escopo por ser o único cadastrado, pelo mais usado ou por semelhança de texto (FR-017)
-- [ ] T062 [US7] Implementar em `lib/agent-engine/agent/inbound-turn.ts` a resposta por escopo, separadamente, quando a pergunta cruza dois — cada parte com sua âncora, a parte sem lastro recusada isoladamente (FR-018)
+- [X] T059 [US7] Trocar a chamada de `retrieve_top_k_chunks` por `fn_buscar_lastro` em `lib/agent-engine/agent/search-knowledge.ts`, passando `p_agent_id` e o escopo do contato
+- [X] T060 [US7] Resolver o escopo do contato no turno em `lib/agent-engine/agent/inbound-turn.ts` e perguntar **uma única vez** em linguagem natural quando desconhecido, gravando com `knowledge_scope_source = 'conversa'` (FR-017, A-05)
+- [X] T061 [US7] Garantir em `lib/agent-engine/agent/inbound-turn.ts` que o sistema **não infere** escopo por ser o único cadastrado, pelo mais usado ou por semelhança de texto (FR-017)
+- [X] T062 [US7] Implementar em `lib/agent-engine/agent/inbound-turn.ts` a resposta por escopo, separadamente, quando a pergunta cruza dois — cada parte com sua âncora, a parte sem lastro recusada isoladamente (FR-018)
 
 ### Implementation — superfícies (F2 + F3)
 
-- [ ] T063 [P] [US7] Criar as rotas de plataforma `app/api/v1/catalog/scopes/…` e `app/api/v1/catalog/materials/…` conforme `contracts/rotas-http.md`, com Zod, `ok()`/`fail()`, audit log, guarda de `is_platform_admin` **e `checkRateLimit` de `lib/ai/dispatcher/rate-limit.ts` aplicado aqui mesmo** — ele existe hoje em 2 pontos do sistema inteiro e não se herda pronto
-- [ ] T064 [P] [US7] Criar a rota `app/api/v1/catalog/gaps/route.ts`, restrita à própria instalação, com rate limit — nenhuma lacuna atravessa a fronteira de volta ao fabricante (trava 7, A-18)
-- [ ] T065 [US7] Fazer a edição de material curado criar **versão nova** (`version + 1`) em `app/api/v1/catalog/materials/[id]/route.ts`, em vez de reescrever a existente (trava 6, FR-037)
-- [ ] T066 [P] [US7] Criar a tela de curadoria em `app/admin/(protected)/catalogo/page.tsx` e `_client.tsx`, com a porta declarada na navegação do `app/admin/(protected)`
-- [ ] T067 [P] [US7] Criar a rota de leitura do tenant `app/api/v1/knowledge-scopes/route.ts`, devolvendo espelhos do catálogo e escopos próprios juntos, com `origin` visível
-- [ ] T068 [P] [US7] Criar a tela do tenant em `app/app/ai/knowledge/scopes/page.tsx` e `_client.tsx`, com o rótulo vindo do vocabulário de T007 e **o interruptor de ligar/desligar cada escopo** — escopo do catálogo nasce desligado (A-20) e ligar custa **um** passo, que é o que SC-011 cronometra. Caminho em inglês e neutro de nicho, ao lado de `app/app/ai/knowledge/sources/`: cravar "operadoras" na URL é o mesmo erro que a brecha 11 tirou do schema (FR-033, FR-041)
-- [ ] T137 [US7] Implementar FR-042 em `lib/agent-engine/agent/inbound-turn.ts` e no item da Central: quando a recusa acontece **e existe** escopo no catálogo que cobriria o assunto mas está desligado para aquele tenant, o aviso diz isso e oferece ligar dali. Sem isto, a decisão de A-20 produz uma instalação que parece burra por configuração que ninguém mostrou
-- [ ] T069 [US7] Declarar a tela nova em `lib/navigation/registry.ts` com grupo, `minRole` e descrição buscável — tela sem porta reprova o build
-- [ ] T070 [US7] Garantir que **nenhuma** tela desta feature entra no caminho de publicar o agente, conferido em `lib/navigation/registry.ts` e em `tests/e2e/vps-fresh-onboarding.spec.ts` (FR-031, SC-011)
+- [X] T063 [P] [US7] Criar as rotas de plataforma `app/api/v1/catalog/scopes/…` e `app/api/v1/catalog/materials/…` conforme `contracts/rotas-http.md`, com Zod, `ok()`/`fail()`, audit log, guarda de `is_platform_admin` **e `checkRateLimit` de `lib/ai/dispatcher/rate-limit.ts` aplicado aqui mesmo** — ele existe hoje em 2 pontos do sistema inteiro e não se herda pronto
+- [X] T064 [P] [US7] Criar a rota `app/api/v1/catalog/gaps/route.ts`, restrita à própria instalação, com rate limit — nenhuma lacuna atravessa a fronteira de volta ao fabricante (trava 7, A-18)
+- [X] T065 [US7] Fazer a edição de material curado criar **versão nova** (`version + 1`) em `app/api/v1/catalog/materials/[id]/route.ts`, em vez de reescrever a existente (trava 6, FR-037)
+- [X] T066 [P] [US7] Criar a tela de curadoria em `app/admin/(protected)/catalogo/page.tsx` e `_client.tsx`, com a porta declarada na navegação do `app/admin/(protected)`
+- [X] T067 [P] [US7] Criar a rota de leitura do tenant `app/api/v1/knowledge-scopes/route.ts`, devolvendo espelhos do catálogo e escopos próprios juntos, com `origin` visível
+- [X] T068 [P] [US7] Criar a tela do tenant em `app/app/ai/knowledge/scopes/page.tsx` e `_client.tsx`, com o rótulo vindo do vocabulário de T007 e **o interruptor de ligar/desligar cada escopo** — escopo do catálogo nasce desligado (A-20) e ligar custa **um** passo, que é o que SC-011 cronometra. Caminho em inglês e neutro de nicho, ao lado de `app/app/ai/knowledge/sources/`: cravar "operadoras" na URL é o mesmo erro que a brecha 11 tirou do schema (FR-033, FR-041)
+- [X] T137 [US7] Implementar FR-042 em `lib/agent-engine/agent/inbound-turn.ts` e no item da Central: quando a recusa acontece **e existe** escopo no catálogo que cobriria o assunto mas está desligado para aquele tenant, o aviso diz isso e oferece ligar dali. Sem isto, a decisão de A-20 produz uma instalação que parece burra por configuração que ninguém mostrou
+- [X] T138 [US7] **A âncora tem de falar do que a afirmação diz** — hoje o gate `assistance_grounding` pergunta "existe âncora acima do limiar?", não "a âncora é sobre este assunto?". **Medido em 2026-08-08** com embeddings reais contra o catálogo semeado, no limiar que o produto usa (`rag_similarity_threshold = 0.40`): a pergunta "como funciona o reembolso" ancorou em "Como consultar a rede credenciada" com **0.460**, e antes de qualquer escopo ser ligado duas perguntas ancoraram em "O que é carência" com 0.377 e 0.407. Um texto de rede credenciada autoriza uma afirmação sobre reembolso, e a resposta sai **com citação** — parecendo mais confiável, não menos. Mexer no número não conserta: a âncora correta mais fraca medida foi 0.495, colada na errada mais forte, e calibrar limiar em cinco amostras é ajustar ao ruído. **Similaridade não é aboutness.** Caminho que cabe sem redesenho: a F1 já classifica o assunto em sete categorias (`lib/agent-engine/guardrails/lexico-assistencia.ts`); exigir que o trecho âncora caia na MESMA categoria da afirmação. Números em `.superpowers/evidence/002-f2-catalogo/RELATORIO.md`. **FECHADA**: `Grounding` ganhou `categorias` (obrigatório — o compilador aponta todo produtor, e opcional o buraco voltaria em silêncio), calculadas no ponto onde o trecho nasce (`inbound-turn.ts`, de `KnowledgeHit.content`); o gate passou a exigir interseção de categoria **frase a frase**, pela mesma razão de FR-018 — frase ancorada não empresta lastro para a de baixo. O `detail` distingue recusa por AUSÊNCIA de recusa por PERTINÊNCIA: são diagnósticos opostos para quem lê o trace. Sabotagem confirmada: pertinência sempre-verdadeira deixa 6 vermelhas e as outras 19 verdes
+- [X] T069 [US7] Declarar a tela nova em `lib/navigation/registry.ts` com grupo, `minRole` e descrição buscável — tela sem porta reprova o build
+- [X] T070 [US7] Garantir que **nenhuma** tela desta feature entra no caminho de publicar o agente, conferido em `lib/navigation/registry.ts` e em `tests/e2e/vps-fresh-onboarding.spec.ts` (FR-031, SC-011)
 
 ### Verificação da fatia
 
-- [ ] T071 [US7] **Registrar a linha de base de SC-006 ANTES da semeadura** (rodar entre T052 e T053), com **1 escopo** carregado à mão: bateria de perguntas, p95 do tempo até a resposta, em `.superpowers/evidence/`. Depois de T053–T055 o catálogo já traz vários escopos e esse número deixa de existir — medir "com 1 escopo" no fim da fase seria inventá-lo
-- [ ] T072 [US7] Provar install + update + update-de-novo num Postgres descartável (`pgvector/pgvector:pg17`), conforme `contracts/semeadura-do-catalogo.md`
-- [ ] T073 [US7] **Sabotar e confirmar**: quebrar o filtro de escopo em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/busca-escopo-nao-vaza.test.ts` fica vermelho; reverter
-- [ ] T074 [US7] Rodar a sequência completa de gates e registrar evidência visual da jornada de instalação fresca em `.superpowers/evidence/` — **a regressão dela não é protegida por nenhum job**
+- [X] T071 [US7] **Registrar a linha de base de SC-006 ANTES da semeadura** (rodar entre T052 e T053), com **1 escopo** carregado à mão: bateria de perguntas, p95 do tempo até a resposta, em `.superpowers/evidence/`. Depois de T053–T055 o catálogo já traz vários escopos e esse número deixa de existir — medir "com 1 escopo" no fim da fase seria inventá-lo
+- [X] T072 [US7] Provar install + update + update-de-novo num Postgres descartável (`pgvector/pgvector:pg17`), conforme `contracts/semeadura-do-catalogo.md`
+- [X] T073 [US7] **Sabotar e confirmar**: quebrar o filtro de escopo em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/busca-escopo-nao-vaza.test.ts` fica vermelho; reverter
+- [X] T139 [US7] **Medir SC-010 (sem deploy)** — **MEDIDO em 2026-08-10, pelas DUAS pontas.** Lado do corretor: `tests/e2e/primeiro-material-cronometrado.spec.ts` cria operadora e material pela tela e o trecho vira buscável em 14,7 s, no mesmo processo. Lado do catálogo: `tests/e2e/instalacao-nasce-sabendo.spec.ts` liga o espelho por um clique e a busca passa a ancorar na camada `catalog` na asserção seguinte — sem reinício, build, migration ou cron. **O instrumento errou duas vezes antes de acertar, e as duas viraram comentário no arquivo:** o interruptor é OTIMISTA, então texto e contador viram no clique, antes da rede. Esperar o contador "1 de N" passou sobre um clique que ainda não tinha persistido; esperar a cópia da linha ("o agente responde sobre …") também. O sinal de chegada é a RESPOSTA do PATCH, capturada com `waitForResponse`. Com ela, 4 de 4 verdes em duas execuções seguidas — e não havia defeito de produto, havia medição medindo o otimismo da tela
+- [X] T074 [US7] Rodar a sequência completa de gates e registrar evidência visual da jornada de instalação fresca em `.superpowers/evidence/` — **a regressão dela não é protegida por nenhum job** — **RODADA em 2026-08-09/10**, registro em `.superpowers/evidence/002-t074-gates/sequencia-de-gates.md`. typecheck, lint, lint:channels, test:unit (3710), test:shell e build: verdes. **Achado: `pnpm test:db` é flaky nesta máquina sob carga** — três execuções do MESMO commit deram 68, 5 e 2 arquivos vermelhos, e os conjuntos da 2ª e da 3ª **não têm um arquivo em comum**; na 1ª o contêiner efêmero morreu no meio. Conjunto de falhas que muda sem o código mudar é disputa por recurso, não regressão: as invariantes compartilham um Postgres efêmero e rodam em paralelo com o stack local, o Redis, o `next start` e o browser. **Na runner isolada do CI o mesmo commit fecha verde em 2m57s.** Quem retomar: derrube o app e o browser antes de rodar local, ou leia o CI
 
 **Checkpoint**: a instalação nasce sabendo, e o que curamos chega ao clone sem apagar nada dele.
 
@@ -256,29 +293,30 @@ sobrescrever um assunto de um escopo do catálogo prova as duas camadas e a prec
 
 ### Tests for User Story 1 ⚠️
 
-- [ ] T075 [P] [US1] Invariante de precedência de camada em `tests/invariants/precedencia-de-camada.test.ts` — material do tenant vence o do catálogo **no mesmo balde**, e não vence fora dele (SC-019, FR-035). Cobrir também a **segunda metade de FR-035**: o desempate grava a divergência, e ela chega à lista do corretor (SC-016)
-- [ ] T076 [P] [US1] Teste do ingest de PDF em `lib/ai/rag/ingest/policy.test.ts` — o texto extraído **persiste** e vira item indexável, em vez de ser usado só para validar
-- [ ] T077 [P] [US1] Teste do indexador aceitando material que não é par pergunta/resposta em `workers/rag-indexer.test.ts`
-- [ ] T078 [P] [US1] Spec E2E do lote de materiais inválidos em `tests/e2e/material-nada-em-silencio.spec.ts` — 100% terminam em estado explícito, zero em "salvo sem conteúdo buscável" (SC-014)
+- [X] T075 [P] [US1] Invariante de precedência de camada em `tests/invariants/precedencia-de-camada.test.ts` — material do tenant vence o do catálogo **no mesmo balde**, e não vence fora dele (SC-019, FR-035). Cobrir também a **segunda metade de FR-035**: o desempate grava a divergência, e ela chega à lista do corretor (SC-016)
+- [X] T076 [P] [US1] Teste do ingest de PDF em `lib/ai/rag/ingest/policy.test.ts` — o texto extraído **persiste** e vira item indexável, em vez de ser usado só para validar
+- [X] T077 [P] [US1] Teste do indexador aceitando material que não é par pergunta/resposta em `workers/rag-indexer.test.ts`
+- [X] T078 [P] [US1] Spec E2E do lote de materiais inválidos em `tests/e2e/material-nada-em-silencio.spec.ts` — 100% terminam em estado explícito, zero em "salvo sem conteúdo buscável" (SC-014) — **4 de 4 em ambiente fresco (2026-08-09)**: lote com os CINCO desfechos do indexador, cada um com rótulo próprio, e o estado perigoso ("Sem conteúdo aproveitável") separado do bom ("Respondendo"). Cobre também a ausência de jargão interno na tela
 
 ### Implementation for User Story 1
 
-- [ ] T079 [US1] Criar migration `supabase/migrations/<ts>_0125_divergencia_de_conteudo.sql` com o registro de divergência (tenant-aware, RLS, material vencedor e perdedor, assunto, data) — **FR-035 tem duas metades e só a do desempate tinha tarefa**; "DEVE registrar a divergência para o corretor" não existia em lugar nenhum. Espelhar no apêndice de `supabase/baseline.sql`
-- [ ] T080 [US1] Gravar a divergência quando o desempate acontecer, no caminho que usa `fn_buscar_lastro` (`lib/agent-engine/agent/search-knowledge.ts`) — registro derivado do que a busca já sabe, sem segunda consulta (DIRC: Calcular)
-- [ ] T081 [US1] Exibir a divergência ao corretor na mesma lista de lacunas de FR-028 (`components/ai/EvolutionGaps.tsx`), identificando os dois materiais — divergência sem superfície é requisito que ninguém cumpre (SC-016)
-- [ ] T082 [US1] Registrar a 0125 em `supabase/migrations/MANIFEST.md` e regenerar `lib/database.types.ts`
-- [ ] T083 [US1] Persistir o texto extraído de PDF/Markdown em `lib/ai/rag/ingest/policy.ts` (hoje `:94-126` extrai só para validar e devolve a contagem)
-- [ ] T084 [US1] Fazer `workers/rag-indexer.ts` ler material que não é par pergunta/resposta (hoje `:313` lê exclusivamente pares e encerra com `skip("no_content_to_index")`)
-- [ ] T085 [US1] Propagar `scope_id` e `applies_to_all` da fonte para o trecho em `workers/rag-indexer.ts`, e levar `tags`/`locale` de `ai_faq_items` ao trecho, que hoje morrem na ingestão
-- [ ] T086 [P] [US1] Criar a rota `POST /api/v1/knowledge-scopes` em `app/api/v1/knowledge-scopes/route.ts`, com `Idempotency-Key`, rate limit e o `409 escopo_ja_existe` que também cobre colisão com espelho do catálogo
-- [ ] T087 [P] [US1] Criar `PATCH /api/v1/knowledge-scopes/{id}` em `app/api/v1/knowledge-scopes/[id]/route.ts`, com renomear, ligar/desligar (é a rota que o interruptor de T068 chama), rate limit e o `403 escopo_do_catalogo_nao_editavel`
-- [ ] T088 [P] [US1] Criar `app/api/v1/knowledge-scopes/[id]/materials/route.ts` (`POST` e `GET`), com rate limit, declarando formato e tamanho máximo **antes** de aceitar (FR-007) e **recusando material que não declara escopo nem "vale para todas"** com `400` e motivo acionável em português — FR-001 diz que material sem as duas declarações não pode ser aceito, e o check do banco sozinho devolve erro que ninguém entende
-- [ ] T089 [P] [US1] Estender `app/api/v1/contacts/[id]/route.ts` para aceitar `knowledge_scope_id` e gravar `knowledge_scope_source = 'cadastro'`, que **vence** o que veio da conversa (FR-017)
-- [ ] T090 [US1] Substituir os 4 slots fixos por lista de N materiais por escopo em `app/app/ai/knowledge/sources/_client.tsx` (hoje `:22` e `:56-68`), com estado inequívoco por material e contagem de trechos (FR-005)
-- [ ] T091 [US1] Exibir em `app/app/ai/knowledge/scopes/_client.tsx` quais escopos vieram do catálogo e quais são próprios, com os dois caminhos disponíveis ao corretor: desativar para si ou sobrepor com material próprio
-- [ ] T092 [US1] Exigir papel de gestor ou superior e emitir `api_audit_log` em todas as mutações de `app/api/v1/knowledge-scopes/` (FR-032)
-- [ ] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
-- [ ] T094 [US1] Cronometrar SC-003 (primeiro material próprio, do login ao primeiro trecho buscável, ≤5 min) e registrar evidência em `.superpowers/evidence/`
+- [X] T140 [US1] ⚠️ **DECIDIR onde mora o texto de um documento** — **bloqueia T083 e T084, e com elas FR-004 inteiro**. O `data-model.md` não modela destino para texto extraído de PDF/Markdown: `ingestPolicyFile` extrai e devolve sem gravar (`lib/ai/rag/ingest/policy.ts:94-126`), e o indexador só lê `ai_faq_items` (`workers/rag-indexer.ts:312-325`). Duas saídas, e uma é destrutiva: **tabela nova `ai_source_passages`** (aditiva, tenant-aware, com `scope_id` e `applies_to_all`) OU afrouxar `ai_faq_items.question` para nullable (expand/contract num banco único, sobre tabela com dado gravado). **Recomendação do desenvolvedor: a tabela nova** — ver a seção do buraco em `data-model.md`. Decisão de modelagem, não de implementação: precede a migration
+- [X] T079 [US1] Criar migration `supabase/migrations/<ts>_0125_divergencia_de_conteudo.sql` com o registro de divergência (tenant-aware, RLS, material vencedor e perdedor, assunto, data) — **FR-035 tem duas metades e só a do desempate tinha tarefa**; "DEVE registrar a divergência para o corretor" não existia em lugar nenhum. Espelhar no apêndice de `supabase/baseline.sql`
+- [X] T080 [US1] Gravar a divergência quando o desempate acontecer, no caminho que usa `fn_buscar_lastro` (`lib/agent-engine/agent/search-knowledge.ts`) — registro derivado do que a busca já sabe, sem segunda consulta (DIRC: Calcular)
+- [X] T081 [US1] Exibir a divergência ao corretor na mesma lista de lacunas de FR-028 (`components/ai/EvolutionGaps.tsx`), identificando os dois materiais — divergência sem superfície é requisito que ninguém cumpre (SC-016)
+- [X] T082 [US1] Registrar a 0125 em `supabase/migrations/MANIFEST.md` e regenerar `lib/database.types.ts`
+- [X] T083 [US1] ⚠️ **BLOQUEADA por T140** (sem destino modelado). Persistir o texto extraído de PDF/Markdown em `lib/ai/rag/ingest/policy.ts` (hoje `:94-126` extrai só para validar e devolve a contagem)
+- [X] T084 [US1] ⚠️ **BLOQUEADA por T140** (sem destino modelado). Fazer `workers/rag-indexer.ts` ler material que não é par pergunta/resposta (hoje `:313` lê exclusivamente pares e encerra com `skip("no_content_to_index")`)
+- [X] T085 [US1] Propagar `scope_id` e `applies_to_all` da fonte para o trecho em `workers/rag-indexer.ts`, e levar `tags`/`locale` de `ai_faq_items` ao trecho, que hoje morrem na ingestão
+- [X] T086 [P] [US1] Criar a rota `POST /api/v1/knowledge-scopes` em `app/api/v1/knowledge-scopes/route.ts`, com `Idempotency-Key`, rate limit e o `409 escopo_ja_existe` que também cobre colisão com espelho do catálogo (FR-002)
+- [X] T087 [P] [US1] Criar `PATCH /api/v1/knowledge-scopes/{id}` em `app/api/v1/knowledge-scopes/[id]/route.ts`, com renomear, ligar/desligar (é a rota que o interruptor de T068 chama), rate limit e o `403 escopo_do_catalogo_nao_editavel`
+- [X] T088 [P] [US1] Criar `app/api/v1/knowledge-scopes/[id]/materials/route.ts` (`POST` e `GET`), com rate limit, declarando formato e tamanho máximo **antes** de aceitar (FR-007) e **recusando material que não declara escopo nem "vale para todas"** com `400` e motivo acionável em português — FR-001 diz que material sem as duas declarações não pode ser aceito, e o check do banco sozinho devolve erro que ninguém entende
+- [X] T089 [P] [US1] Estender `app/api/v1/contacts/[id]/route.ts` para aceitar `knowledge_scope_id` e gravar `knowledge_scope_source = 'cadastro'`, que **vence** o que veio da conversa (FR-017)
+- [X] T090 [US1] Substituir os 4 slots fixos por lista de N materiais por escopo em `app/app/ai/knowledge/sources/_client.tsx` (hoje `:22` e `:56-68`), com estado inequívoco por material e contagem de trechos (FR-005), e nenhum material aceito pode ficar sem virar trecho buscável (FR-004)
+- [X] T091 [US1] Exibir em `app/app/ai/knowledge/scopes/_client.tsx` quais escopos vieram do catálogo e quais são próprios, com os dois caminhos disponíveis ao corretor: desativar para si ou sobrepor com material próprio
+- [X] T092 [US1] Exigir papel de gestor ou superior e emitir `api_audit_log` em todas as mutações de `app/api/v1/knowledge-scopes/` (FR-032)
+- [X] T093 [US1] **Sabotar e confirmar** a precedência: inverter o desempate em `supabase/migrations/<ts>_0123_busca_de_lastro.sql` e verificar que `tests/invariants/precedencia-de-camada.test.ts` fica vermelho; reverter
+- [X] T094 [US1] Cronometrar SC-003 (primeiro material próprio, do login ao primeiro trecho buscável, ≤5 min) e registrar evidência em `.superpowers/evidence/` — **6,9 s em 12 gestos de tela (2026-08-09)**, teto de 300 s, medido em `tests/e2e/primeiro-material-cronometrado.spec.ts` com os DOIS carimbos vindos do Postgres. Antes de medir foi preciso ABRIR A PORTA: não havia como criar a própria operadora pela tela — `POST /api/v1/knowledge-scopes` existia e passava nos testes dela, e nenhum botão chegava até a rota. O estado vazio ainda mandava "comece carregando um material em Conhecimento", que é a tela que exige um nome já ligado: dois becos apontando um para o outro. Sem isso, o "primeiro material PRÓPRIO" de SC-003 era inalcançável e o cronômetro nem começava
 
 **Checkpoint**: o corretor manda no que vale para ele.
 
@@ -294,16 +332,16 @@ durante todo o processo.
 
 ### Tests for User Story 4 ⚠️
 
-- [ ] T095 [P] [US4] Teste de que a versão nova do acervo só é ativada depois de todos os trechos entrarem, em `workers/rag-indexer.test.ts` — falha no meio deixa a anterior valendo por inteiro (FR-006)
-- [ ] T096 [P] [US4] Spec E2E de convivência em `tests/e2e/segundo-escopo-sem-janela.spec.ts` — perguntas sobre o primeiro escopo continuam respondidas durante toda a carga do segundo (SC-004)
+- [X] T095 [P] [US4] Teste de que a versão nova do acervo só é ativada depois de todos os trechos entrarem, em `workers/rag-indexer.test.ts` — falha no meio deixa a anterior valendo por inteiro (FR-006)
+- [X] T096 [P] [US4] Spec E2E de convivência em `tests/e2e/segundo-escopo-sem-janela.spec.ts` — perguntas sobre o primeiro escopo continuam respondidas durante toda a carga do segundo (SC-004) — **COBERTO, e em outro arquivo de propósito.** A medição vive no caso de SC-004 de `tests/e2e/primeiro-material-cronometrado.spec.ts`, que já carrega o segundo material pela tela e, durante toda a carga e indexação, repergunta a `fn_buscar_lastro` a cada 1,5 s a pergunta que o PRIMEIRO material responde — com controle antes de começar, para "zero janela" não poder significar "nunca respondeu". **Zero amostras sem base (2026-08-09).** Um arquivo separado repetiria a mesma jornada cara (duas operadoras, dois materiais, embedding de verdade) para medir exatamente a mesma coisa: o custo é real e a cobertura seria a mesma. Se a convivência algum dia for medida por outro ângulo — camada do catálogo respondendo enquanto material próprio entra —, é aí que o arquivo próprio se justifica
 
 ### Implementation for User Story 4
 
-- [ ] T097 [US4] Garantir em `workers/rag-indexer.ts` que carregar material **não** desativa, apaga ou substitui material não relacionado (FR-003)
-- [ ] T098 [US4] Garantir em `workers/rag-indexer.ts` que falha no processamento preserva o acervo anterior por inteiro, sem base parcial (FR-006)
-- [ ] T099 [US4] Implementar remoção e desativação de escopo em `app/api/v1/knowledge-scopes/[id]/route.ts`, tornando o material inerte para respostas novas **imediatamente** e preservando a rastreabilidade das já dadas (FR-008)
-- [ ] T100 [US4] Fazer `app/app/ai/knowledge/scopes/_client.tsx` listar N escopos sem limite fixo, com o estado de cada um (FR-003, US4 cenário 3)
-- [ ] T101 [US4] Cronometrar SC-004 (segundo material em ≤2 min, zero janela sem base) e registrar evidência em `.superpowers/evidence/`
+- [X] T097 [US4] Garantir em `workers/rag-indexer.ts` que carregar material **não** desativa, apaga ou substitui material não relacionado (FR-003)
+- [X] T098 [US4] Garantir em `workers/rag-indexer.ts` que falha no processamento preserva o acervo anterior por inteiro, sem base parcial (FR-006)
+- [X] T099 [US4] Implementar remoção e desativação de escopo em `app/api/v1/knowledge-scopes/[id]/route.ts`, tornando o material inerte para respostas novas **imediatamente** e preservando a rastreabilidade das já dadas (FR-008)
+- [X] T100 [US4] Fazer `app/app/ai/knowledge/scopes/_client.tsx` listar N escopos sem limite fixo, com o estado de cada um (FR-003, US4 cenário 3)
+- [X] T101 [US4] Cronometrar SC-004 (segundo material em ≤2 min, zero janela sem base) e registrar evidência em `.superpowers/evidence/` — **44 s em 11 gestos, teto de 120 s, e ZERO amostras sem base (2026-08-09)**. A medição só existiu depois de consertar o defeito que ela achou: o `rag-indexer` devolvia `skipped` na janela de debounce de 30 s, e `skipped` marca o evento como CONSUMIDO — o segundo material carregado dentro da janela era engolido e **nunca indexado** (fonte `ready`, item gravado, `last_index_status` nulo, tela dizendo "Preparando" para sempre, nada reemitindo). Material aceito e descartado em silêncio: o modo de falha que FR-004 proíbe pelo nome. Conserto: `retry` com `retry_at` — coalescer é juntar a rajada em uma reconstrução agora e outra depois da janela, nunca descartar o que chegou cedo; o drain reagenda sem contar tentativa. Vigiado por `workers/rag-indexer.test.ts` (sabotagem confirmada: voltando a `skipped`, o caso reprova) e pelo e2e cronometrado. O defeito só aparecia com Redis de pé — sem ele o debounce cai no mapa em memória do processo, e cada `next start` começa com a janela limpa
 
 **Checkpoint**: escopos convivem, e nenhum vaza para o outro.
 
@@ -319,16 +357,16 @@ sozinha na tela, com o debug desligado.
 
 ### Tests for User Story 3 ⚠️
 
-- [ ] T102 [P] [US3] Invariante de rastreabilidade histórica em `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` — resposta antiga continua apontando para o conteúdo que valia na época, depois de o acervo ser reconstruído (FR-023)
-- [ ] T103 [P] [US3] Spec E2E em `tests/e2e/origem-sem-debug.spec.ts` — chegar ao texto do trecho em no máximo 3 interações de tela, com o modo de depuração **desligado** (SC-008)
+- [X] T102 [P] [US3] Invariante de rastreabilidade histórica em `tests/invariants/rastreabilidade-sobrevive-reindex.test.ts` — resposta antiga continua apontando para o conteúdo que valia na época, depois de o acervo ser reconstruído (FR-023)
+- [X] T103 [P] [US3] Spec E2E em `tests/e2e/origem-sem-debug.spec.ts` — chegar ao texto do trecho em no máximo 3 interações de tela, com o modo de depuração **desligado** (SC-008) — **3 de 3 em ambiente fresco (2026-08-09)**: o texto do trecho está a **2** interações, com o teto de 3 afirmado numa contagem explícita, e a origem aparece sem nenhum interruptor de depuração ligado
 
 ### Implementation for User Story 3
 
-- [ ] T104 [US3] Criar migration `supabase/migrations/<ts>_0126_rastreabilidade_validade_lacunas.sql` com `message_groundings` (tenant-aware, `layer`, `source_ref` com a cópia histórica), espelhá-la no apêndice de `supabase/baseline.sql` e registrar no MANIFEST
-- [ ] T105 [US3] Gravar `message_groundings` no mesmo caminho que envia a mensagem, em `lib/agent-engine/agent/inbound-turn.ts` — ou a resposta é rastreável, ou não é enviada (FR-024)
-- [ ] T106 [US3] Tirar a citação de trás do toggle de depuração em `components/inbox/MessageBubble.tsx` (hoje `:40-43`) e `hooks/ai/useDebugToggle.ts`
-- [ ] T107 [US3] Exibir em `components/inbox/MessageBubble.tsx` o texto do trecho, o material, o escopo, a data de atualização **e a camada** de origem (FR-022, FR-039)
-- [ ] T108 [US3] Tratar em `components/inbox/MessageBubble.tsx` a ausência de origem em resposta que **não** é de assistência como normal, sem sinalizar problema (US3 cenário 4)
+- [X] T104 [US3] Criar migration `supabase/migrations/<ts>_0126_rastreabilidade_validade_lacunas.sql` com `message_groundings` (tenant-aware, `layer`, `source_ref` com a cópia histórica), espelhá-la no apêndice de `supabase/baseline.sql` e registrar no MANIFEST
+- [X] T105 [US3] Gravar `message_groundings` no mesmo caminho que envia a mensagem, em `lib/agent-engine/agent/inbound-turn.ts` — ou a resposta é rastreável, ou não é enviada (FR-024) Também é o que cumpre FR-021: a âncora vira registro permanente, não campo de conveniência.
+- [X] T106 [US3] Tirar a citação de trás do toggle de depuração em `components/inbox/MessageBubble.tsx` (hoje `:40-43`) e `hooks/ai/useDebugToggle.ts`
+- [X] T107 [US3] Exibir em `components/inbox/MessageBubble.tsx` o texto do trecho, o material, o escopo, a data de atualização **e a camada** de origem (FR-022, FR-039)
+- [X] T108 [US3] Tratar em `components/inbox/MessageBubble.tsx` a ausência de origem em resposta que **não** é de assistência como normal, sem sinalizar problema (US3 cenário 4) **Feito sem depender da tabela nova**: a T026 já grava a âncora em `messages.metadata` no formato da F5, com `snippet` (texto do trecho), `layer` e o `source_ref` (título, escopo e data) — que é cópia histórica embutida na mensagem. A regra virou `deveMostrarOrigem`/`descreverOrigem` em `lib/ai/citations/types.ts`, com suíte própria; a tela só a consome. T104/T105 seguem necessárias para consultar âncora independentemente da mensagem, não para FR-022/FR-039.
 
 **Checkpoint**: o erro vira corrigível, e o corretor sabe a quem cobrar a correção.
 
@@ -343,16 +381,16 @@ agrupadas, com "não há nada" separado de "quase acertou".
 
 ### Tests for User Story 5 ⚠️
 
-- [ ] T109 [P] [US5] Teste da agregação por escopo e por assunto em `lib/ai/evolution/aggregate.test.ts`, distinguindo "nada encontrado" de "encontrado insuficiente" (FR-029)
-- [ ] T110 [P] [US5] Spec E2E em `tests/e2e/lacunas-acionaveis.spec.ts` — carregar o material que cobre uma lacuna a faz sumir da lista (SC-013)
+- [X] T109 [P] [US5] Teste da agregação por escopo e por assunto em `lib/ai/evolution/aggregate.test.ts`, distinguindo "nada encontrado" de "encontrado insuficiente" (FR-029)
+- [X] T110 [P] [US5] Spec E2E em `tests/e2e/lacunas-acionaveis.spec.ts` — carregar o material que cobre uma lacuna a faz sumir da lista (SC-013) — **4 de 4 em ambiente fresco (2026-08-09)**, indexando de verdade (material entra pelo formulário, `event-log-drain` roda o `rag-indexer`, embedding do provedor). Achou DOIS defeitos: (1) nada fechava a lacuna quando o material chegava — a lista só esvaziava se o corretor clicasse "Marcar resolvido"; (2) a rota da Evolução lia as recusas sem filtrar `status`, então mesmo com o fechamento a MESMA lacuna seguia na tela onde o corretor identifica o assunto (FR-028). Sabotagem confirmada: removido o `.neq("status","resolved")`, o caso central reprova com "a lacuna coberta continuou na lista". Pulado onde não há chave de embedding (é o caso do CI hoje) — pular é honesto, dublar o embedding mediria o dublê
 
 ### Implementation for User Story 5
 
-- [ ] T111 [US5] Acrescentar `scope_id` e `refusal_reason` a `knowledge_searches` em `supabase/migrations/<ts>_0126_rastreabilidade_validade_lacunas.sql` e no apêndice de `supabase/baseline.sql` — **derivar, não duplicar** (DIRC: Calcular)
-- [ ] T112 [US5] Gravar as duas colunas na recusa, em `lib/agent-engine/agent/search-knowledge.ts`
-- [ ] T113 [US5] Agrupar por escopo e assunto em `lib/ai/evolution/aggregate.ts`, mantendo a separação entre sem-resposta e quase-acertou (hoje `:88-90, 153, 223-224`)
-- [ ] T114 [US5] Exibir as lacunas com contagem e ao menos uma pergunta real de exemplo em `components/ai/EvolutionGaps.tsx`
-- [ ] T115 [US5] Servir a mesma leitura ao administrador de plataforma em `app/admin/(protected)/catalogo/_client.tsx`, pela rota de T064, restrita à própria instalação
+- [X] T111 [US5] Acrescentar `scope_id` e `refusal_reason` a `knowledge_searches` em `supabase/migrations/<ts>_0126_rastreabilidade_validade_lacunas.sql` e no apêndice de `supabase/baseline.sql` — **derivar, não duplicar** (DIRC: Calcular)
+- [X] T112 [US5] Gravar as duas colunas na recusa, em `lib/agent-engine/agent/search-knowledge.ts`
+- [X] T113 [US5] Agrupar por escopo e assunto em `lib/ai/evolution/aggregate.ts`, mantendo a separação entre sem-resposta e quase-acertou (hoje `:88-90, 153, 223-224`)
+- [X] T114 [US5] Exibir as lacunas com contagem e ao menos uma pergunta real de exemplo em `components/ai/EvolutionGaps.tsx`
+- [X] T115 [US5] Servir a mesma leitura ao administrador de plataforma em `app/admin/(protected)/catalogo/_client.tsx`, pela rota de T064, restrita à própria instalação
 
 **Checkpoint**: o acervo tem quem o alimente depois da primeira semana.
 
@@ -366,16 +404,16 @@ agrupadas, com "não há nada" separado de "quase acertou".
 
 ### Tests for User Story 6 ⚠️
 
-- [ ] T116 [P] [US6] Invariante de que material vencido devolve zero linhas em `tests/invariants/material-vencido-nao-ancora.test.ts` (SC-009, FR-026)
-- [ ] T117 [P] [US6] Teste de que material **sem** validade declarada ancora normalmente em `tests/invariants/material-vencido-nao-ancora.test.ts` — datar é opcional e não pode travar o corretor apressado (FR-025)
+- [X] T116 [P] [US6] Invariante de que material vencido devolve zero linhas em `tests/invariants/material-vencido-nao-ancora.test.ts` (SC-009, FR-026)
+- [X] T117 [P] [US6] Teste de que material **sem** validade declarada ancora normalmente em `tests/invariants/material-vencido-nao-ancora.test.ts` — datar é opcional e não pode travar o corretor apressado (FR-025)
 
 ### Implementation for User Story 6
 
-- [ ] T118 [US6] Expor `valid_until` como campo opcional na tela de material, em `app/app/ai/knowledge/sources/_client.tsx`
-- [ ] T119 [US6] Confirmar em `tests/invariants/material-vencido-nao-ancora.test.ts` que `fn_buscar_lastro` corta material vencido (implementado em T047), inclusive quando o vencido era o **único** que responderia
-- [ ] T120 [US6] Criar `workers/validade-de-material.ts`, que avisa o corretor antes do vencimento com nome do material e escopo, reusando a Central (FR-027)
-- [ ] T136 [US6] Dar gatilho ao worker de T120: rota `app/api/v1/cron/validade-de-material/route.ts` e a linha diária no `crond` do `scheduler` em `docker-compose.prod.yml` — mesmo motivo de T135
-- [ ] T121 [US6] Rodar `pnpm test:db` e registrar evidência em `.superpowers/evidence/`
+- [X] T118 [US6] Expor `valid_until` como campo opcional na tela de material, em `app/app/ai/knowledge/sources/_client.tsx`
+- [X] T119 [US6] Confirmar em `tests/invariants/material-vencido-nao-ancora.test.ts` que `fn_buscar_lastro` corta material vencido (implementado em T047), inclusive quando o vencido era o **único** que responderia
+- [X] T120 [US6] Criar `workers/validade-de-material.ts`, que avisa o corretor antes do vencimento com nome do material e escopo, reusando a Central (FR-027)
+- [X] T136 [US6] Dar gatilho ao worker de T120: rota `app/api/v1/cron/validade-de-material/route.ts` e a linha diária no `crond` do `scheduler` em `docker-compose.prod.yml` — mesmo motivo de T135
+- [X] T121 [US6] Rodar `pnpm test:db` e registrar evidência em `.superpowers/evidence/` — executado em 2026-08-09, **94 arquivos / 650 asserções**, install e update verdes. Evidência em `.superpowers/evidence/002-test-db-2026-08-09.md`
 
 **Checkpoint**: todas as histórias funcionam independentemente.
 
@@ -383,14 +421,14 @@ agrupadas, com "não há nada" separado de "quase acertou".
 
 ## Phase 10: Polish & Cross-Cutting
 
-- [ ] T122 [P] Fazer a superfície de teste do agente exercer a mesma regra de lastro da conversa real em `lib/ai/agents/avaliar-resposta-de-teste.ts` — ou declarar na própria tela o que ela **não** avaliou (FR-034, SC-015)
-- [ ] T123 [P] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que conhecimento gerado automaticamente a partir de conversas **não** ancora afirmação de assistência (FR-040), com teste em `tests/invariants/aprendizado-nao-ancora-assistencia.test.ts`
-- [ ] T124 Medir SC-006 com 20 escopos carregados, comparar com a linha de base de T071 e registrar em `.superpowers/evidence/` — critério é a diferença (≤25% no p95), não um número absoluto
-- [ ] T125 [P] **Conferir** que todas as rotas novas de `app/api/v1/` aplicam `checkRateLimit` — o rate limit é implementado dentro de T063, T064, T086, T087 e T088, na fatia de cada rota, e não aqui. Adiá-lo ao Polish faria F2 e F4 serem entregues reprovando o item 6 do próprio Definition of Done, e cada fatia é entregável sozinha
-- [ ] T126 [P] Atualizar `docs/architecture/` e `docs/testing/user-journey-map.md` com o que foi entregue e os achados
-- [ ] T127 [P] Atualizar a spec e o `CLAUDE.md` se algum contrato mudou na execução (item 10 do DoD)
-- [ ] T128 Rodar `quickstart.md` de ponta a ponta, no ambiente fresco, e registrar evidência visual de cada fatia em `.superpowers/evidence/`
-- [ ] T129 Responder o Living System Checklist (`docs/doctrine/sistema-vivo.md`) e os 14 itens do Definition of Done
+- [X] T122 [P] Fazer a superfície de teste do agente exercer a mesma regra de lastro da conversa real em `lib/ai/agents/avaliar-resposta-de-teste.ts` — ou declarar na própria tela o que ela **não** avaliou (FR-034, SC-015)
+- [X] T123 [P] Garantir em `lib/agent-engine/guardrails/assistance-grounding.ts` que conhecimento gerado automaticamente a partir de conversas **não** ancora afirmação de assistência (FR-040), com teste em `tests/invariants/aprendizado-nao-ancora-assistencia.test.ts`
+- [X] T124 Medir SC-006 com 20 escopos carregados, comparar com a linha de base de T071 e registrar em `.superpowers/evidence/` — critério é a diferença (≤25% no p95), não um número absoluto
+- [X] T125 [P] **Conferir** que todas as rotas novas de `app/api/v1/` aplicam `checkRateLimit` — o rate limit é implementado dentro de T063, T064, T086, T087 e T088, na fatia de cada rota, e não aqui. Adiá-lo ao Polish faria F2 e F4 serem entregues reprovando o item 6 do próprio Definition of Done, e cada fatia é entregável sozinha
+- [X] T126 [P] Atualizar `docs/architecture/` e `docs/testing/user-journey-map.md` com o que foi entregue e os achados — mapa novo `escopos-do-corretor.architecture.json` (17 peças, 20 arestas, com as não-ligações deliberadas declaradas) e jornada **J10** no mapa de jornadas, incluindo o achado que mudou o desenho de T099
+- [X] T127 [P] Atualizar a spec e o `CLAUDE.md` se algum contrato mudou na execução (item 10 do DoD) — o contrato MUDOU: `DELETE /api/v1/knowledge-scopes/{id}` entrou em `contracts/rotas-http.md`, com a razão de a remoção ser lógica. `CLAUDE.md` não desatualizou: nenhuma doutrina mudou, e o caso já é coberto pela regra de mudança destrutiva precisar de caminho de volta
+- [X] T128 Rodar `quickstart.md` de ponta a ponta, no ambiente fresco, e registrar evidência visual de cada fatia em `.superpowers/evidence/` — **PERCORRIDO em 2026-08-10**, registro em `.superpowers/evidence/002-t128-quickstart/percurso.md` com a tabela fatia-a-fatia. Passada única com `--workers=1`: **30 casos, 30 verdes** (26 numa invocação + 4 de `assistencia-sem-lastro` depois do seed que ela exige — a falha foi honesta e dizia exatamente isso). **Declarado o que NÃO foi percorrido**: os passos 1–3 de F1 pedem as 20 perguntas pelo WhatsApp de teste, e este ambiente não tem número conectado; o que foi medido é o mesmo veredito de lastro sobre respostas de modelo de verdade, pelo gate de verdade, com a rodada de falha induzida. O transporte fica sem prova aqui — é superfície da spec 004
+- [X] T129 Responder o Living System Checklist (`docs/doctrine/sistema-vivo.md`) e os 14 itens do Definition of Done — respondido para T099 em `.superpowers/evidence/002-living-system-checklist-T099.md`. **13 de 14 itens verdes**; o 12 (prova pela tela em conta nova) fica aberto junto das outras 7 specs E2E, e está registrado como tal
 
 ---
 
@@ -420,7 +458,7 @@ Testes escritos e **vermelhos** antes da implementação · schema antes de runt
 tela · sabotagem confirmada antes do checkpoint · **um commit ao fim da fase** (constituição v2.1.0),
 com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 
-### Ordem das migrations (revista em 2026-08-08)
+### Ordem das migrations (revista em 2026-08-09)
 
 | Nº | Fatia | O quê |
 |---|---|---|
@@ -431,15 +469,22 @@ com as migrations saindo em commit próprio junto do apêndice e do MANIFEST.
 | 0124 | F3 | adoção local do catálogo e inércia da versão semeada |
 | 0125 | F4 | registro de divergência de conteúdo |
 | 0126 | F5 | rastreabilidade, validade e lacunas |
-
-A faixa planejada foi 0119–0122 até 2026-08-08, quando o merge da spec 001 ocupou esses quatro
-números (`0119_gateway_inbound`, `0120_aviso_segredo_de_canal`, `0121_aviso_de_entrega_descartada`,
-`0122_aviso_recebimento_desligado`). Renumerada para 0123–0126. As migrations 0116, 0117 e 0118
-desta spec já existem e não mudam. Antes de criar a próxima, confira o último número real com
-`ls supabase/migrations/` — a sequência é compartilhada entre specs e quem chega depois cede.
+| 0132 | F4 | onde mora o texto de um documento (`ai_source_passages`) — era 0127 |
+| 0133 | F4 | âncora legível do documento, forward-fix de `fn_buscar_lastro` — era 0128 |
+| 0134 | — | lastro de fábrica no agente (default de `ai_agents.guardrails`) — era 0129 |
+| 0135 | F4 | remoção lógica do escopo (`deleted_at`), e `escopo_ativo` passa a exigi-lo (T099) |
 
 As colunas de escopo saíram da 0124 e foram para a **0118**: a `fn_buscar_lastro` da 0123 as lê, e
 duas fases depois é tarde — a função não criaria, ou criaria sem filtro nenhum do lado do tenant.
+
+**A faixa cedeu duas vezes, e pelo mesmo motivo.** Primeiro 0119–0122, quando o merge da spec 001
+ocupou esses quatro números; renumerada para 0123–0126. Depois 0127–0129, quando o merge da spec
+004 já tinha publicado `0127_gateway_writer`, `0128_gateway_escrita`, `0129_aviso_gateway_fora` e
+`0130_aviso_divergencia_reconciliacao` na `main` — as três desta spec passaram a **0132–0134**, com
+carimbo de tempo reemitido depois do último da 004 para número e cronologia não se contradizerem.
+A sequência é compartilhada entre specs e **quem chega depois cede**: antes de criar a próxima,
+confira o último número real com `ls supabase/migrations/` **contra a `main`**, não contra a sua
+branch — foi olhar só para a própria branch que produziu as duas colisões.
 
 ### Parallel Opportunities
 

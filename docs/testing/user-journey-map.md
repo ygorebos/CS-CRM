@@ -572,6 +572,53 @@ percorrida inteira por uma pessoa*.
 
 ---
 
+# Sessão 2026-08-09 — a operadora que o corretor remove (spec 002, T099)
+
+## J10 — Remover uma operadora criada por engano `[P1]`
+
+Contexto: FR-008 nomeia **duas** operações — remover e desativar — e até esta sessão só
+existia desativar. O corretor que criasse "Unimeed" por erro de digitação ficava com a
+linha na lista para sempre, desligada. Numa lista de trinta operadoras, lixo desligado é
+o que faz a tela deixar de ser legível.
+
+| # | Caso | Expectativa | Resultado |
+|---|------|-------------|-----------|
+| J10.1 | Operadora criada pelo corretor mostra "Remover"; a que veio do catálogo, não | o botão só existe onde a rota aceita | **PASS** por unidade de tela (`escopos-tela-remocao.test.ts`), **falta prova pela tela** |
+| J10.2 | O primeiro clique pergunta, e diz o que para / o que fica / o que continua explicável | nenhuma chamada antes de confirmar | **PASS** por unidade, **falta prova pela tela** |
+| J10.3 | Confirmado, a linha sai da lista e o aviso diz quantos materiais foram **arquivados** | a palavra "apagado" não aparece — porque não é o que acontece | **PASS** por unidade, **falta prova pela tela** |
+| J10.4 | A operadora removida para de ancorar resposta **na próxima pergunta** | sem cache, sem job no meio (FR-008 "imediatamente") | **PASS** no banco (`escopo-removido-fica-inerte.test.ts`) |
+| J10.5 | O material removido **não** é promovido ao balde "vale para todos" | ele some, não vira resposta universal | **PASS** no banco — é o caso que dá nome ao arquivo |
+| J10.6 | Reativar `is_active` por fora não ressuscita o material | duas travas, e o UPDATE que as testa existe (é o PATCH da rota) | **PASS** no banco |
+| J10.7 | A resposta já dada continua mostrando de onde veio | `message_groundings` sem FK, com a cópia congelada | **PASS** no banco |
+| J10.8 | Remover o espelho do catálogo é recusado, e a mensagem diz o que fazer | 403 + "desligue-a" | **PASS** por unidade de rota, **falta prova pela tela** |
+
+**Pendente**: J10.1, J10.2, J10.3 e J10.8 são de TELA e ainda não foram exercitadas com
+Playwright em ambiente fresco. A doutrina de QA Visual é explícita: unidade e curl não
+substituem a prova pela tela.
+
+## O achado que mudou o desenho, e o que ele ensina
+
+A primeira implementação de T099 era um `DELETE` de verdade. Ela **não roda** — medido num
+Postgres descartável, não deduzido:
+
+```
+new row for relation "ai_knowledge_sources" violates check constraint
+"ai_knowledge_sources_scope_xor_all"
+```
+
+A FK de `ai_knowledge_sources.scope_id` é `on delete set null` e a constraint da migration
+0118 exige balde **ou** "vale para todos" — apagar o escopo deixaria a fonte sem nenhum dos
+dois. O teste de rota, que dubla o supabase-js, passava verde: **o dublê responde no
+formato que quem escreveu o teste inventou**, e a constraint não estava lá para recusar.
+
+Quem pegou foi o invariante contra Postgres real. É a mesma regra 5 da seção "Como medir
+sem produzir verde falso" do `CLAUDE.md`, aplicada a banco em vez de a provedor externo:
+formato e recusa de terceiro só se sabem medindo o terceiro.
+
+O caso `"delete de verdade é IMPOSSÍVEL"` ficou no invariante de propósito. Ele não
+descreve o comportamento do produto — descreve **por que o produto é assim**, e fica
+vermelho no dia em que a constraint mudar e a decisão puder ser revista.
+
 ## Formas de mensagem do WhatsApp — cobertura e o buraco declarado (spec 006, 2026-08-09)
 
 A conversa **escondia** o que o cliente fazia. Citação, reação e apagamento chegavam pelo mesmo

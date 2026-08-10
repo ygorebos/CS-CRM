@@ -157,11 +157,34 @@ async function ensurePlatformAdmin(userId: string): Promise<void> {
   console.log("[bootstrap] dono promovido a super-admin de plataforma");
 }
 
+/**
+ * Espelhos do catálogo curado para esta org (T056).
+ *
+ * A semeadura do `baseline.sql` sincroniza as organizações que existiam quando ela rodou;
+ * esta nasce depois. Sem isto, o ambiente fresco — que é justamente onde a doutrina de QA
+ * Visual manda provar a feature — sobe com a tela de Operadoras VAZIA, e a prova de que
+ * "a instalação nasce sabendo" testaria o contrário do que promete.
+ */
+async function ensureEscoposDoCatalogo(orgId: string): Promise<void> {
+  const { error } = await admin.rpc("fn_sincronizar_escopos_do_catalogo", {
+    p_organization_id: orgId,
+  });
+  if (error) {
+    // Não derruba o bootstrap: a org e o dono já existem, e o resto do ambiente é
+    // utilizável. Mas avisa alto — em ambiente fresco isto é o que faz a tela de
+    // Operadoras parecer quebrada.
+    console.warn(`[bootstrap] ⚠️  escopos do catálogo NÃO sincronizados: ${error.message}`);
+    return;
+  }
+  console.log("[bootstrap] escopos do catálogo sincronizados (nascem desligados — A-20)");
+}
+
 async function main(): Promise<void> {
   const ownerId = await ensureOwnerUser();
   const orgId = await ensureOrg(ownerId);
   await ensureMembership(ownerId, orgId);
   await ensurePlatformAdmin(ownerId);
+  await ensureEscoposDoCatalogo(orgId);
   console.log(`\n✅ Bootstrap completo.\n  dono: ${OWNER_EMAIL}\n  org:  ${orgId}\n  Faça login em ${env.NEXT_PUBLIC_APP_URL || "https://<seu-dominio>"} e conclua o onboarding.`);
 }
 

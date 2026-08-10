@@ -34,6 +34,7 @@ import {
   UsersThree,
   WebhooksLogo,
 } from "@/lib/ui/icons";
+import { ROTULO_PADRAO } from "@/lib/vocabulary/knowledge-scope";
 
 /**
  * Registro de navegação — a ÚNICA lista de destinos do app do tenant.
@@ -237,6 +238,27 @@ export const NAV_DESTINATIONS: NavDestination[] = [
     group: "ia",
     section: "Ensinar o agente",
     minRole: "manager",
+  },
+  {
+    // Spec 002 (T069). Rótulo e descrição carregam o vocabulário do nicho de validação;
+    // a URL, não — ela é neutra e em inglês de propósito (FR-041), como a tela vizinha.
+    // O registro é estático e não lê banco, então aqui vale o padrão de fábrica
+    // (`ROTULO_PADRAO`): quem trocar o rótulo da instalação troca o texto da tela, e a
+    // navegação continua dizendo "Operadoras" — limitação conhecida, não esquecimento.
+    href: "/app/ai/knowledge/scopes",
+    label: ROTULO_PADRAO.plural,
+    // A descrição é o texto que o ⌘K varre: "ligar", "desligar" e "operadora" são as
+    // palavras pelas quais se procura isto, e nenhuma delas está no rótulo.
+    description:
+      "Ligue as operadoras que você vende — o agente só responde sobre o que estiver ligado.",
+    icon: Buildings,
+    group: "ia",
+    section: "Ensinar o agente",
+    // Mesmo papel que o `PATCH` da rota exige (FR-032) e que a página redireciona:
+    // a tela existe para o interruptor, e um `agent` que a visse só teria botão morto.
+    minRole: "manager",
+    // Sem `sidebar`: ligar o que se vende é gesto de configuração inicial, não uso diário
+    // — o mesmo motivo pelo qual Conhecimento, ao lado, também mora só no hub.
   },
   {
     href: "/app/ai/memory",

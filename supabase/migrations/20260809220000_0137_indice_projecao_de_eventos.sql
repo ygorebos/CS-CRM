@@ -1,4 +1,4 @@
--- 0132 — Índice da projeção de eventos sobre mensagens (spec 006, T017 / FR-001..FR-005)
+-- 0137 — Índice da projeção de eventos sobre mensagens (spec 006, T017 / FR-001..FR-005)
 --
 -- # O que este índice serve
 --

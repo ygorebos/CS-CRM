@@ -57,10 +57,50 @@ Desligar um **espelho do catálogo** é a trava 4: torna o material daquela oper
 este tenant e não afeta nenhum outro (FR-008). `403 escopo_do_catalogo_nao_editavel` ao tentar
 mudar qualquer outro campo de um espelho.
 
+### `DELETE /api/v1/knowledge-scopes/{id}`
+
+Remove um escopo **próprio** (T099, a outra metade de FR-008). `200` com
+`{ "id", "deleted": true, "materials_archived": <n> }`.
+
+**A remoção é LÓGICA** (`deleted_at`, migration 0135), e não por preferência de estilo:
+`delete from knowledge_scopes` **não roda** quando existe material no balde — a FK é
+`on delete set null` e a constraint `ai_knowledge_sources_scope_xor_all` recusa fonte sem
+balde. Soltar o ponteiro com `applies_to_all = true` promoveria o material da operadora
+removida a responder a todo mundo. O acervo é **arquivado** (`is_active = false`,
+`status = 'archived'`), nunca apagado.
+
+Efeito imediato, sem job no meio: o escopo sai da lista, para de resolver na busca e não
+pode mais receber material nem vincular contato. As respostas já dadas continuam
+explicáveis — `message_groundings` não tem FK para escopo e carrega a cópia congelada da
+origem.
+
+`403 escopo_do_catalogo_nao_editavel` em espelho do catálogo: `fn_sincronizar_escopos_do_catalogo`
+o recria na próxima sincronização, então uma remoção que "funciona" e volta sozinha seria
+mentira. O gesto com efeito real ali é `PATCH { "is_active": false }`.
+
+`404` para id fora do formato, de outra organização, ou já removido. Mesmo teto de escrita
+do `PATCH` — baldes separados por método deixariam o teto da trava 4 contornável alternando
+os dois.
+
 ### `POST /api/v1/knowledge-scopes/{id}/materials`
 
 Carrega material próprio (FR-004, FR-007). `multipart/form-data` para arquivo, JSON para texto
 colado.
+
+**`{id}` é o UUID do escopo OU a palavra reservada `todas`.** Escrito ao construir a rota, porque
+o contrato não dizia como se declara "vale para todas as operadoras" nesta superfície — e o
+`data-model.md` recusa, com razão, um escopo fictício "todos" como LINHA em `knowledge_scopes`
+(ele apareceria na lista do corretor e no filtro do contato como se fosse uma operadora).
+
+A palavra no segmento da URL resolve sem criar linha nenhuma. E resolve um segundo problema, que
+é o ponto de FR-001: **a declaração de escopo mora no PATH, nunca no corpo**. Um corpo sem
+`scope_id` e sem `applies_to_all` é indistinguível de um corpo em que a tela esqueceu de mandá-los,
+e o CHECK do banco devolveria um erro que ninguém entende. No path, a ausência é impossível: ou há
+um segmento, ou não há rota. Qualquer outro valor — incluindo o `undefined` que uma tela monta sem
+seleção — é `400 material_sem_escopo` com frase acionável.
+
+O corpo é validado como `strictObject` **sem** `scope_id`, `applies_to_all` nem `organization_id`:
+mandá-los é `422`. Declaração em dois lugares é declaração que um dia discorda de si mesma.
 
 Antes de aceitar, a rota **declara e valida** formato e tamanho máximo (FR-007). Recusa com
 `422 material_sem_texto_extraivel`, `415 formato_nao_suportado` ou `413 material_muito_grande`,

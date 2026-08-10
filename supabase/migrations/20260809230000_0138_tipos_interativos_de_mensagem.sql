@@ -1,4 +1,4 @@
--- 0133 — Tipos interativos de mensagem (spec 006, T061 / FR-016)
+-- 0138 — Tipos interativos de mensagem (spec 006, T061 / FR-016)
 --
 -- `messages_type_check` passa a aceitar três formas que o canal já entrega e que
 -- o CRM não tinha como registrar:
