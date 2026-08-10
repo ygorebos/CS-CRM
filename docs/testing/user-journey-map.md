@@ -618,3 +618,30 @@ formato e recusa de terceiro só se sabem medindo o terceiro.
 O caso `"delete de verdade é IMPOSSÍVEL"` ficou no invariante de propósito. Ele não
 descreve o comportamento do produto — descreve **por que o produto é assim**, e fica
 vermelho no dia em que a constraint mudar e a decisão puder ser revista.
+
+---
+
+## Mídia recebida pelo gateway — o anexo que nunca chegava `[P0]` (2026-08-10)
+
+**Onde dói** — a foto é a primeira coisa que o cliente manda quando quer cotação ("segue a
+carteirinha"). Chegar a conversa sem o arquivo é o corretor pedindo de novo o que o cliente já
+mandou.
+
+**O que se mediu** — no dev, com a instância real pareada, toda imagem recebida entrava como
+mensagem **sem anexo**. Nenhum erro na tela; só um `WRN` no log do gateway. Três causas somadas
+estão em [`docs/doctrine/armadilhas-de-execucao.md`](../doctrine/armadilhas-de-execucao.md), item
+17 — inclusive a terceira, que só apareceu ao sabotar o teste: o campo de URL ficava com o
+endereço **cifrado do CDN do provedor** em vez de voltar a vazio.
+
+**Cobertura que passou a existir**
+
+| Camada | Onde | O que prova |
+|---|---|---|
+| gateway | `internal/handlers/media_inbox_test.go` (9 casos) | referência sem host; a rota serve os bytes; 404 definitivo × 502 transitório; ingestão não baixa nada |
+| banco | `tests/invariants/gateway-escrita-direta.test.ts` (6 casos) | o evento sai — e **não** sai para texto puro, anexo já persistido, nem redelivery |
+| provedor real | medição direta | `GET /media/uazapi/...` devolveu `image/jpeg`, 62.643 bytes, `JPEG 629×1280`; sem token 401; conexão inexistente 404 |
+| **tela** | Playwright no dev | a foto renderizada na conversa com `naturalWidth×Height = 629×1280` numa caixa `256×192` — pixel, não elemento presente |
+
+**O que ainda não foi provado pela tela** — o ciclo completo de uma foto **nova** (celular →
+gateway → função → worker → conversa) numa única passada. As peças foram medidas separadamente e
+a prova de tela usou uma imagem real já recebida. Falta uma foto enviada depois do deploy.
