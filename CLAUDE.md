@@ -324,6 +324,49 @@ Ao mexer em schema, RLS, RBAC, atribuição, escopo, roteamento, follow-up, webh
 4. **Quando uma feature entra na `main`, todas as outras branches ficam atrasadas na hora.** Quem for retomar qualquer uma delas aplica a regra 1 primeiro. Ao fim de uma feature, considere propagar a `main` para as branches vivas limpas (FF as sem trabalho próprio; merge nas divergentes limpas; pular as sujas/conflitantes e reportar).
 5. **Conflito ao atualizar = pare e resolva com cabeça** (ou escale), nunca escolha um lado no automático numa branch que não é sua. Preservar trabalho > branch "verde rápido".
 
+**A regra 1 fala da NOSSA `main` (`origin`, `ygorebos/CS-CRM`) e de mais nenhuma.** Sincronizar com o
+repositório-pai é operação proibida — ver a seção seguinte.
+
+---
+
+## Hard fork: o `upstream` saiu do fluxo (decidido em 2026-08-10)
+
+`ygorebos/CS-CRM` nasceu como fork de `melgarafael/DeskcommCRM`, e o GitHub ainda registra o
+parentesco. **Os dois pararam de convergir.** A `main` daqui é a fonte da verdade e é o que roda em
+produção; a numeração de migration é nossa.
+
+O que foi medido no dia da decisão, para que ninguém reabra a discussão de memória:
+
+- Último ancestral comum: `9249e6f2` (PR #181 do upstream), **2026-08-07**. Três dias de convívio.
+- Divergência: **220 commits só nossos, 206 só de lá, 695 arquivos diferentes.**
+- **A numeração de migration colidiu de `0116` a `0136`** — dezesseis números com arquivo
+  **diferente** dos dois lados (`0127` é `gateway_writer` aqui e `provider_vocabulario_aberto` lá).
+  A última migration comum é a `0115`. A `feat/006` já usa `0137`/`0138`, que lá são outra coisa.
+- Merge de teste (`git merge-tree --write-tree`, que não toca em arquivo): **15 conflitos**, entre
+  eles `supabase/baseline.sql`, `supabase/migrations/MANIFEST.md` e `lib/database.types.ts`.
+
+As regras que decorrem disso:
+
+1. **Não existe `git merge upstream/main`.** Não é caro, é impossível: o resultado tem dois arquivos
+   distintos reivindicando o mesmo `NNNN` e dois blocos com o mesmo rótulo no apêndice do
+   `baseline.sql`. O Supabase CLI usa o **timestamp** como PK de `schema_migrations`, então o banco
+   não fica errado — fica sem subir.
+2. **O remote `upstream` foi removido deste clone.** Se reaparecer em algum ambiente, é dele que
+   sai o acidente; remova de novo (`git remote remove upstream`) em vez de conviver.
+3. **Não use o botão "Sync fork" do GitHub.** É o mesmo merge, pelo navegador, sem revisão — e é o
+   caminho mais fácil de todos, porque o GitHub o oferece sozinho na página do repo.
+4. **`gh` exige base explícita em fork.** Medido: `gh pr list` sem `--repo` respondeu com os PRs
+   **#211-#222**, que são do upstream; os nossos vão até **#19**. Um `gh pr create` distraído abre
+   PR no repositório de terceiro. Já corrigido com `gh repo set-default ygorebos/CS-CRM` — confira
+   com `gh repo set-default --view` antes de criar PR em máquina nova.
+5. **Aproveitar conserto de lá é `cherry-pick`, com a migration renumerada aqui** — nunca merge, e
+   nunca o número original.
+6. A catraca que sobra é `tests/unit/manifest-x-migrations.test.ts` (número e timestamp repetidos
+   reprovam). Ela é a **rede, não a porta**: só acusa depois de o merge já existir na árvore.
+
+Pendência que não é nossa de resolver: o GitHub só desfaz o vínculo de fork por pedido ao Suporte.
+Enquanto não for feito, a página do repo continua oferecendo o "Sync fork".
+
 ---
 
 ## Migrations & Banco — DOUTRINA (instância única)
