@@ -127,6 +127,45 @@ describe("bolha de mensagem — nunca em branco", () => {
     expect(screen.getByText("+5511999998888")).toBeTruthy();
   });
 
+  it("menu enviado mostra AS OPÇÕES, não só a pergunta", () => {
+    // Medido em 2026-08-10 mandando um menu de verdade pelo canal conectado: a
+    // bolha exibia apenas "qual plano te interessa?" e engolia a lista. Quem
+    // reabre a conversa amanhã precisa saber o que ofereceu — é a lista que
+    // determina o que o cliente pôde responder, e sem ela a resposta chega sem
+    // referente.
+    render(
+      <MessageBubble
+        message={msg({
+          type: "menu",
+          direction: "outbound",
+          body: "Qual plano te interessa?",
+          metadata: { menu: { options: ["Individual", "Familiar"], footer: "Responda tocando" } },
+        })}
+      />,
+    );
+    expect(screen.getByTestId("opcoes-do-menu")).toBeTruthy();
+    expect(screen.getByText("Individual")).toBeTruthy();
+    expect(screen.getByText("Familiar")).toBeTruthy();
+    expect(screen.getByText("Responda tocando")).toBeTruthy();
+  });
+
+  it("menu com carga inválida não quebra a bolha — a pergunta continua na tela", () => {
+    // Linha antiga, ou gravada por um caminho que não validou. Cair aqui não pode
+    // custar a mensagem inteira.
+    render(
+      <MessageBubble
+        message={msg({
+          type: "menu",
+          direction: "outbound",
+          body: "Qual plano te interessa?",
+          metadata: { menu: { options: [] } },
+        })}
+      />,
+    );
+    expect(screen.queryByTestId("opcoes-do-menu")).toBeNull();
+    expect(screen.getByText("Qual plano te interessa?")).toBeTruthy();
+  });
+
   it("localização SEM carga válida cai no rótulo, e ainda assim não fica vazia", () => {
     // O caso que a leitura tolerante precisa cobrir: linha antiga, gravada antes
     // de a carga existir. Sem o rótulo, seria exatamente a bolha em branco.

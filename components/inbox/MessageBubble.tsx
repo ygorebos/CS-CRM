@@ -11,7 +11,8 @@ import { QuotedPreview } from "@/components/inbox/message/QuotedPreview";
 import { ReactionRow } from "@/components/inbox/message/ReactionRow";
 import { UnsupportedNotice } from "@/components/inbox/message/UnsupportedNotice";
 import { useReplyTarget } from "@/components/inbox/message/reply-target";
-import { lerContatos, lerLocalizacao } from "@/lib/messaging/payloads";
+import { MenuOptions } from "@/components/inbox/message/MenuOptions";
+import { lerContatos, lerLocalizacao, lerMenu } from "@/lib/messaging/payloads";
 import { PROJECAO_VAZIA } from "@/lib/messaging/projection/types";
 import { ArrowBendUpLeft, Prohibit } from "@/lib/ui/icons";
 import {
@@ -49,6 +50,9 @@ export function MessageBubble({ message, debugCitations }: Props) {
     (message.type === "location" && lerLocalizacao(message.metadata) !== null) ||
     (message.type === "contact" && lerContatos(message.metadata).length > 0);
   const hasConteudo = hasMedia || hasCargaPropria;
+  // As opções do menu: medido enviando um de verdade, a bolha mostrava só a
+  // pergunta e a lista sumia da tela — ver `MenuOptions`.
+  const menu = message.type === "menu" ? lerMenu(message.metadata) : null;
   // Figurinha sem caption: sem moldura de bolha (padrão WhatsApp).
   const isBareSticker = hasMedia && message.type === "sticker" && !message.body;
   const projection = message.projection ?? PROJECAO_VAZIA;
@@ -156,6 +160,8 @@ export function MessageBubble({ message, debugCitations }: Props) {
             {message.body}
           </p>
         )}
+
+        {menu && <MenuOptions menu={menu} isOutbound={isOutbound} />}
 
         {projection.unsupported && <UnsupportedNotice unsupported={projection.unsupported} />}
 

@@ -103,7 +103,7 @@ para qualquer tipo.
 { "conversation_id": "uuid", "type": "sticker", "media_storage_path": "org/conv/arquivo.webp" }
 ```
 
-- A escolha de mandar como figurinha é **do usuário**, não deduzida do MIME. Hoje um `.webp`
+- A escolha de mandar como figurinha é **do usuário**, não deduzida do MIME. Hoje um arquivo `webp`
   vira `image` por inferência (`validateOutboundMedia`), e é por isso que figurinha não existe.
 
 ### 2.5 Menu, botão de link, pedido de localização (User Story 4)

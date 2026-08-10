@@ -620,6 +620,40 @@ provasse.
 | Apagamento observado ponta a ponta | depende do canal oficial conectado, ou de trabalho no gateway |
 | Projeção em conversa de ≥500 mensagens | banco povoado — conversa de 10 mensagens não mede índice nenhum |
 
-**Enviar reação e apagar para todos continuam fora**, e não por esquecimento: a operação não existe
-na porta de tráfego para conversa comum (`tiposParaOperacao` não tem `reaction`; apagar só existe
-como passagem do canal não-oficial).
+**Enviar reação e apagar para todos continuam fora do escopo** — mas os dois casos **não** são o
+mesmo, e a linha anterior deste documento os igualava errado. Conferido na porta de tráfego em
+2026-08-10:
+
+| | Rota na porta de tráfego | Capacidade no canal da Central | Falta o quê |
+|---|---|---|---|
+| **Reagir** | `POST /v1/messages/reaction` — **unificada**, já existe | `OpReacao` = **Total** no não-oficial | só trabalho de CRM: gesto na bolha + rota que chama a porta |
+| **Apagar para todos** | só `POST /v1/uazapi/messages/delete` — **nome de provedor** | `OpMsgApagar` = só não-oficial | rota unificada na porta: o CRM não fala dialeto de provedor (anti-pattern 15) |
+
+Ou seja: a exclusão de **reagir** foi decidida sob a premissa de que dependia da porta de tráfego, e
+essa premissa é falsa. **Apagar** de fato depende.
+
+### Medição com recurso real — 2026-08-10 (canal não-oficial conectado, número do dono)
+
+Nove envios pela tela, em conta real, no ambiente de desenvolvimento, com o canal `WORKING`:
+texto, citação, imagem com legenda, documento, figurinha, localização, cartão de contato, menu, e
+citação de uma mensagem **do cliente**. Os nove voltaram `201` com `external_id` do provedor e
+renderizaram na conversa (evidência em `.superpowers/evidence/006-tipos-mensagem/`).
+
+Dois defeitos que **só a medição achou**, ambos corrigidos:
+
+1. **`menu` voltava HTTP 500** — `violates check constraint "messages_type_check"`. A migration
+   0133 estava commitada e o gate `invariants` verde, porque ele aplica o `baseline.sql` num
+   Postgres novo; o banco em que se estava testando nunca a recebeu. **Gate verde não prova que o
+   banco à sua frente recebeu a mudança.**
+2. **A bolha do menu engolia as opções** — mostrava só a pergunta. A lista sempre esteve no
+   `metadata`; faltava a tela lê-la. Corrigido em `MenuOptions.tsx`, e a prova é retroativa: o menu
+   gravado ANTES do conserto passou a exibir "1. Individual / 2. Familiar" sem reenvio.
+
+**O que segue sem prova, e não deve ser lido como provado:** o que o aparelho do cliente exibe.
+Formato de terceiro só se sabe medindo o terceiro — mapa abrindo no lugar, contato salvando na
+agenda, figurinha sem moldura, menu clicável.
+
+**Achado adjacente (fora desta spec):** as **12** mensagens de saída deste canal estão em `sent`;
+nenhuma chegou a `delivered` ou `read`. O caminho de status existe no CRM
+(`lib/gateway/ingest.ts`), então o envelope de confirmação não está chegando — o visto duplo nunca
+aparece para o corretor.

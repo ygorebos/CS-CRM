@@ -333,3 +333,47 @@ aparelho que esta sessão não tinha, e duas são fechamento que só faz sentido
   `quoted_id`/`contatos` (3), bolha sem rótulo/reação/corpo apagado (4).
 
 **Verde parcial não é verde**: a suíte de tela (`pnpm test:e2e`) **não rodou** nesta sessão.
+
+---
+
+## Medição com recurso real — 2026-08-10
+
+Nove envios **pela tela**, conta real, canal não-oficial `WORKING`, número do dono. Todos `201`
+com `external_id` do provedor, todos renderizando na conversa. Evidência:
+`.superpowers/evidence/006-tipos-mensagem/`.
+
+| # | Tipo | Resultado |
+|---|---|---|
+| 1 | texto | 201 |
+| 2 | citação (alvo: minha própria mensagem) | 201, `reply_to_external_id` gravado |
+| 3 | imagem com legenda | 201, legenda na bolha |
+| 4 | documento | 201, cartão com nome e tamanho |
+| 5 | figurinha (arquivo webp) | 201, **sem moldura de bolha** na tela |
+| 6 | localização | 201, cartão com nome, endereço, coordenadas e "Abrir no mapa" |
+| 7 | cartão de contato | 201, nome + telefone copiável |
+| 8 | menu | **500 na primeira tentativa** — ver defeito 1 |
+| 9 | citação de mensagem **do cliente** | 201, alvo `AC7CF9B8…` (o `external_id` de entrada) |
+
+**Defeito 1 — o banco não tinha a migration.** `menu` voltou
+`violates check constraint "messages_type_check"`. A 0133 estava commitada e o gate `invariants`
+verde — porque ele aplica o `baseline.sql` num Postgres **novo**. O banco de desenvolvimento nunca
+a recebeu, e **não tem histórico de migration** (`supabase_migrations.schema_migrations` não
+existe), então `supabase db push` tentaria replicar as ~120 do zero. Aplicado o arquivo versionado
+por `psql` em contêiner. Constraint conferida antes e depois.
+
+**Defeito 2 — a bolha do menu engolia as opções.** Mostrava só a pergunta; a lista ficava só no
+`metadata`. Quem reabre a conversa amanhã não sabia o que ofereceu — e é a lista que determina o
+que o cliente pôde responder. Corrigido em `components/inbox/message/MenuOptions.tsx`, vigiado por
+dois casos novos em `bolha-sem-buraco.test.tsx`, sabotagem confirmada (1 vermelho). A prova é
+**retroativa**: o menu gravado ANTES do conserto passou a exibir `1. Individual / 2. Familiar` sem
+reenvio.
+
+**Correção de premissa (T067/FR-022).** A exclusão de **enviar reação** foi decidida como "depende
+da porta de tráfego". Conferido: `POST /v1/messages/reaction` **já existe lá, unificada**, e a
+capacidade `OpReacao` é **Total** no canal não-oficial. Reagir é trabalho só de CRM. **Apagar para
+todos** continua dependendo da porta: só existe como `POST /v1/uazapi/messages/delete` — rota com
+nome de provedor, que o CRM não pode chamar (anti-pattern 15).
+
+**Achado adjacente.** As **12** mensagens de saída deste canal estão em `sent`; **nenhuma** chegou
+a `delivered` ou `read`. O caminho de status existe no CRM (`lib/gateway/ingest.ts`) — o envelope
+de confirmação não está chegando. Fora do escopo desta spec, mas o corretor nunca vê o visto duplo.

@@ -194,3 +194,18 @@ export function lerContatos(metadata: unknown): ContactCard[] {
   const r = contactsPayloadSchema.safeParse(bruto);
   return r.success ? r.data : [];
 }
+
+/**
+ * Lê as opções de um menu de um `metadata`, ou `null` se não houver.
+ *
+ * Existe porque medir o envio real mostrou o buraco: a bolha do menu mostrava só
+ * a pergunta ("qual plano te interessa?") e ENGOLIA as opções. O corretor abria a
+ * conversa no dia seguinte e não sabia o que tinha oferecido — e é justamente a
+ * lista que determina o que o cliente pôde responder.
+ */
+export function lerMenu(metadata: unknown): MenuPayload | null {
+  if (!metadata || typeof metadata !== "object") return null;
+  const bruto = (metadata as Record<string, unknown>).menu;
+  const r = menuPayloadSchema.safeParse(bruto);
+  return r.success ? r.data : null;
+}
