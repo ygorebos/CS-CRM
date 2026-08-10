@@ -244,7 +244,8 @@ jobs:
             material-nada-em-silencio.spec.ts \
             lacunas-acionaveis.spec.ts \
             primeiro-material-cronometrado.spec.ts \
-            instalacao-nasce-sabendo.spec.ts
+            instalacao-nasce-sabendo.spec.ts \
+            catalogo-curadoria.spec.ts
         env:
           # Só o que NÃO vem do `.env.e2e`: isto é ajuste de CI, não config do
           # produto. CI = 1 IP para todos os specs, e o teto de produção
