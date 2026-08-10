@@ -457,9 +457,22 @@ Os dois carimbos vêm do Postgres, não do laço do teste. Os **gestos** entram 
 o tempo: é a parte que não depende da máquina, e um caminho que cresce em passos reprova mesmo
 que o hardware melhore.
 
-### Aberto (6 tarefas)
+### Fechado (140 de 140)
 
-`T040` e `T041` (specs de curadoria e de instalação nascendo sabendo), `T128` (quickstart de ponta
-a ponta), `T131` (bateria de 20 perguntas para SC-001/SC-002), `T139` (SC-010 sem deploy, pelas
-DUAS pontas — corretor e administrador de plataforma) e `T074` (sequência completa de gates com
-evidência visual).
+Todas as tarefas da spec 002 foram fechadas em 2026-08-10. As três frentes que faltavam
+saíram nesta rodada, e cada uma achou defeito:
+
+- **T131** (SC-001/SC-002) — 20 perguntas respondidas por modelo de verdade e julgadas pelo
+  gate de verdade. Com a busca derrubada, 13 de 13 afirmações recusadas; afirmação que
+  sairia sem âncora: zero nas duas rodadas. A primeira versão do instrumento derivava "é
+  afirmação" do próprio veredito do gate — número que não podia subir.
+- **T041/T139** (instalação nasce sabendo, SC-010) — catálogo listado com zero espelhos
+  ligados, e um clique fazendo a busca ancorar na camada curada, no mesmo processo. Duas
+  asserções de tela passaram antes sobre um clique que não tinha persistido: o interruptor é
+  otimista, e o sinal de chegada é a resposta do PATCH.
+- **T040** (curadoria) — corrigir material curado publica a versão 2 e a 1 fica intacta.
+- **T074** e **T128** — sequência de gates e quickstart percorrido, com o que NÃO foi
+  executado declarado por escrito.
+
+O que segue aberto é de outra natureza: os passos 1–3 de F1 do quickstart pedem as 20
+perguntas pelo WhatsApp de teste, e isso é transporte — superfície da spec 004.
