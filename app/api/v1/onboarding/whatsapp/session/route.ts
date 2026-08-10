@@ -5,8 +5,17 @@ import { ok, fail } from "@/lib/api/wrappers";
 import { loadAuthUser, resolveActiveOrg } from "@/lib/auth/server";
 import { requireRole } from "@/lib/auth/require-role";
 import { ARCHIVED_AT, queryTolerantToMissingArchived } from "@/lib/channels/archived";
-import { criarConexaoDeCanal } from "@/lib/channels/criar-conexao";
-import { CHANNEL_PROVIDER_WAHA } from "@/lib/channels/capabilities";
+import { criarConexaoDeCanal, provisionarEGravarConexao } from "@/lib/channels/criar-conexao";
+import {
+  CHANNEL_PROVIDER_GATEWAY_WHATSAPP,
+  CHANNEL_PROVIDER_WAHA,
+} from "@/lib/channels/capabilities";
+import {
+  observarNoGateway,
+  parearNoGateway,
+  provisionamentoConfigurado,
+  statusDeCanalPara,
+} from "@/lib/gateway/provisionamento";
 import {
   reactivateChannelSession,
   type ChannelReactivationActor,
@@ -36,6 +45,34 @@ function defaultSessionName(orgId: string): string {
 }
 
 /**
+ * A conexão do onboarding e POR ONDE ela fala.
+ *
+ * `gatewayConnectionId` preenchido é o único sinal confiável de que esta conexão
+ * é do gateway. `ingest_path` **não serve** para isso: ele diz por onde a
+ * instalação recebe, e vale `'gateway'` mesmo em linha que nasceu no WAHA.
+ */
+interface ConexaoDoOnboarding {
+  id: string;
+  gatewayConnectionId: string | null;
+}
+
+/** A conexão deste onboarding, sem criar nada — o que o `GET` precisa saber. */
+async function lerConexaoDoOnboarding(
+  orgId: string,
+  sessionName: string,
+): Promise<ConexaoDoOnboarding | null> {
+  const supabase = await createClient();
+  const { data } = await supabase
+    .from("channel_sessions")
+    .select("id, gateway_connection_id")
+    .eq("organization_id", orgId)
+    .eq("waha_session_name", sessionName)
+    .maybeSingle();
+  if (!data?.id) return null;
+  return { id: data.id as string, gatewayConnectionId: (data.gateway_connection_id as string) ?? null };
+}
+
+/**
  * A linha de `channel_sessions` deste onboarding — criando, reutilizando ou
  * RESSUSCITANDO.
  *
@@ -60,7 +97,7 @@ async function ensureChannelSession(
   orgId: string,
   sessionName: string,
   actor: ChannelReactivationActor,
-): Promise<string> {
+): Promise<ConexaoDoOnboarding> {
   const supabase = await createClient();
   const buscar = (colunas: string) =>
     supabase
@@ -70,12 +107,20 @@ async function ensureChannelSession(
       .eq("waha_session_name", sessionName)
       .maybeSingle();
   const { data: existingRaw } = await queryTolerantToMissingArchived(
-    () => buscar(`id, ${ARCHIVED_AT}`),
-    () => buscar("id"),
+    () => buscar(`id, gateway_connection_id, ${ARCHIVED_AT}`),
+    () => buscar("id, gateway_connection_id"),
   );
-  const existing = existingRaw as { id: string; archived_at?: string | null } | null;
+  const existing = existingRaw as {
+    id: string;
+    gateway_connection_id?: string | null;
+    archived_at?: string | null;
+  } | null;
   if (existing?.id) {
-    if (!existing.archived_at) return existing.id;
+    const jaExistente = {
+      id: existing.id,
+      gatewayConnectionId: existing.gateway_connection_id ?? null,
+    };
+    if (!existing.archived_at) return jaExistente;
     const { error: reErr } = await reactivateChannelSession(
       supabase,
       {
@@ -92,7 +137,7 @@ async function ensureChannelSession(
       actor,
     );
     if (reErr) throw new Error(`channel_session_reactivate_failed: ${reErr.message}`);
-    return existing.id;
+    return jaExistente;
   }
   // CAMINHO ÚNICO com a Central de Conexões (T044 / FR-034). Antes daqui havia
   // um insert próprio, e ele divergia em duas coisas que doíam:
@@ -104,13 +149,29 @@ async function ensureChannelSession(
   //     dizendo isso;
   //   - nenhuma auditoria `channel.connected`: um número entrava no ar sem
   //     registrar quem o ligou, justamente na porta usada por 100% deles.
-  const criacao = await criarConexaoDeCanal(supabase, {
+  //
+  // E, desde 2026-08-10, a divergência que faltava: quem chamava só
+  // `criarConexaoDeCanal` provisionava no WAHA e ainda assim carimbava
+  // `ingest_path='gateway'` (o carimbo segue `GATEWAY_INBOUND_ENABLED`, não o
+  // provedor de verdade). Medido em produção: a conexão nascia dizendo "recebo
+  // pela rota nova", com `gateway_connection_id` NULO e sessão criada no WAHA.
+  // A mensagem não se perdia — só o webhook do gateway lê `ingest_path` —, mas o
+  // gateway ficava de pé e sem uso justamente na porta por onde passam 100% dos
+  // usuários novos, que é o desfecho contra o qual `caminho-de-ingestao.ts` foi
+  // escrito. A porta gêmea (`/api/v1/channel-sessions`) já fazia certo.
+  const pedido = {
     organizationId: orgId,
     sessionName,
     actorUserId: actor.userId,
     requestId: actor.requestId ?? "",
-    origem: "onboarding",
-  });
+    origem: "onboarding" as const,
+  };
+  const criacao = provisionamentoConfigurado()
+    ? await provisionarEGravarConexao(supabase, {
+        ...pedido,
+        platform: CHANNEL_PROVIDER_GATEWAY_WHATSAPP,
+      })
+    : await criarConexaoDeCanal(supabase, pedido);
   if (!criacao.ok) {
     throw new Error(
       criacao.motivo === "sem_cifra"
@@ -118,7 +179,11 @@ async function ensureChannelSession(
         : `channel_session_insert_failed: ${criacao.detalhe}`,
     );
   }
-  return criacao.conexao.id as string;
+  return {
+    id: criacao.conexao.id as string,
+    gatewayConnectionId:
+      "gatewayConnectionId" in criacao ? ((criacao.gatewayConnectionId as string | undefined) ?? null) : null,
+  };
 }
 
 export async function GET() {
@@ -126,9 +191,27 @@ export async function GET() {
   if (!user) return fail("unauthenticated", "Sessão expirada", 401);
   const activeOrg = await resolveActiveOrg(user);
   if (!activeOrg) return fail("tenant_not_found", "Sem organização ativa", 404);
+  const sessionName = defaultSessionName(activeOrg.orgId);
+
+  // Conexão do gateway: o estado vem de LÁ. Perguntar ao WAHA por uma sessão que
+  // nunca existiu nele devolveria 404 — e a tela leria "NOT_STARTED" para uma
+  // conexão viva, esperando um QR que nunca chega.
+  const conexao = await lerConexaoDoOnboarding(activeOrg.orgId, sessionName);
+  if (conexao?.gatewayConnectionId) {
+    try {
+      const observado = await observarNoGateway(conexao.gatewayConnectionId);
+      return ok({ status: statusDeCanalPara(observado.status), session: sessionName });
+    } catch (err) {
+      return ok({
+        status: "ERROR",
+        session: sessionName,
+        error: err instanceof Error ? err.message : "unknown",
+      });
+    }
+  }
+
   const waha = getWahaClient();
   if (!waha) return ok({ status: "WAHA_NOT_CONFIGURED", session: null });
-  const sessionName = defaultSessionName(activeOrg.orgId);
   try {
     const remote = (await waha.getSessionQr(sessionName)) as WahaSessionResponse;
     return ok({ status: remote.status ?? "UNKNOWN", session: sessionName });
@@ -168,8 +251,13 @@ export async function POST(req: Request) {
   });
   if (!authz.ok) return authz.response;
   const { user, org: activeOrg } = authz;
-  const waha = getWahaClient();
-  if (!waha) return fail("waha_not_configured", "Suba o Docker (docker compose up -d waha) e tente novamente.", 503);
+  const peloGateway = provisionamentoConfigurado();
+  // A exigência do WAHA é do CAMINHO ANTIGO. Cobrá-la com o gateway configurado
+  // fecharia o onboarding numa instalação que não usa WAHA para nada.
+  const waha = peloGateway ? null : getWahaClient();
+  if (!peloGateway && !waha) {
+    return fail("waha_not_configured", "Suba o Docker (docker compose up -d waha) e tente novamente.", 503);
+  }
   const sessionName = defaultSessionName(activeOrg.orgId);
 
   // 1) Make sure we have a row in channel_sessions.
@@ -179,12 +267,15 @@ export async function POST(req: Request) {
   // sem ele a exceção sobe crua — o corretor recebe 500 com pilha na primeira
   // tela do produto, exatamente onde a primeira impressão se decide. Encontrado
   // ao escrever o teste de papel da T045: o caso do `admin` estourava aqui.
-  let channelSessionId: string;
+  let conexao: ConexaoDoOnboarding;
   try {
-    channelSessionId = await ensureChannelSession(activeOrg.orgId, sessionName, {
+    conexao = await ensureChannelSession(activeOrg.orgId, sessionName, {
       userId: user.id,
       requestId,
-      metadata: { provider: CHANNEL_PROVIDER_WAHA, origin: "onboarding" },
+      metadata: {
+        provider: peloGateway ? CHANNEL_PROVIDER_GATEWAY_WHATSAPP : CHANNEL_PROVIDER_WAHA,
+        origin: "onboarding",
+      },
     });
   } catch (err) {
     const detalhe = err instanceof Error ? err.message : String(err);
@@ -197,13 +288,42 @@ export async function POST(req: Request) {
     );
   }
 
+  const querQrNovo = new URL(req.url).searchParams.get("restart") === "1";
+
+  // 2-gateway) Pareamento pelo gateway. `force` traduz o "gerar outro QR" da
+  // tela: sem ele o gateway devolve o material AINDA VÁLIDO, e o corretor que
+  // clicou porque o QR morreu receberia o mesmo QR morto de volta.
+  if (conexao.gatewayConnectionId) {
+    try {
+      const material = await parearNoGateway(conexao.gatewayConnectionId, { force: querQrNovo });
+      return ok(
+        {
+          status: statusDeCanalPara(material.status),
+          session: sessionName,
+          channel_session_id: conexao.id,
+        },
+        { requestId },
+      );
+    } catch (err) {
+      return NextResponse.json(
+        {
+          error: {
+            code: "gateway_pair_failed",
+            message: err instanceof Error ? err.message : "unknown",
+          },
+        },
+        { status: 502 },
+      );
+    }
+  }
+
   // 1b) `?restart=1` = pedido explícito de QR novo. O start sozinho não resolve
   // uma sessão FAILED: o WAHA responde 422 ("already exists") e o usuário fica
   // preso olhando um QR morto. O QR do WhatsApp expira em poucos minutos, então
   // "falhou, gere outro" é fluxo normal do onboarding, não caso de exceção.
-  if (new URL(req.url).searchParams.get("restart") === "1") {
+  if (querQrNovo) {
     try {
-      await waha.stopSession(sessionName);
+      await waha!.stopSession(sessionName);
     } catch {
       // Sessão já parada/inexistente: seguir para o start é o comportamento certo.
     }
@@ -211,20 +331,20 @@ export async function POST(req: Request) {
 
   // 2) Start the session in WAHA. Idempotent — WAHA returns 422 if already started; treat as ok.
   try {
-    const remote = (await waha.startSession(sessionName)) as WahaSessionResponse;
+    const remote = (await waha!.startSession(sessionName)) as WahaSessionResponse;
     // `requestId` também na resposta: é ele que liga o `X-Request-Id` que o
     // operador vê ao evento `channel.reactivated` que a ressurreição gravou.
     return ok(
-      { status: remote.status ?? "STARTING", session: sessionName, channel_session_id: channelSessionId },
+      { status: remote.status ?? "STARTING", session: sessionName, channel_session_id: conexao.id },
       { requestId },
     );
   } catch (err) {
     const msg = err instanceof Error ? err.message : "unknown";
     if (msg.includes("422") || msg.includes("409")) {
       // Session already exists — just fetch status.
-      const remote = (await waha.getSessionQr(sessionName)) as WahaSessionResponse;
+      const remote = (await waha!.getSessionQr(sessionName)) as WahaSessionResponse;
       return ok(
-        { status: remote.status ?? "RUNNING", session: sessionName, channel_session_id: channelSessionId },
+        { status: remote.status ?? "RUNNING", session: sessionName, channel_session_id: conexao.id },
         { requestId },
       );
     }
