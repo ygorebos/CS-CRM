@@ -324,6 +324,11 @@ aparelho que esta sessão não tinha, e duas são fechamento que só faz sentido
 - `pnpm test:db`: **84 arquivos, 568 testes, verde** — com o `baseline.sql` aplicado em install
   E update, incluindo as migrations 0132 e 0133, o par novo do vocabulário, o isolamento da
   projeção e o invariante de LGPD.
+- **Nota de ambiente, para quem repetir:** `scripts/test-db.sh` usa **porta fixa** (54329). Com
+  duas sessões rodando `test:db` nesta máquina, uma derruba o container da outra e o resultado é
+  uma enxurrada de `No such container` — 138 falhas que não têm nada a ver com o código. Rode com
+  `TEST_DB_PORT=54399 pnpm test:db` quando a árvore estiver disputada, e **nunca** remova
+  container que não é seu.
 - **Sabotagem confirmada em 3 rodadas, 12 vermelhos**: projeção desligada (5), adapter sem
   `quoted_id`/`contatos` (3), bolha sem rótulo/reação/corpo apagado (4).
 
